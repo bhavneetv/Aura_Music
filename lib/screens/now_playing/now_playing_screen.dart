@@ -336,6 +336,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         icon: const Icon(Icons.speed_rounded, color: Colors.grey, size: 20),
                         onPressed: () => _showPlaybackSpeedDialog(notifier),
                       ),
+
+                      // Add to Playlist Option
+                      IconButton(
+                        icon: const Icon(Icons.playlist_add_rounded, color: Colors.grey, size: 22),
+                        tooltip: 'Add to Playlist',
+                        onPressed: () => _showAddToPlaylistBottomSheet(track),
+                      ),
                       
                       // Active Queue Info list
                       IconButton(
@@ -631,6 +638,180 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showAddToPlaylistBottomSheet(Track track) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final customBranding = ref.watch(customizationProvider);
+    final playlists = StorageService.getPlaylists();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24))
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              height: 400,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Add to Playlist',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      ),
+                      TextButton.icon(
+                        icon: Icon(Icons.add, color: customBranding.accentColor, size: 16),
+                        label: Text('New', style: TextStyle(color: customBranding.accentColor)),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showCreatePlaylistDialog(track);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (playlists.isEmpty)
+                    const Expanded(
+                      child: Center(
+                        child: Text(
+                          'No playlists yet. Create one above!',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: playlists.length,
+                        itemBuilder: (context, index) {
+                          final pl = playlists[index];
+                          final trackIds = List<String>.from(pl['trackIds'] ?? []);
+                          final alreadyContains = trackIds.contains(track.id);
+
+                          return ListTile(
+                            leading: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: customBranding.accentColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(Icons.playlist_play_rounded, color: customBranding.accentColor),
+                            ),
+                            title: Text(
+                              pl['name'] ?? 'Playlist',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Text('${trackIds.length} songs'),
+                            trailing: alreadyContains
+                                ? Icon(Icons.check_circle_rounded, color: customBranding.accentColor)
+                                : const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
+                            onTap: () async {
+                              if (!alreadyContains) {
+                                trackIds.add(track.id);
+                                playlists[index]['trackIds'] = trackIds;
+                                await StorageService.savePlaylists(playlists);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Added "${track.title}" to ${pl['name']}'),
+                                      backgroundColor: customBranding.accentColor,
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              } else {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('"${track.title}" is already in ${pl['name']}'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              }
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }
+        );
+      },
+    );
+  }
+
+  void _showCreatePlaylistDialog(Track track) {
+    final nameController = TextEditingController();
+    final customBranding = ref.watch(customizationProvider);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Create New Playlist'),
+          content: TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              hintText: 'Playlist name...',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: customBranding.accentColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Create & Add', style: TextStyle(color: Colors.white)),
+              onPressed: () async {
+                final name = nameController.text.trim();
+                if (name.isNotEmpty) {
+                  final playlists = StorageService.getPlaylists();
+                  final newPl = {
+                    'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                    'name': name,
+                    'description': 'A premium custom playlist',
+                    'trackIds': <String>[track.id],
+                  };
+                  playlists.add(newPl);
+                  await StorageService.savePlaylists(playlists);
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Created playlist "$name" and added "${track.title}"'),
+                        backgroundColor: customBranding.accentColor,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                  Navigator.pop(context);
+                }
+              },
+            ),
+          ],
         );
       },
     );

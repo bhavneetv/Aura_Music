@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import '../models/track.dart';
 import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
+import '../providers/music_provider.dart';
 import '../main.dart';
 
 // Repeat modes
@@ -413,7 +414,60 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _saveQueue();
   }
 
-  void nextTrack() {
+  Future<void> _autoPlayNextRecommended() async {
+    final current = state.currentTrack;
+    if (current == null) return;
+
+    // Use current song's genre/language (e.g. "PUNJABI", "HINDI", etc.)
+    // If it is empty, default to "PUNJABI"
+    String genreQuery = current.genre.trim();
+    if (genreQuery.isEmpty) {
+      genreQuery = 'PUNJABI';
+    }
+
+    try {
+      final source = ref.read(musicSourceProvider);
+      List<Track> recommendations = await source.getTracksByGenre(genreQuery);
+
+      // If recommendations is empty or error, fallback to onboarding preferred languages
+      if (recommendations.isEmpty) {
+        final prefs = StorageService.getPreferredLanguages();
+        if (prefs.isNotEmpty) {
+          recommendations = await source.getTracksByGenre(prefs.first);
+        }
+      }
+
+      // Filter out songs currently in queue to prevent immediate repeats
+      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
+      final filtered = recommendations.where((t) => !existingIds.contains(t.id)).toList();
+
+      Track? nextTrackToPlay;
+      if (filtered.isNotEmpty) {
+        // Pick the first one from the filtered recommendations
+        nextTrackToPlay = filtered.first;
+      } else if (recommendations.isNotEmpty) {
+        // Fallback to any recommended song if all are already in queue
+        nextTrackToPlay = recommendations.first;
+      }
+
+      if (nextTrackToPlay != null) {
+        // Add to queue and play
+        final updatedQueue = List<Track>.from(state.queue)..add(nextTrackToPlay);
+        final nextIdx = updatedQueue.length - 1;
+        state = state.copyWith(
+          queue: updatedQueue,
+          currentIndex: nextIdx,
+          currentTrack: nextTrackToPlay,
+        );
+        await _saveQueue();
+        playTrack(nextTrackToPlay);
+      }
+    } catch (e) {
+      print('Error auto-playing next recommended: $e');
+    }
+  }
+
+  void nextTrack() async {
     if (state.queue.isEmpty) return;
     
     if (state.repeatMode == RepeatMode.one && state.currentTrack != null) {
@@ -426,9 +480,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (nextIdx >= state.queue.length) {
       if (state.repeatMode == RepeatMode.all) {
         nextIdx = 0;
+        playTrack(state.queue[nextIdx]);
       } else {
-        return; // End of playback
+        // Autoplay recommended song just like Spotify
+        await _autoPlayNextRecommended();
       }
+      return;
     }
     
     playTrack(state.queue[nextIdx]);
