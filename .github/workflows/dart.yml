@@ -19,25 +19,42 @@ jobs:
       - run: pod repo update
         working-directory: ios
 
-      - name: Build iOS (ignore Flutter's post-build signing check)
-        run: flutter build ios --release --no-codesign || true
+      # Prepares Generated.xcconfig, runs pod install, WITHOUT
+      # attempting Flutter's own final assembly/signing-gated step
+      - name: Prepare iOS project (config only, no build)
+        run: flutter build ios --release --no-codesign --config-only
+
+      - name: Archive via xcodebuild directly (bypasses Flutter's team check)
+        run: |
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath "$PWD/build/Runner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            archive
+        working-directory: ios
 
       - name: Verify Runner.app and inspect size
         run: |
-          APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          APP_PATH="ios/build/Runner.xcarchive/Products/Applications/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
             echo "Runner.app not found at $APP_PATH — real build failure."
+            find ios/build -maxdepth 4 2>/dev/null
             exit 1
           fi
           echo "--- Size ---"
           du -sh "$APP_PATH"
           echo "--- Contents ---"
-          find "$APP_PATH" -maxdepth 3
+          find "$APP_PATH" -maxdepth 2
 
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -RL build/ios/Release-iphoneos/Runner.app Payload/
+          cp -RL "ios/build/Runner.xcarchive/Products/Applications/Runner.app" Payload/
           echo "--- Payload size after copy ---"
           du -sh Payload
           ditto -c -k --keepParent Payload FlutterIpaExport.ipa
@@ -49,6 +66,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: FlutterIpaExport.ipa
-          tag: v1.0
+          tag: v1.1
           overwrite: true
           body: "This is first release"
