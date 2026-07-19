@@ -24,51 +24,54 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Update CocoaPods repo
-        run: pod repo update
-        working-directory: ios
-
-      - name: Install Pods
+      - name: Install CocoaPods dependencies
         run: pod install --repo-update
         working-directory: ios
 
-      # Build unsigned IPA — no Apple Developer account needed
-      # This produces build/ios/ipa/Aura.ipa (or music_app.ipa)
-      - name: Build unsigned IPA
-        run: flutter build ipa --release --no-codesign
+      # Build the .app WITHOUT archiving — no Developer account needed
+      # Output: build/ios/iphoneos/Runner.app
+      - name: Build iOS app (no codesign)
+        run: flutter build ios --release --no-codesign
 
-      # The IPA is created at build/ios/ipa/*.ipa by flutter build ipa
-      - name: Locate IPA file
-        id: find_ipa
+      # Manually package Runner.app into a sideloadable IPA
+      # This is the standard sideload IPA format (Payload/Runner.app → zipped as .ipa)
+      - name: Package IPA
         run: |
-          IPA_PATH=$(find build/ios/ipa -name "*.ipa" | head -n 1)
-          echo "ipa_path=$IPA_PATH" >> $GITHUB_OUTPUT
-          echo "Found IPA at: $IPA_PATH"
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/Runner.app
+          zip -r -9 Aura.ipa Payload
+          mkdir -p build/ios/ipa
+          mv Aura.ipa build/ios/ipa/Aura.ipa
+          echo "IPA packaged at: build/ios/ipa/Aura.ipa"
+          ls -lh build/ios/ipa/
 
-      # Upload as workflow artifact (always available, no release needed)
+      # Upload as workflow artifact — always available without a release
       - name: Upload IPA as artifact
         uses: actions/upload-artifact@v4
         with:
           name: Aura-unsigned-ipa
-          path: ${{ steps.find_ipa.outputs.ipa_path }}
+          path: build/ios/ipa/Aura.ipa
           retention-days: 30
 
-      # Also upload to GitHub Release if triggered by a tag
+      # Also upload to GitHub Release when triggered by a version tag
       - name: Upload IPA to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ steps.find_ipa.outputs.ipa_path }}
+          file: build/ios/ipa/Aura.ipa
           asset_name: Aura-unsigned.ipa
           tag: ${{ github.ref_name }}
           overwrite: true
           body: |
             ## Aura Music App — Unsigned IPA
-            
-            ✅ Build with no code signing — ready for sideloading.
-            
+
+            ✅ Built without code signing — ready for sideloading.
+
             ### How to sideload to your iPhone:
             1. Download `Aura-unsigned.ipa`
-            2. Use **AltStore**, **Sideloadly**, or **TrollStore** to install
+            2. Use **Sideloadly** (Windows) or **AltStore** to install
             3. No Apple Developer account needed!
+            
+            > Free Apple ID sideloads expire every 7 days and need re-installing.
+            > TrollStore users: install permanently with no expiry.
