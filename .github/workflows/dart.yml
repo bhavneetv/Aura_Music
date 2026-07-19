@@ -22,20 +22,27 @@ jobs:
       - name: Build iOS (ignore Flutter's post-build signing check)
         run: flutter build ios --release --no-codesign || true
 
-      - name: Verify Runner.app was actually produced
+      - name: Verify Runner.app and inspect size
         run: |
           APP_PATH="build/ios/Release-iphoneos/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
             echo "Runner.app not found at $APP_PATH — real build failure."
             exit 1
           fi
-          echo "Runner.app found at $APP_PATH"
+          echo "--- Size ---"
+          du -sh "$APP_PATH"
+          echo "--- Contents ---"
+          find "$APP_PATH" -maxdepth 3
 
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r build/ios/Release-iphoneos/Runner.app Payload/
-          zip -qq -r -9 FlutterIpaExport.ipa Payload
+          cp -RL build/ios/Release-iphoneos/Runner.app Payload/
+          echo "--- Payload size after copy ---"
+          du -sh Payload
+          ditto -c -k --keepParent Payload FlutterIpaExport.ipa
+          echo "--- Final IPA size ---"
+          ls -lh FlutterIpaExport.ipa
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
