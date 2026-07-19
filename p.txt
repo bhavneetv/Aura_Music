@@ -1,0 +1,35 @@
+
+
+for desgin i setup MCP server for stitch use Aura Vinyl Music Player [pdr.md](file;file:///y%3A/music%20player/pdr.md) 
+> Design a premium, cross-platform mobile music player app  for iOS and Android. Style: minimal, elegant, luxurious — inspired by Spotify, Apple Music, Samsung Music, and classic vinyl record players. Use glassmorphism surfaces, rounded cards (20–28px radius), floating pill-shaped controls, generous whitespace, and Material Design 3 principles. Support both **Dark Mode** (deep charcoal/black base, warm amber/gold accent) and **Light Mode** (soft off-white base, same accent family). Typography: geometric sans for UI chrome, a slightly bolder display face for song titles.
+>
+> **Screens to design:**
+> 1. **Splash / Loading Screen** — see detailed spec below.
+> 2. **Onboarding** — 3–4 swipeable illustrated slides (discover free music, offline downloads, vinyl/CD/cassette player styles, personalized picks), skip button, dot indicator.
+> 3. **Home** — collapsing header with greeting + search bar, horizontal rails for Continue Listening, Trending, Recommended, New Releases, Genres/Moods (gradient cards), Favorites/Downloads previews, persistent Mini Player above bottom nav.
+> 4. **Search** — search field, segmented tabs (Songs/Albums/Artists/Playlists), recent + trending search chips, filter bottom sheet.
+> 5. **Album / Artist / Playlist Detail** — large artwork header, Play All / Shuffle buttons, track list rows.
+> 6. **Now Playing** — full-screen sheet with 4 switchable visual styles: **Vinyl** (spinning black disc, grooves, tonearm/needle), **CD** (reflective rainbow-sheen disc), **Cassette** (retro spinning reels), **Minimal** (large flat album art). Progress bar, transport controls, secondary icon row (sleep timer, lyrics, speed, queue).
+> 7. **Queue** — draggable bottom sheet, now playing pinned + reorderable up-next list.
+> 8. **Library** — tabs for Songs/Albums/Artists/Playlists + shortcuts to Downloads/Favorites/History.
+> 9. **Settings** — grouped list (Appearance, Player, Audio, Notifications, About), with switches and value-preview rows.
+> 10. **Equalizer** — band sliders with a live curve graphic, preset chips.
+>
+> **Bottom navigation:** 5 tabs — Home, Search, Library, Queue, Settings.
+
+---
+
+**Loading Screen — detailed spec**
+
+> Design an animated splash/loading screen, duration **2–3 seconds**, shown on cold app launch:
+> - Center stage: a **rotating vinyl record** — black disc with faint concentric groove rings, a small circular album-art label in the center, subtle radial light reflection sweeping across the disc as it spins. Continuous smooth rotation for the full 2–3s (no stop).
+> - A slim tonearm/needle graphic animates down onto the record edge shortly after the disc appears, reinforcing the "starting to play" feel.
+> - App wordmark **"Aura"** fades/slides in below the disc, with a small subtitle "Vinyl Music Player" in a lighter weight.
+> - Background: deep gradient (charcoal → near-black in Dark Mode; warm cream gradient in Light Mode), soft vignette behind the disc.
+> - Transition out: cross-fade + slight scale-down of the vinyl into the Home screen's Mini Player position (sets up the shared-element pattern used later when Mini Player expands to Now Playing).
+>
+> **Skeleton loading states** (for use anywhere content is fetching from the Jamendo API — Home rails, Search results, Album/Artist detail):
+> - Shimmering placeholder blocks matching the exact shape of the real content: square rounded-corner cards for album/track art, thin rounded bars for title/artist text lines, circular placeholders for artist avatars.
+> - Shimmer sweep: a soft diagonal light band moving left-to-right, looping every ~1.2s, low-contrast (never a stark white flash) — same tone family as the app's glass surfaces so it doesn't clash with Dark Mode.
+> - Each Home rail loads independently, so design the skeleton state per-section (a skeleton rail can sit above fully-loaded rails without blocking the rest of the screen).
+

@@ -1,0 +1,638 @@
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/track.dart';
+import '../../providers/playback_provider.dart';
+import '../../providers/customization_provider.dart';
+import '../../services/storage/storage_service.dart';
+import '../../themes/app_theme.dart';
+import '../splash/splash_screen.dart';
+import '../equalizer/equalizer_screen.dart';
+
+class NowPlayingScreen extends ConsumerStatefulWidget {
+  const NowPlayingScreen({super.key});
+
+  @override
+  ConsumerState<NowPlayingScreen> createState() => _NowPlayingScreenState();
+}
+
+class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with TickerProviderStateMixin {
+  late AnimationController _spinController;
+  double _lastAngle = 0.0;
+  
+  // Deceleration angle tracker
+  late AnimationController _decelController;
+  late Animation<double> _decelAngleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _spinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+    _decelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (ref.read(playbackProvider).isPlaying) {
+        _spinController.repeat();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _spinController.dispose();
+    _decelController.dispose();
+    super.dispose();
+  }
+
+  void _syncAnimations(bool isPlaying) {
+    if (isPlaying) {
+      if (_decelController.isAnimating) _decelController.stop();
+      _spinController.repeat();
+    } else {
+      if (_spinController.isAnimating) {
+        _lastAngle = _spinController.value * 2 * math.pi;
+        _spinController.stop();
+        _decelAngleAnimation = Tween<double>(begin: _lastAngle, end: _lastAngle + (math.pi / 8)).animate(
+          CurvedAnimation(parent: _decelController, curve: Curves.decelerate)
+        );
+        _decelController.forward(from: 0.0);
+      }
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60);
+    return '$minutes:${twoDigits(seconds)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(playbackProvider);
+    final notifier = ref.read(playbackProvider.notifier);
+    final customBranding = ref.watch(customizationProvider);
+    
+    _syncAnimations(state.isPlaying);
+
+    if (state.currentTrack == null) {
+      return const Scaffold(body: Center(child: Text('No song playing')));
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final track = state.currentTrack!;
+
+    final List<Color> bgColors = isDark
+        ? [const Color(0xFF1B1B1D), const Color(0xFF0C0C0E)]
+        : [const Color(0xFFFAF7F2), const Color(0xFFE8E2D7)];
+
+    double angle = 0.0;
+    if (_decelController.isAnimating) {
+      angle = _decelAngleAnimation.value;
+    } else if (state.isPlaying) {
+      angle = _spinController.value * 2 * math.pi;
+    } else {
+      angle = _lastAngle;
+    }
+
+    final isFav = StorageService.isFavorite('trackIds', track.id);
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: bgColors,
+          ),
+          borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: (isDark ? Colors.white : Colors.black).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Header Top Row
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      Text(
+                        'NOW PLAYING',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              letterSpacing: 2,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          color: isFav ? Colors.redAccent : Colors.grey,
+                          size: 24,
+                        ),
+                        onPressed: () async {
+                          await StorageService.toggleFavorite('trackIds', track.id);
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Dynamic Skin Stages
+                SizedBox(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.width * 0.85,
+                  child: _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Title & Artist Metadata
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    children: [
+                      Text(
+                        track.title,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        track.artist,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.6),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Progress Slider
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
+                    children: [
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 3.5,
+                          activeTrackColor: customBranding.accentColor,
+                          thumbColor: customBranding.accentColor,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                        ),
+                        child: Slider(
+                          value: state.progress,
+                          onChanged: (val) {
+                            notifier.seek(val);
+                          },
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_formatDuration(state.currentPosition), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                            Text(_formatDuration(state.totalDuration), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Controls: Shuffle, Previous, Play/Pause, Next, Repeat
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.shuffle_rounded, 
+                          color: state.isShuffle ? customBranding.accentColor : Colors.grey, 
+                          size: 22
+                        ),
+                        onPressed: () {
+                          notifier.toggleShuffle();
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.skip_previous_rounded, size: 36),
+                        onPressed: () => notifier.previousTrack(),
+                      ),
+                      GestureDetector(
+                        onTap: () => notifier.togglePlay(),
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: customBranding.accentColor,
+                            shape: BoxShape.circle,
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))
+                            ],
+                          ),
+                          child: Icon(
+                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                            color: isDark ? Colors.black : Colors.white,
+                            size: 36,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.skip_next_rounded, size: 36),
+                        onPressed: () => notifier.nextTrack(),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          state.repeatMode == RepeatMode.one 
+                              ? Icons.repeat_one_rounded 
+                              : Icons.repeat_rounded,
+                          color: state.repeatMode != RepeatMode.off ? customBranding.accentColor : Colors.grey,
+                          size: 22,
+                        ),
+                        onPressed: () {
+                          final nextMode = {
+                            RepeatMode.off: RepeatMode.all,
+                            RepeatMode.all: RepeatMode.one,
+                            RepeatMode.one: RepeatMode.off,
+                          }[state.repeatMode]!;
+                          notifier.setRepeatMode(nextMode);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Bottom row: Sleep timer, Equalizer, Speed adjust, Queue drawer
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Sleep Timer Option
+                      IconButton(
+                        icon: Icon(
+                          Icons.timer_rounded, 
+                          color: state.sleepTimerMinutes != null ? customBranding.accentColor : Colors.grey,
+                          size: 20,
+                        ),
+                        onPressed: () => _showSleepTimerDialog(notifier),
+                      ),
+                      
+                      // Equalizer Option
+                      IconButton(
+                        icon: const Icon(Icons.graphic_eq_rounded, color: Colors.grey, size: 20),
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const EqualizerScreen()));
+                        },
+                      ),
+                      
+                      // Playback Speed
+                      IconButton(
+                        icon: const Icon(Icons.speed_rounded, color: Colors.grey, size: 20),
+                        onPressed: () => _showPlaybackSpeedDialog(notifier),
+                      ),
+                      
+                      // Active Queue Info list
+                      IconButton(
+                        icon: const Icon(Icons.queue_music_rounded, color: Colors.grey, size: 20),
+                        onPressed: () => _showQueueBottomSheet(state, notifier),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Skins Layout Rendering ───────────────────────────────────
+
+  Widget _buildSkinStage(String skin, Track track, double angle, bool isDark, Color accentColor) {
+    switch (skin) {
+      case 'cd':
+        return Center(
+          child: Transform.rotate(
+            angle: angle,
+            child: _buildCDDisc(track, isDark),
+          ),
+        );
+      case 'cassette':
+        return Center(
+          child: _buildCassetteTape(track, angle, isDark),
+        );
+      case 'minimal':
+        return Center(
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.68,
+            height: MediaQuery.of(context).size.width * 0.68,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))
+              ],
+            ),
+          ),
+        );
+      case 'vinyl':
+      default:
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Align(
+              alignment: Alignment.center,
+              child: Transform.rotate(
+                angle: angle,
+                child: VinylRecordWidget(size: MediaQuery.of(context).size.width * 0.72),
+              ),
+            ),
+            Positioned(
+              top: -10,
+              right: 25,
+              child: SizedBox(
+                width: 120,
+                height: 180,
+                child: CustomPaint(
+                  painter: TonearmPainter(isDark: isDark),
+                ),
+              ),
+            ),
+          ],
+        );
+    }
+  }
+
+  // ── Custom Skins Painters ────────────────────────────────────
+
+  Widget _buildCDDisc(Track track, bool isDark) {
+    final size = MediaQuery.of(context).size.width * 0.70;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [
+            const Color(0xFFE0E0E0),
+            Colors.grey[400]!,
+            const Color(0xFFC0C0C0),
+            Colors.grey[600]!,
+          ],
+          stops: const [0.0, 0.4, 0.7, 1.0],
+        ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 6))
+        ],
+      ),
+      child: Center(
+        child: Container(
+          width: size * 0.4,
+          height: size * 0.4,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
+            border: Border.all(color: Colors.white, width: 3),
+          ),
+          child: Center(
+            child: Container(
+              width: size * 0.1,
+              height: size * 0.1,
+              decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCassetteTape(Track track, double angle, bool isDark) {
+    final size = MediaQuery.of(context).size.width * 0.8;
+    return Container(
+      width: size,
+      height: size * 0.6,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFE2DDD5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.withOpacity(0.5), width: 3),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 12, offset: const Offset(0, 6))
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Tape windows
+          Align(
+            alignment: Alignment.center,
+            child: Container(
+              width: size * 0.7,
+              height: size * 0.32,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F0F0F) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.withOpacity(0.4), width: 1.5),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  // Gear 1
+                  Transform.rotate(
+                    angle: angle,
+                    child: const Icon(Icons.brightness_5_rounded, color: Colors.grey, size: 36),
+                  ),
+                  // Cover Image small in center
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(track.artworkUrl, width: 36, height: 36, fit: BoxFit.cover),
+                  ),
+                  // Gear 2
+                  Transform.rotate(
+                    angle: angle,
+                    child: const Icon(Icons.brightness_5_rounded, color: Colors.grey, size: 36),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Tape text brand
+          Positioned(
+            top: 10,
+            left: 20,
+            child: Text(
+              'AURA TAPE',
+              style: TextStyle(
+                fontWeight: FontWeight.w900, 
+                fontSize: 12, 
+                color: isDark ? Colors.white30 : Colors.black26, 
+                letterSpacing: 2
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Dialog Selectors & Queue Sheet ───────────────────────────
+
+  void _showSleepTimerDialog(PlaybackNotifier notifier) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: const Text('Sleep Timer Settings', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('5 Minutes'),
+                onTap: () {
+                  notifier.startSleepTimer(5);
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('15 Minutes'),
+                onTap: () {
+                  notifier.startSleepTimer(15);
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('30 Minutes'),
+                onTap: () {
+                  notifier.startSleepTimer(30);
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('Turn Timer Off', style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  notifier.cancelSleepTimer();
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPlaybackSpeedDialog(PlaybackNotifier notifier) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: const Text('Playback Speed', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
+              return ListTile(
+                title: Text('${speed}x'),
+                onTap: () {
+                  notifier.setPlaybackSpeed(speed);
+                  Navigator.pop(context);
+                },
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showQueueBottomSheet(PlaybackState state, PlaybackNotifier notifier) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Active Queue', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: state.queue.length,
+                  itemBuilder: (context, index) {
+                    final track = state.queue[index];
+                    final isCurrent = index == state.currentIndex;
+                    return ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.network(track.artworkUrl, width: 40, height: 40, fit: BoxFit.cover),
+                      ),
+                      title: Text(track.title, style: TextStyle(fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal, fontSize: 14)),
+                      subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
+                      trailing: isCurrent ? const Icon(Icons.volume_up_rounded, color: AppTheme.goldAccent, size: 20) : null,
+                      onTap: () {
+                        notifier.playTrack(track);
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
