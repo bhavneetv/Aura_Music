@@ -22,12 +22,9 @@ jobs:
       - name: Build iOS (ignore Flutter's post-build signing check)
         run: flutter build ios --release --no-codesign || true
 
-      - name: Show where the app actually landed
-        run: find build/ios -maxdepth 4 -iname "Runner.app" -o -iname "*.xcarchive"
-
       - name: Verify Runner.app was actually produced
         run: |
-          APP_PATH="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
+          APP_PATH="build/ios/Release-iphoneos/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
             echo "Runner.app not found at $APP_PATH — real build failure."
             exit 1
@@ -37,7 +34,7 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app Payload/
+          cp -r build/ios/Release-iphoneos/Runner.app Payload/
           zip -qq -r -9 FlutterIpaExport.ipa Payload
 
       - name: Upload binaries to release
