@@ -22,7 +22,7 @@ jobs:
       # Prepares Generated.xcconfig, runs pod install, WITHOUT
       # attempting Flutter's own final assembly/signing-gated step
       - name: Prepare iOS project (config only, no build)
-        run: flutter build ios --release --no-codesign --config-only
+        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons
 
       - name: Archive via xcodebuild directly (bypasses Flutter's team check)
         run: |
