@@ -175,18 +175,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final track = tracks[index];
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-          leading: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              track.artworkUrl,
-              width: 50,
-              height: 50,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
+          leading: SizedBox(
+            width: 50,
+            height: 50,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                track.artworkUrl,
                 width: 50,
                 height: 50,
-                color: Colors.grey.shade800,
-                child: const Icon(Icons.music_note_rounded),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 50,
+                  height: 50,
+                  color: Colors.grey.shade800,
+                  child: const Icon(Icons.music_note_rounded),
+                ),
               ),
             ),
           ),

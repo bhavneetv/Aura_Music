@@ -99,7 +99,7 @@ class Track {
       artist: 'Whispering Winds',
       album: 'Acoustic Seasons',
       duration: '3:50',
-      artworkUrl: 'https://images.unsplash.com/photo-1487180142328-0c4e37023af5?w=500&auto=format&fit=crop&q=60',
+      artworkUrl: 'https://images.unsplash.com/photo-1501630834273-4b5604d2ee31?w=500&auto=format&fit=crop&q=60',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
       genre: 'Acoustic',
     ),
