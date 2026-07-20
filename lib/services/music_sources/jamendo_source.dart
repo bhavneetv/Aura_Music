@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'music_source.dart';
 import '../../models/track.dart';
+import '../storage/storage_service.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
@@ -10,8 +12,11 @@ class JamendoSource implements MusicSource {
   @override
   Future<List<Track>> getTrendingTracks() async {
     try {
-      final response = await _dio.get('$_baseUrl/search/songs?query=trending');
-      return _parseTracks(response.data);
+      final page = math.Random().nextInt(3) + 1;
+      final response = await _dio.get('$_baseUrl/search/songs?query=trending&page=$page');
+      final tracks = _parseTracks(response.data);
+      tracks.shuffle();
+      return tracks;
     } catch (e) {
       print('Error fetching trending tracks: $e');
       return _getMockFallback();
@@ -35,12 +40,56 @@ class JamendoSource implements MusicSource {
   @override
   Future<List<Track>> getTracksByGenre(String genre) async {
     try {
-      final response = await _dio.get('$_baseUrl/search/songs?query=$genre');
-      return _parseTracks(response.data);
+      final page = math.Random().nextInt(4) + 1;
+      final response = await _dio.get('$_baseUrl/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
+      final tracks = _parseTracks(response.data);
+      tracks.shuffle();
+      return tracks;
     } catch (e) {
       print('Error fetching tracks by genre "$genre": $e');
       return _getMockFallback();
     }
+  }
+
+  @override
+  Future<List<Track>> getDynamicRecommendations() async {
+    try {
+      final preferredLangs = StorageService.getPreferredLanguages();
+      final preferredGenres = StorageService.getPreferredGenres();
+      final history = StorageService.getListeningHistory();
+
+      final List<String> seedQueries = [];
+      for (final item in history.take(5)) {
+        if (item['genre'] != null && item['genre'].toString().isNotEmpty) {
+          seedQueries.add(item['genre'].toString());
+        }
+        if (item['artist'] != null && item['artist'].toString().isNotEmpty) {
+          seedQueries.add(item['artist'].toString().split(',').first);
+        }
+      }
+      seedQueries.addAll(preferredLangs);
+      seedQueries.addAll(preferredGenres);
+
+      if (seedQueries.isEmpty) {
+        seedQueries.addAll(['trending', 'punjabi', 'bollywood', 'chillout', 'lofi', 'romantic']);
+      }
+
+      seedQueries.shuffle();
+      final selectedQuery = seedQueries.first;
+      final page = math.Random().nextInt(5) + 1;
+
+      final response = await _dio.get('$_baseUrl/search/songs?query=${Uri.encodeComponent(selectedQuery)}&page=$page');
+      final tracks = _parseTracks(response.data);
+      if (tracks.isNotEmpty) {
+        tracks.shuffle();
+        return tracks;
+      }
+    } catch (e) {
+      print('Error fetching dynamic recommendations: $e');
+    }
+
+    final fallback = List<Track>.from(Track.mockTracks)..shuffle();
+    return fallback;
   }
 
   // ── Parsers & Helpers ────────────────────────────────────────

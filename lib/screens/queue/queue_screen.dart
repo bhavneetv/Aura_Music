@@ -14,11 +14,24 @@ class QueueScreen extends ConsumerStatefulWidget {
 
 class _QueueScreenState extends ConsumerState<QueueScreen> {
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(playbackProvider.notifier).ensureUpcomingRecommendations();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = ref.watch(playbackProvider);
     final notifier = ref.read(playbackProvider.notifier);
     final customBranding = ref.watch(customizationProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final upcomingStart = (state.currentIndex >= 0 && state.currentIndex < state.queue.length)
+        ? state.currentIndex + 1
+        : 0;
+    final upcomingTracks = state.queue.skip(upcomingStart).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,6 +94,12 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                           width: 52,
                           height: 52,
                           fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            width: 52,
+                            height: 52,
+                            color: Colors.grey.shade800,
+                            child: const Icon(Icons.music_note_rounded, size: 24),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -109,14 +128,14 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           ),
         ],
 
-        // Up Next Label
+        // Up Next Label & Upcoming 5 Badge
         Padding(
-          padding: const EdgeInsets.only(left: 24, top: 16, bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'UP NEXT (${state.queue.length} songs • ${_formatQueueDuration(state.queueDuration)})',
+                'UP NEXT (${upcomingTracks.length} songs)',
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: isDark ? Colors.white38 : Colors.black38,
                       fontSize: 11,
@@ -124,28 +143,42 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                       letterSpacing: 1.5,
                     ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: customBranding.accentColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Upcoming Recommended',
+                  style: TextStyle(color: customBranding.accentColor, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ),
             ],
           ),
         ),
 
         // Reorderable Queue List
         Expanded(
-          child: state.queue.isEmpty
-              ? const Center(child: Text('Play queue is empty', style: TextStyle(color: Colors.grey)))
+          child: upcomingTracks.isEmpty
+              ? const Center(child: Text('No upcoming songs in queue', style: TextStyle(color: Colors.grey)))
               : ReorderableListView.builder(
                   padding: const EdgeInsets.only(bottom: 96),
-                  itemCount: state.queue.length,
+                  itemCount: upcomingTracks.length,
                   onReorder: (oldIndex, newIndex) {
-                    notifier.reorderQueue(oldIndex, newIndex);
+                    triggerHaptic(HapticFeedbackType.medium);
+                    notifier.reorderQueue(upcomingStart + oldIndex, upcomingStart + newIndex);
                   },
                   itemBuilder: (context, index) {
-                    final track = state.queue[index];
-                    final isCurrent = index == state.currentIndex;
+                    final track = upcomingTracks[index];
+                    final isUpcoming5 = index < 5;
 
                     return KeyedSubtree(
-                      key: ValueKey('${track.id}_$index'),
-                      child: Opacity(
-                        opacity: isCurrent ? 0.5 : 1.0,
+                      key: ValueKey('queue_up_${track.id}_$index'),
+                      child: Container(
+                        color: isUpcoming5
+                            ? customBranding.accentColor.withOpacity(isDark ? 0.05 : 0.03)
+                            : Colors.transparent,
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
                           leading: Row(
@@ -160,24 +193,52 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                   width: 40,
                                   height: 40,
                                   fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    width: 40,
+                                    height: 40,
+                                    color: Colors.grey.shade800,
+                                    child: const Icon(Icons.music_note_rounded, size: 20),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                          title: Text(
-                            track.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  track.title,
+                                  style: TextStyle(
+                                    fontWeight: isUpcoming5 ? FontWeight.bold : FontWeight.normal,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              if (isUpcoming5)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  margin: const EdgeInsets.only(left: 6),
+                                  decoration: BoxDecoration(
+                                    color: customBranding.accentColor.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '#${index + 1}',
+                                    style: TextStyle(fontSize: 9, color: customBranding.accentColor, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                            ],
                           ),
                           subtitle: Text(track.artist, style: const TextStyle(fontSize: 11)),
-                          trailing: isCurrent 
-                              ? const SizedBox.shrink()
-                              : IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline_rounded, size: 18),
-                                  onPressed: () {
-                                    notifier.removeFromQueue(index);
-                                  },
-                                ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.remove_circle_outline_rounded, size: 18),
+                            onPressed: () {
+                              triggerHaptic(HapticFeedbackType.light);
+                              notifier.removeFromQueue(upcomingStart + index);
+                            },
+                          ),
                           onTap: () {
+                            triggerHaptic(HapticFeedbackType.selection);
                             notifier.playTrack(track);
                           },
                         ),

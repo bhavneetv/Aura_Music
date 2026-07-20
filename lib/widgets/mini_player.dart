@@ -35,6 +35,8 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
     super.dispose();
   }
 
+  double _miniPlayerDragX = 0.0;
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(playbackProvider);
@@ -62,6 +64,23 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
       onTapCancel: () {
         _bounceController.reverse();
       },
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          _miniPlayerDragX += details.delta.dx;
+        });
+      },
+      onHorizontalDragEnd: (details) {
+        if (_miniPlayerDragX < -60) {
+          triggerHaptic(HapticFeedbackType.medium);
+          notifier.nextTrack();
+        } else if (_miniPlayerDragX > 60) {
+          triggerHaptic(HapticFeedbackType.medium);
+          notifier.previousTrack();
+        }
+        setState(() {
+          _miniPlayerDragX = 0.0;
+        });
+      },
       child: AnimatedBuilder(
         animation: _scaleAnimation,
         builder: (context, child) {
@@ -70,7 +89,9 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
             child: child,
           );
         },
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          transform: Matrix4.translationValues(_miniPlayerDragX, 0, 0),
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           height: 66,
           decoration: BoxDecoration(

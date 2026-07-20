@@ -43,7 +43,6 @@ class DownloadService extends ChangeNotifier {
   List<Track> getDownloadedTracksList() {
     final Map<String, String> mapped = StorageService.getDownloadedTracks();
     final List<Track> tracks = [];
-    final allPlaylists = StorageService.getPlaylists();
     
     // Scan standard mock tracks first
     for (final track in Track.mockTracks) {
@@ -159,6 +158,14 @@ class DownloadService extends ChangeNotifier {
       }
       await StorageService.deleteDownloadRecord(trackId);
       notifyListeners();
+    }
+  }
+
+  Future<void> downloadPlaylist(List<Track> tracks) async {
+    for (final track in tracks) {
+      if (!isDownloaded(track.id)) {
+        await startDownload(track);
+      }
     }
   }
 }

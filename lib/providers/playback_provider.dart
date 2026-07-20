@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
@@ -9,6 +11,27 @@ import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
+
+enum HapticFeedbackType { light, medium, heavy, selection }
+
+void triggerHaptic([HapticFeedbackType type = HapticFeedbackType.light]) {
+  if (StorageService.isHapticsEnabled()) {
+    switch (type) {
+      case HapticFeedbackType.light:
+        HapticFeedback.lightImpact();
+        break;
+      case HapticFeedbackType.medium:
+        HapticFeedback.mediumImpact();
+        break;
+      case HapticFeedbackType.heavy:
+        HapticFeedback.heavyImpact();
+        break;
+      case HapticFeedbackType.selection:
+        HapticFeedback.selectionClick();
+        break;
+    }
+  }
+}
 
 // Repeat modes
 enum RepeatMode { off, all, one }
@@ -113,6 +136,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   StreamSubscription? _posSub;
   StreamSubscription? _durSub;
   Timer? _sleepTimer;
+  bool _isCrossfading = false;
 
   @override
   PlaybackState build() {
@@ -138,6 +162,19 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Save play position periodically in Hive
       if (state.currentTrack != null) {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
+      }
+
+      // Crossfade handling
+      if (StorageService.isCrossfadeEnabled() && dur.inMilliseconds > 0) {
+        final crossfadeSec = StorageService.getCrossfadeDuration();
+        final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
+        if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000) && !_isCrossfading) {
+          _isCrossfading = true;
+          nextTrack();
+          Future.delayed(Duration(seconds: crossfadeSec + 1), () {
+            _isCrossfading = false;
+          });
+        }
       }
     });
 
@@ -221,7 +258,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           gaplessPlayback: gapless,
           playbackSpeed: speed,
         );
-      } catch (_) {}
+        ensureUpcomingRecommendations();
+      } catch (e) {
+        print('Failed to restore saved queue: $e');
+      }
     } else {
       // Default initial state
       if (Track.mockTracks.isNotEmpty) {
@@ -234,6 +274,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           gaplessPlayback: gapless,
           playbackSpeed: speed,
         );
+        ensureUpcomingRecommendations();
       }
     }
   }
@@ -250,6 +291,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   // ── Smart Queue Controls ────────────────────────────────────
 
   void playTrack(Track track) async {
+    triggerHaptic(HapticFeedbackType.selection);
+
     // Add to queue if not present, and update index
     List<Track> currentQueue = List.from(state.queue);
     int idx = currentQueue.indexWhere((t) => t.id == track.id);
@@ -265,50 +308,56 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     );
     await _saveQueue();
 
-    // Verify & Stream audio URL
     String audioUrl = track.audioUrl;
-    bool urlIsWorking = false;
-    if (audioUrl.isNotEmpty) {
-      try {
-        final dio = Dio();
-        final response = await dio.head(
-          audioUrl,
-          options: Options(validateStatus: (s) => s != null && s < 400),
-        );
-        if (response.statusCode == 200) {
-          urlIsWorking = true;
-        }
-      } catch (_) {}
-    }
 
-    if (!urlIsWorking) {
-      print('🚨 Stale URL detected. Recovering fresh stream for ${track.title}...');
-      try {
-        final dio = Dio();
-        final response = await dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
-        final results = response.data['data']?['results'] as List?;
-        if (results != null && results.isNotEmpty) {
-          final freshUrl = results.first['downloadUrl']?.last['url']?.toString() ?? '';
-          if (freshUrl.isNotEmpty) {
-            audioUrl = freshUrl;
-            
-            // Healed track update
-            final healed = Track(
-              id: track.id,
-              title: track.title,
-              artist: track.artist,
-              album: track.album,
-              duration: track.duration,
-              artworkUrl: track.artworkUrl,
-              audioUrl: freshUrl,
-              genre: track.genre,
-            );
-            currentQueue[idx] = healed;
-            state = state.copyWith(queue: currentQueue, currentTrack: healed);
-            await _saveQueue();
+    // Check if downloaded locally first
+    final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
+    if (downloadedPath != null && File(downloadedPath).existsSync()) {
+      audioUrl = downloadedPath;
+    } else {
+      bool urlIsWorking = false;
+      if (audioUrl.isNotEmpty) {
+        try {
+          final dio = Dio();
+          final response = await dio.head(
+            audioUrl,
+            options: Options(validateStatus: (s) => s != null && s < 400),
+          );
+          if (response.statusCode == 200) {
+            urlIsWorking = true;
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
+
+      if (!urlIsWorking) {
+        print('🚨 Stale URL detected. Recovering fresh stream for ${track.title}...');
+        try {
+          final dio = Dio();
+          final response = await dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
+          final results = response.data['data']?['results'] as List?;
+          if (results != null && results.isNotEmpty) {
+            final freshUrl = results.first['downloadUrl']?.last['url']?.toString() ?? '';
+            if (freshUrl.isNotEmpty) {
+              audioUrl = freshUrl;
+              
+              // Healed track update
+              final healed = Track(
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                duration: track.duration,
+                artworkUrl: track.artworkUrl,
+                audioUrl: freshUrl,
+                genre: track.genre,
+              );
+              currentQueue[idx] = healed;
+              state = state.copyWith(queue: currentQueue, currentTrack: healed);
+              await _saveQueue();
+            }
+          }
+        } catch (_) {}
+      }
     }
 
     if (audioUrl.isNotEmpty) {
@@ -317,30 +366,101 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
         
         await _handler.playTrack(track.copyWith(audioUrl: audioUrl));
+
+        // Preload next track in queue & ensure upcoming recommendations filled
+        _preloadNextTrack();
+        ensureUpcomingRecommendations();
       } catch (e) {
         print('ExoPlayer play failed: $e');
       }
     }
   }
 
+  Future<void> ensureUpcomingRecommendations() async {
+    if (state.currentTrack == null) return;
+    
+    int remainingUpcoming = state.queue.length - (state.currentIndex + 1);
+    if (remainingUpcoming >= 5) return;
+
+    try {
+      final source = ref.read(musicSourceProvider);
+      List<Track> recommendations = await source.getDynamicRecommendations();
+      if (recommendations.isEmpty) {
+        String genreQuery = state.currentTrack!.genre.trim();
+        if (genreQuery.isEmpty) genreQuery = 'PUNJABI';
+        recommendations = await source.getTracksByGenre(genreQuery);
+      }
+
+      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
+      List<Track> filtered = recommendations.where((t) => !existingIds.contains(t.id)).toList();
+      filtered.shuffle();
+
+      if (filtered.isEmpty) {
+        filtered = List<Track>.from(Track.mockTracks)..shuffle();
+        filtered.removeWhere((t) => existingIds.contains(t.id));
+      }
+
+      if (filtered.isNotEmpty) {
+        final needed = 5 - remainingUpcoming;
+        final toAdd = filtered.take(needed).toList();
+        final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
+        state = state.copyWith(queue: updatedQueue);
+        await _saveQueue();
+      }
+    } catch (e) {
+      print('Error filling upcoming recommendations: $e');
+      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
+      final filtered = List<Track>.from(Track.mockTracks)..shuffle();
+      filtered.removeWhere((t) => existingIds.contains(t.id));
+      if (filtered.isNotEmpty) {
+        final needed = 5 - remainingUpcoming;
+        final toAdd = filtered.take(needed).toList();
+        final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
+        state = state.copyWith(queue: updatedQueue);
+        await _saveQueue();
+      }
+    }
+  }
+
+  Future<void> _preloadNextTrack() async {
+    final nextIdx = state.currentIndex + 1;
+    if (nextIdx < state.queue.length) {
+      final nextTrackItem = state.queue[nextIdx];
+      final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id);
+      if (localPath == null || !File(localPath).existsSync()) {
+        try {
+          if (nextTrackItem.audioUrl.isEmpty) {
+            final dio = Dio();
+            final response = await dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${nextTrackItem.title} ${nextTrackItem.artist}")}');
+            final results = response.data['data']?['results'] as List?;
+            if (results != null && results.isNotEmpty) {
+              final freshUrl = results.first['downloadUrl']?.last['url']?.toString() ?? '';
+              if (freshUrl.isNotEmpty) {
+                final List<Track> updatedQueue = List.from(state.queue);
+                updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
+                state = state.copyWith(queue: updatedQueue);
+                _saveQueue();
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
   void addToQueue(Track track) {
-    if (state.queue.any((t) => t.id == track.id)) return;
-    final List<Track> updated = List.from(state.queue)..add(track);
+    List<Track> updated = List.from(state.queue);
+    updated.removeWhere((t) => t.id == track.id);
+    final insertIdx = (state.currentIndex >= 0 && state.currentIndex < updated.length)
+        ? state.currentIndex + 1
+        : updated.length;
+    updated.insert(insertIdx, track);
     state = state.copyWith(queue: updated);
     _saveQueue();
   }
 
   void playNext(Track track) {
-    List<Track> updated = List.from(state.queue);
-    updated.removeWhere((t) => t.id == track.id);
-    final insertIdx = state.currentIndex + 1;
-    if (insertIdx >= updated.length) {
-      updated.add(track);
-    } else {
-      updated.insert(insertIdx, track);
-    }
-    state = state.copyWith(queue: updated);
-    _saveQueue();
+    addToQueue(track);
   }
 
   void removeFromQueue(int index) {

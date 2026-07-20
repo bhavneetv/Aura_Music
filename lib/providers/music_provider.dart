@@ -19,3 +19,9 @@ final genreTracksProvider = FutureProvider.family<List<Track>, String>((ref, gen
   final source = ref.read(musicSourceProvider);
   return source.getTracksByGenre(genre);
 });
+
+// FutureProvider to fetch fresh dynamic recommendations based on user preferences & history
+final dynamicRecommendationsProvider = FutureProvider<List<Track>>((ref) async {
+  final source = ref.read(musicSourceProvider);
+  return source.getDynamicRecommendations();
+});

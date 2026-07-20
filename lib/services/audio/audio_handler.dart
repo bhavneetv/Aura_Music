@@ -15,41 +15,44 @@ Future<AudioHandler> initAudioHandler() async {
 }
 
 class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _playerA = AudioPlayer();
+  final AudioPlayer _playerB = AudioPlayer();
+  late AudioPlayer _activePlayer;
+  late AudioPlayer _fadePlayer;
 
   MyAudioHandler() {
-    // Forward playback events to audio_service state stream
-    _player.playbackEventStream.map(_transformEvent).pipe(playbackState);
+    _activePlayer = _playerA;
+    _fadePlayer = _playerB;
+    _activePlayer.playbackEventStream.map(_transformEvent).pipe(playbackState);
   }
 
-  AudioPlayer get player => _player;
+  AudioPlayer get player => _activePlayer;
 
   // ── Audio Controls ─────────────────────────────────────────
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() => _activePlayer.play();
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() => _activePlayer.pause();
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) => _activePlayer.seek(position);
 
   @override
   Future<void> stop() async {
-    await _player.stop();
+    await _activePlayer.stop();
+    await _fadePlayer.stop();
     await playbackState.firstWhere((state) => state.processingState == AudioProcessingState.idle);
   }
 
   @override
   Future<void> skipToNext() async {
-    // Skip to next logic will be controlled by Riverpod / QueueNotifier
     customAction('next');
   }
 
   @override
   Future<void> skipToPrevious() async {
-    // Skip to previous logic will be controlled by Riverpod / QueueNotifier
     customAction('previous');
   }
 
@@ -72,8 +75,53 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     this.mediaItem.add(mediaItem);
     
     // Set source
-    await _player.setUrl(track.audioUrl);
-    _player.play();
+    await _activePlayer.setUrl(track.audioUrl);
+    await _activePlayer.setVolume(1.0);
+    _activePlayer.play();
+  }
+
+  Future<void> crossfadeToTrack(Track nextTrack, int crossfadeSeconds) async {
+    final mediaItem = MediaItem(
+      id: nextTrack.id,
+      album: nextTrack.album,
+      title: nextTrack.title,
+      artist: nextTrack.artist,
+      duration: _parseDuration(nextTrack.duration),
+      artUri: Uri.parse(nextTrack.artworkUrl),
+      extras: {
+        'audioUrl': nextTrack.audioUrl,
+        'genre': nextTrack.genre,
+      },
+    );
+    this.mediaItem.add(mediaItem);
+
+    final outgoingPlayer = _activePlayer;
+    final incomingPlayer = _fadePlayer;
+
+    try {
+      await incomingPlayer.setUrl(nextTrack.audioUrl);
+      await incomingPlayer.setVolume(0.0);
+      incomingPlayer.play();
+
+      final steps = (crossfadeSeconds * 10).clamp(10, 100);
+      final stepMs = (crossfadeSeconds * 1000 / steps).round();
+
+      for (int i = 1; i <= steps; i++) {
+        await Future.delayed(Duration(milliseconds: stepMs));
+        final double progress = i / steps;
+        await outgoingPlayer.setVolume((1.0 - progress).clamp(0.0, 1.0));
+        await incomingPlayer.setVolume(progress.clamp(0.0, 1.0));
+      }
+
+      await outgoingPlayer.stop();
+      await outgoingPlayer.setVolume(1.0);
+
+      _activePlayer = incomingPlayer;
+      _fadePlayer = outgoingPlayer;
+    } catch (e) {
+      print('Crossfade failed fallback to normal play: $e');
+      await playTrack(nextTrack);
+    }
   }
 
   Duration _parseDuration(String durationStr) {
@@ -94,7 +142,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     return PlaybackState(
       controls: [
         MediaControl.skipToPrevious,
-        if (_player.playing) MediaControl.pause else MediaControl.play,
+        if (_activePlayer.playing) MediaControl.pause else MediaControl.play,
         MediaControl.stop,
         MediaControl.skipToNext,
       ],
@@ -110,11 +158,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         ProcessingState.buffering: AudioProcessingState.buffering,
         ProcessingState.ready: AudioProcessingState.ready,
         ProcessingState.completed: AudioProcessingState.completed,
-      }[_player.processingState]!,
-      playing: _player.playing,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
-      speed: _player.speed,
+      }[_activePlayer.processingState]!,
+      playing: _activePlayer.playing,
+      updatePosition: _activePlayer.position,
+      bufferedPosition: _activePlayer.bufferedPosition,
+      speed: _activePlayer.speed,
       queueIndex: event.currentIndex,
     );
   }

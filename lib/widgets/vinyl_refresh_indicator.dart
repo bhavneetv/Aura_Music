@@ -84,15 +84,21 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
   bool _handleScrollNotification(ScrollNotification notification) {
     if (_isRefreshing) return false;
 
-    if (notification is ScrollUpdateNotification) {
+    if (notification is OverscrollNotification) {
+      if (notification.overscroll < 0) {
+        setState(() {
+          _dragOffset += -notification.overscroll * 0.5;
+          _canRefresh = _dragOffset >= _refreshThreshold;
+        });
+      }
+    } else if (notification is ScrollUpdateNotification) {
       final metrics = notification.metrics;
-      // Scroll pixels < 0 means pulling past the top
       if (metrics.pixels < 0) {
         setState(() {
           _dragOffset = -metrics.pixels;
           _canRefresh = _dragOffset >= _refreshThreshold;
         });
-      } else if (_dragOffset != 0.0) {
+      } else if (_dragOffset != 0.0 && metrics.pixels >= 0) {
         setState(() {
           _dragOffset = 0.0;
         });

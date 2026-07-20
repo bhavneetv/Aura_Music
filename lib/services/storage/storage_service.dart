@@ -36,6 +36,40 @@ class StorageService {
     await box.put(key, value);
   }
 
+  static bool isCrossfadeEnabled() {
+    return getSetting('crossfade_enabled', defaultValue: false) as bool;
+  }
+
+  static Future<void> setCrossfadeEnabled(bool enabled) async {
+    await saveSetting('crossfade_enabled', enabled);
+  }
+
+  static int getCrossfadeDuration() {
+    return getSetting('crossfade_duration', defaultValue: 5) as int;
+  }
+
+  static Future<void> setCrossfadeDuration(int seconds) async {
+    await saveSetting('crossfade_duration', seconds);
+  }
+
+  static bool isHapticsEnabled() {
+    return getSetting('haptics_enabled', defaultValue: true) as bool;
+  }
+
+  static Future<void> setHapticsEnabled(bool enabled) async {
+    await saveSetting('haptics_enabled', enabled);
+  }
+
+  static bool hasSeenPlayerTutorial() {
+    final box = Hive.box(_profileBox);
+    return box.get('seen_player_tutorial', defaultValue: false) as bool;
+  }
+
+  static Future<void> setSeenPlayerTutorial() async {
+    final box = Hive.box(_profileBox);
+    await box.put('seen_player_tutorial', true);
+  }
+
   // ── Onboarding Profile ──────────────────────────────────────
   
   static bool isOnboardingComplete() {
@@ -187,6 +221,16 @@ class StorageService {
     await box.put('listening_history', jsonEncode([]));
   }
 
+  // ── Progress Bar Visual Style ────────────────────────────────
+
+  static String getProgressBarStyle() {
+    return getSetting('progress_bar_style', defaultValue: 'normal') as String;
+  }
+
+  static Future<void> setProgressBarStyle(String style) async {
+    await saveSetting('progress_bar_style', style);
+  }
+
   // ── Downloads Tracker ───────────────────────────────────────
 
   static Map<String, String> getDownloadedTracks() {
@@ -198,6 +242,11 @@ class StorageService {
     } catch (_) {
       return {};
     }
+  }
+
+  static String? getDownloadedTrackPath(String trackId) {
+    final downloads = getDownloadedTracks();
+    return downloads[trackId];
   }
 
   static Future<void> registerDownload(String trackId, String localPath) async {

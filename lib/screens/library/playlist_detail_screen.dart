@@ -4,6 +4,7 @@ import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../services/download/download_service.dart';
 import '../../themes/app_theme.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
@@ -152,6 +153,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         ),
         title: Text(_playlist['name'] ?? 'Playlist Detail', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.download_for_offline_rounded),
+            tooltip: 'Download Playlist',
+            onPressed: () {
+              DownloadService.instance.downloadPlaylist(_playlistTracks);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Downloading ${_playlistTracks.length} tracks for offline listening...'),
+                  duration: const Duration(seconds: 2),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',

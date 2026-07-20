@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
@@ -17,12 +19,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final TextEditingController _nameController = TextEditingController();
   bool _offlineOnly = false;
   String _audioQuality = 'HQ Stream (256kbps)';
+  bool _crossfadeEnabled = false;
+  double _crossfadeDuration = 5.0;
+  bool _hapticsEnabled = true;
+  String _progressBarStyle = 'normal';
 
   @override
   void initState() {
     super.initState();
     _offlineOnly = StorageService.getSetting('offline_mode_only', defaultValue: false) as bool;
     _audioQuality = StorageService.getSetting('download_quality_label', defaultValue: 'HQ Stream (256kbps)') as String;
+    _crossfadeEnabled = StorageService.isCrossfadeEnabled();
+    _crossfadeDuration = StorageService.getCrossfadeDuration().toDouble();
+    _hapticsEnabled = StorageService.isHapticsEnabled();
+    _progressBarStyle = StorageService.getProgressBarStyle();
   }
 
   @override
@@ -277,13 +287,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final playerSettings = ref.watch(settingsProvider);
     final customBranding = ref.watch(customizationProvider);
     
     final playbackState = ref.watch(playbackProvider);
     final playbackNotifier = ref.read(playbackProvider.notifier);
     
-    final settingsNotifier = ref.read(settingsProvider.notifier);
     final themeNotifier = ref.read(themeModeProvider.notifier);
 
     final isDark = themeMode == ThemeMode.dark ||
@@ -378,11 +386,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         _buildSwitchTile(
           'Haptic Feedback',
-          'Vibrate on buttons and slider events',
-          playerSettings.hapticFeedback,
+          'Vibrate on buttons, gestures and playback controls',
+          _hapticsEnabled,
           customBranding.accentColor,
-          (val) {
-            settingsNotifier.toggleHaptics(val);
+          (val) async {
+            setState(() {
+              _hapticsEnabled = val;
+            });
+            await StorageService.setHapticsEnabled(val);
           },
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
@@ -408,6 +419,53 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           'Customize frequency bands and presets',
           const EqualizerScreen(),
         ),
+        _buildSelectionTile(
+          'Progress Bar Visual Style',
+          _progressBarStyle.toUpperCase(),
+          () => _showProgressBarStyleDialog(),
+        ),
+        _buildSwitchTile(
+          'Crossfade Audio',
+          'Smooth transition between ending and next song',
+          _crossfadeEnabled,
+          customBranding.accentColor,
+          (val) async {
+            setState(() {
+              _crossfadeEnabled = val;
+            });
+            await StorageService.setCrossfadeEnabled(val);
+          },
+        ),
+        if (_crossfadeEnabled)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Crossfade Duration', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text('${_crossfadeDuration.toInt()} seconds', style: TextStyle(color: customBranding.accentColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ],
+                ),
+                Slider(
+                  value: _crossfadeDuration,
+                  min: 1.0,
+                  max: 10.0,
+                  divisions: 9,
+                  activeColor: customBranding.accentColor,
+                  label: '${_crossfadeDuration.toInt()} sec',
+                  onChanged: (val) async {
+                    setState(() {
+                      _crossfadeDuration = val;
+                    });
+                    await StorageService.setCrossfadeDuration(val.toInt());
+                  },
+                ),
+              ],
+            ),
+          ),
         _buildSelectionTile(
           'Download Stream Quality',
           _audioQuality,
@@ -456,9 +514,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
 
-        // 6. Group: About
+        // 6. Group: About & Share
         const SizedBox(height: 12),
         _buildSectionHeader('ABOUT', customBranding.accentColor),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+          title: const Text('Share App', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          subtitle: const Text('Share download link & QR Code'),
+          trailing: Icon(Icons.qr_code_2_rounded, color: customBranding.accentColor),
+          onTap: () => _showShareAppDialog(customBranding.accentColor),
+        ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
@@ -689,6 +754,140 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         });
         StorageService.saveSetting('download_quality_label', option);
         Navigator.pop(context);
+      },
+    );
+  }
+
+  void _showProgressBarStyleDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text('Progress Bar Visual Style', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBarStyleOption('normal', 'Normal (Material Rounded)'),
+              _buildBarStyleOption('snake', 'Snake (Wavy Sine Wave)'),
+              _buildBarStyleOption('zigzag', 'Zigzag (Sawtooth Wave)'),
+              _buildBarStyleOption('neon', 'Neon Glow (Pulse Shader)'),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBarStyleOption(String key, String label) {
+    final isSelected = _progressBarStyle == key;
+    return ListTile(
+      title: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+      trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: Colors.amber) : null,
+      onTap: () async {
+        setState(() {
+          _progressBarStyle = key;
+        });
+        await StorageService.setProgressBarStyle(key);
+        if (mounted) Navigator.pop(context);
+      },
+    );
+  }
+
+  void _showShareAppDialog(Color accentColor) {
+    const shareUrl = String.fromEnvironment(
+      'APP_DOWNLOAD_URL',
+      defaultValue: String.fromEnvironment(
+        'APP_SHARE_URL',
+        defaultValue: 'https://github.com/bhavneetv/Aura_Music/releases',
+      ),
+    );
+
+    Future<void> launchAppUrl() async {
+      try {
+        final uri = Uri.parse(shareUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          await launchUrl(uri, mode: LaunchMode.platformDefault);
+        }
+      } catch (e) {
+        try {
+          final uri = Uri.parse(shareUrl);
+          await launchUrl(uri, mode: LaunchMode.inAppWebView);
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Opening $shareUrl')),
+            );
+          }
+        }
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text('Share Aura App', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Tap QR Code or link below to open download page:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: launchAppUrl,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4)),
+                    ],
+                  ),
+                  child: QrImageView(
+                    data: shareUrl,
+                    version: QrVersions.auto,
+                    size: 180.0,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: launchAppUrl,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    shareUrl,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: accentColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accentColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Close', style: TextStyle(color: Colors.white)),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ],
+        );
       },
     );
   }

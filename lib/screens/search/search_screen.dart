@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/music_provider.dart';
+import '../../services/storage/storage_service.dart';
 import '../../themes/app_theme.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -16,7 +17,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   List<Track> _filteredTracks = [];
-  final List<String> _recentSearches = ['Midnight', 'Solaris', 'Retro', 'Chillout'];
+  List<String> _recentSearches = [];
   final List<String> _trendingSearches = ['Synthwave', 'Ambient', 'Acoustic', 'Jazz', 'Lo-Fi'];
   bool _isSearching = false;
 
@@ -26,6 +27,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     _tabController = TabController(length: 4, vsync: this);
     _searchController.addListener(_onSearchChanged);
     _filteredTracks = Track.mockTracks;
+    _recentSearches = StorageService.getRecentSearches();
   }
 
   @override
@@ -56,6 +58,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
           _filteredTracks = results;
           _isSearching = false;
         });
+        StorageService.addSearchQuery(query);
       }
     } catch (_) {
       if (mounted) {
@@ -179,6 +182,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                   child: TextField(
                     controller: _searchController,
                     style: const TextStyle(fontSize: 14),
+                    onSubmitted: (query) async {
+                      await StorageService.addSearchQuery(query);
+                      setState(() {
+                        _recentSearches = StorageService.getRecentSearches();
+                      });
+                    },
                     decoration: InputDecoration(
                       border: InputBorder.none,
                       hintText: 'Search songs, albums, artists...',
@@ -292,38 +301,66 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
           itemCount: _filteredTracks.length,
           itemBuilder: (context, index) {
             final track = _filteredTracks[index];
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-              leading: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  track.artworkUrl,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    width: 48,
-                    height: 48,
-                    color: Colors.grey.shade800,
-                    child: const Icon(Icons.music_note_rounded),
+            return Dismissible(
+              key: Key('search_${track.id}_$index'),
+              direction: DismissDirection.startToEnd,
+              confirmDismiss: (direction) async {
+                notifier.addToQueue(track);
+                triggerHaptic(HapticFeedbackType.medium);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Added "${track.title}" to Queue 🎵'),
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
                   ),
+                );
+                return false; // Keep item in search list
+              },
+              background: Container(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.only(left: 24),
+                color: AppTheme.goldAccent.withOpacity(0.8),
+                child: const Row(
+                  children: [
+                    Icon(Icons.queue_music_rounded, color: Colors.black),
+                    SizedBox(width: 8),
+                    Text('Add to Queue', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  ],
                 ),
               ),
-              title: Text(
-                track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    track.artworkUrl,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      width: 48,
+                      height: 48,
+                      color: Colors.grey.shade800,
+                      child: const Icon(Icons.music_note_rounded),
+                    ),
+                  ),
+                ),
+                title: Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '${track.artist} • ${track.genre}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
+                onTap: () {
+                  notifier.playTrack(track);
+                },
               ),
-              subtitle: Text(
-                '${track.artist} • ${track.genre}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
-              onTap: () {
-                notifier.playTrack(track);
-              },
             );
           },
         );
@@ -343,9 +380,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
               Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               if (isRecent)
                 TextButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await StorageService.clearSearchHistory();
                     setState(() {
-                      _recentSearches.clear();
+                      _recentSearches = StorageService.getRecentSearches();
                     });
                   },
                   child: const Text('Clear', style: TextStyle(color: AppTheme.goldAccent, fontSize: 12)),
@@ -358,8 +396,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
             runSpacing: 8,
             children: items.map((tag) {
               return GestureDetector(
-                onTap: () {
+                onTap: () async {
                   _searchController.text = tag;
+                  await StorageService.addSearchQuery(tag);
+                  setState(() {
+                    _recentSearches = StorageService.getRecentSearches();
+                  });
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

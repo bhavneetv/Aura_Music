@@ -11,6 +11,8 @@ import '../search/search_screen.dart';
 import '../library/library_screen.dart';
 import '../queue/queue_screen.dart';
 import '../settings/settings_screen.dart';
+import '../../services/storage/storage_service.dart';
+import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -53,19 +55,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor),
       body: SafeArea(
         bottom: false,
-        child: Stack(
-          children: [
-            // Render active tab body
-            tabBody,
+        child: NetworkStatusBanner(
+          child: Stack(
+            children: [
+              // Render active tab body
+              tabBody,
 
-            // Persistent Mini Player above bottom nav bar
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: MiniPlayer(),
-            ),
-          ],
+              // Persistent Mini Player above bottom nav bar
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: MiniPlayer(),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -74,20 +78,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Home Tab Content
   Widget _buildHomeTab(BuildContext context) {
     final trendingAsync = ref.watch(trendingTracksProvider);
-    final continueListeningAsync = ref.watch(genreTracksProvider('chillout'));
-    final recommendedAsync = ref.watch(genreTracksProvider('ambient'));
+    final recommendedAsync = ref.watch(dynamicRecommendationsProvider);
     final customBranding = ref.watch(customizationProvider);
+
+    // Get actual listening history from Hive
+    final historyList = StorageService.getListeningHistory();
+    final List<Track> historyTracks = [];
+    for (final item in historyList) {
+      if (item['track_id'] != null) {
+        historyTracks.add(
+          Track(
+            id: item['track_id'].toString(),
+            title: item['title']?.toString() ?? 'Track',
+            artist: item['artist']?.toString() ?? 'Unknown Artist',
+            album: item['album']?.toString() ?? 'Album',
+            duration: item['duration']?.toString() ?? '3:30',
+            artworkUrl: item['artworkUrl']?.toString() ?? '',
+            audioUrl: item['audioUrl']?.toString() ?? '',
+            genre: item['genre']?.toString() ?? '',
+          ),
+        );
+      }
+    }
+
+    final continueTracks = historyTracks.isNotEmpty ? historyTracks.take(10).toList() : Track.mockTracks.sublist(0, 4);
 
     return VinylRefreshIndicator(
       onRefresh: () async {
         ref.invalidate(trendingTracksProvider);
-        ref.invalidate(genreTracksProvider('chillout'));
-        ref.invalidate(genreTracksProvider('ambient'));
+        ref.invalidate(dynamicRecommendationsProvider);
         try {
           await Future.wait([
             ref.read(trendingTracksProvider.future),
-            ref.read(genreTracksProvider('chillout').future),
-            ref.read(genreTracksProvider('ambient').future),
+            ref.read(dynamicRecommendationsProvider.future),
           ]);
         } catch (_) {}
       },
@@ -99,16 +122,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           _buildHomeHeader(context),
           const SizedBox(height: 24),
 
-          // Continue Listening
-          continueListeningAsync.when(
-            loading: () => const RailShimmer(),
-            error: (err, stack) => _buildTrackRail(context, 'Continue Listening', Track.mockTracks.sublist(0, 3)),
-            data: (tracks) => _buildTrackRail(
-              context,
-              'Continue Listening',
-              tracks.isEmpty ? Track.mockTracks.sublist(0, 3) : tracks,
-            ),
-          ),
+          // Continue Listening (Actual History)
+          _buildTrackRail(context, 'Continue Listening', continueTracks),
           const SizedBox(height: 12),
 
           // Trending

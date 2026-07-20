@@ -5,6 +5,8 @@ import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../services/download/download_service.dart';
+import '../../widgets/custom_slider_track_shapes.dart';
 import '../../themes/app_theme.dart';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
@@ -23,6 +25,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // Deceleration angle tracker
   late AnimationController _decelController;
   late Animation<double> _decelAngleAnimation;
+  Offset _albumDragOffset = Offset.zero;
 
   @override
   void initState() {
@@ -39,6 +42,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (ref.read(playbackProvider).isPlaying) {
         _spinController.repeat();
+      }
+      if (!StorageService.hasSeenPlayerTutorial()) {
+        _showPlayerTutorialModal();
       }
     });
   }
@@ -150,31 +156,147 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               fontWeight: FontWeight.bold,
                             ),
                       ),
-                      IconButton(
-                        icon: Icon(
-                          isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                          color: isFav ? Colors.redAccent : Colors.grey,
-                          size: 24,
-                        ),
-                        onPressed: () async {
-                          await StorageService.toggleFavorite('trackIds', track.id);
-                          setState(() {});
-                        },
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListenableBuilder(
+                            listenable: DownloadService.instance,
+                            builder: (context, _) {
+                              final isDownloaded = DownloadService.instance.isDownloaded(track.id);
+                              final task = DownloadService.instance.tasks[track.id];
+                              final isDownloading = task?.status == 'downloading';
+
+                              if (isDownloading) {
+                                return const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                                );
+                              }
+                              if (isDownloaded) {
+                                return IconButton(
+                                  icon: Icon(Icons.download_done_rounded, color: customBranding.accentColor, size: 22),
+                                  onPressed: () {},
+                                );
+                              }
+                              return IconButton(
+                                icon: const Icon(Icons.download_rounded, color: Colors.grey, size: 22),
+                                onPressed: () {
+                                  DownloadService.instance.startDownload(track);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Downloading "${track.title}" for offline playback...'),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              color: isFav ? Colors.redAccent : Colors.grey,
+                              size: 24,
+                            ),
+                            onPressed: () async {
+                              triggerHaptic(HapticFeedbackType.selection);
+                              await StorageService.toggleFavorite('trackIds', track.id);
+                              setState(() {});
+                            },
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
-                // Dynamic Skin Stages
-                SizedBox(
-                  width: MediaQuery.of(context).size.width,
-                  height: MediaQuery.of(context).size.width * 0.85,
-                  child: _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
+                // Dynamic Skin Stages with Physics Swipe Gestures
+                GestureDetector(
+                  onPanUpdate: (details) {
+                    setState(() {
+                      _albumDragOffset += details.delta;
+                    });
+                  },
+                  onPanEnd: (details) async {
+                    final dx = _albumDragOffset.dx;
+                    final dy = _albumDragOffset.dy;
+
+                    if (dx.abs() > dy.abs()) {
+                      if (dx < -80) {
+                        // Swipe Left -> Next Track
+                        triggerHaptic(HapticFeedbackType.medium);
+                        notifier.nextTrack();
+                      } else if (dx > 80) {
+                        // Swipe Right -> Previous Track
+                        triggerHaptic(HapticFeedbackType.medium);
+                        notifier.previousTrack();
+                      }
+                    } else {
+                      if (dy < -80) {
+                        // Swipe Up -> Toggle Favorite
+                        triggerHaptic(HapticFeedbackType.medium);
+                        await StorageService.toggleFavorite('trackIds', track.id);
+                        setState(() {});
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(StorageService.isFavorite('trackIds', track.id) ? 'Added to Favorites ❤️' : 'Removed from Favorites'),
+                              duration: const Duration(seconds: 1),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      } else if (dy > 80) {
+                        // Swipe Down -> Add to Playlist
+                        triggerHaptic(HapticFeedbackType.medium);
+                        _showAddToPlaylistBottomSheet(track);
+                      }
+                    }
+
+                    // Physics spring back bounce
+                    setState(() {
+                      _albumDragOffset = Offset.zero;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutBack,
+                    transform: Matrix4.translationValues(_albumDragOffset.dx, _albumDragOffset.dy, 0),
+                    width: MediaQuery.of(context).size.width,
+                    height: MediaQuery.of(context).size.width * 0.82,
+                    child: _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
+                  ),
                 ),
 
-                const SizedBox(height: 20),
+                // Mini Gesture Legend
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Text('👈 Prev', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('Next 👉', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('👆 Fav', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        Text('Playlist 👇', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
 
                 // Title & Artist Metadata
                 Padding(
@@ -216,6 +338,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           trackHeight: 3.5,
                           activeTrackColor: customBranding.accentColor,
                           thumbColor: customBranding.accentColor,
+                          trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
                           thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                           overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
                         ),
@@ -812,6 +935,97 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               },
             ),
           ],
+        );
+      },
+    );
+  }
+
+  void _showPlayerTutorialModal() {
+    int currentStep = 0;
+    final customBranding = ref.watch(customizationProvider);
+
+    final steps = [
+      {
+        'title': '🎵 Interactive Vinyl & Skins',
+        'desc': 'Tap the bottom skin icon to cycle between Vinyl record, CD, Cassette tape, and Minimal artwork skins!'
+      },
+      {
+        'title': '👆 Swipe Gestures',
+        'desc': 'Swipe Left/Right to skip tracks. Swipe Up to Favorite. Swipe Down to add to any playlist instantly!'
+      },
+      {
+        'title': '🎛️ Equalizer & Sleep Timer',
+        'desc': 'Fine-tune 5-band EQ, bass boost, and set automatic sleep timers directly from the bottom controls.'
+      },
+      {
+        'title': '🎨 Dynamic RGB Branding',
+        'desc': 'Customize app name, icon, and accent color with live RGB gradient preview in Settings.'
+      },
+    ];
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setTutorialState) {
+            final step = steps[currentStep];
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              title: Text(step['title']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(step['desc']!, style: const TextStyle(fontSize: 14, height: 1.4)),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      steps.length,
+                      (idx) => Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        width: idx == currentStep ? 16 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: idx == currentStep ? customBranding.accentColor : Colors.grey.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('Skip', style: TextStyle(color: Colors.grey)),
+                  onPressed: () async {
+                    await StorageService.setSeenPlayerTutorial();
+                    if (mounted) Navigator.pop(context);
+                  },
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: customBranding.accentColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    currentStep < steps.length - 1 ? 'Next' : 'Got It!',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    if (currentStep < steps.length - 1) {
+                      setTutorialState(() {
+                        currentStep++;
+                      });
+                    } else {
+                      await StorageService.setSeenPlayerTutorial();
+                      if (mounted) Navigator.pop(context);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
