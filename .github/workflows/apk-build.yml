@@ -1,4 +1,4 @@
-name: Build & Release Flutter APK
+name: Build Flutter APK & Release
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v2.0.1
-      RELEASE_NAME: Flutter App v1.0.0
+      RELEASE_TAG: v2.0.0
+      RELEASE_NAME: Flutter App v2.0.0
 
     steps:
       - name: Checkout repository
@@ -27,21 +27,34 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.5"
+          flutter-version: "3.35.0"
+          channel: stable
           cache: true
+
+      - name: Verify Flutter
+        run: |
+          flutter --version
+          dart --version
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+        continue-on-error: true
+
+      - name: Build Release APK
         run: flutter build apk --release
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
-          files: build/app/outputs/flutter-apk/app-release.apk
           generate_release_notes: true
+          files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
