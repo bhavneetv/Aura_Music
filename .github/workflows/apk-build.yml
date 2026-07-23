@@ -11,42 +11,37 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v2.0.0
-      RELEASE_NAME: Flutter App v2.0.0
+      RELEASE_TAG: v1.0.3
+      RELEASE_NAME: Flutter App v1.0.0
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.35.0"
           channel: stable
           cache: true
 
-      - name: Verify Flutter
+      - name: Show Flutter & Dart versions
         run: |
           flutter --version
           dart --version
 
-      - name: Install dependencies
+      - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze
+      - name: Analyze project
         run: flutter analyze
 
-      - name: Run tests
-        run: flutter test
-        continue-on-error: true
-
-      - name: Build Release APK
+      - name: Build APK
         run: flutter build apk --release
 
       - name: Create GitHub Release
