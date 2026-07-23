@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v1.0.2
-      RELEASE_NAME: Flutter App v1.0.0
+      RELEASE_TAG: v2.0
+      RELEASE_NAME: Flutter App v1.0.2
 
     steps:
       - name: Checkout source
@@ -30,16 +30,21 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Check versions
-        run: |
-          flutter --version
-          dart --version
+      - name: Flutter Version
+        run: flutter --version
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Analyze Project
+        run: flutter analyze
+        continue-on-error: true
+
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Verify APK
+        run: ls -lh build/app/outputs/flutter-apk/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
