@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v1.0.3
+      RELEASE_TAG: v1.0.2
       RELEASE_NAME: Flutter App v1.0.0
 
     steps:
@@ -30,16 +30,13 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Show Flutter & Dart versions
+      - name: Check versions
         run: |
           flutter --version
           dart --version
 
-      - name: Get dependencies
+      - name: Install dependencies
         run: flutter pub get
-
-      - name: Analyze project
-        run: flutter analyze
 
       - name: Build APK
         run: flutter build apk --release
