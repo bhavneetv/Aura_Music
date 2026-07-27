@@ -155,7 +155,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final savedSpeed = StorageService.getSetting('playback_speed', defaultValue: 1.0) as double;
 
     // 1. Listen to position changes
-    _posSub = _handler.player.positionStream.listen((pos) {
+    _posSub = _handler.activePositionStream.listen((pos) {
       final dur = state.totalDuration;
       final double progress = dur.inMilliseconds > 0
           ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
@@ -185,14 +185,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     });
 
     // 2. Listen to duration changes
-    _durSub = _handler.player.durationStream.listen((dur) {
+    _durSub = _handler.activeDurationStream.listen((dur) {
       if (dur != null) {
         state = state.copyWith(totalDuration: dur);
       }
     });
 
     // 3. Listen to player state
-    _stateSub = _handler.player.playerStateStream.listen((playerState) {
+    _stateSub = _handler.activePlayerStateStream.listen((playerState) {
       state = state.copyWith(isPlaying: playerState.playing);
       
       // Auto-play next track on completion
@@ -269,21 +269,26 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         print('Failed to restore saved queue: $e');
       }
     } else {
-      // Dynamic non-static initial state
-      if (Track.mockTracks.isNotEmpty) {
-        final pool = List<Track>.from(Track.mockTracks)..shuffle();
-        final seedTrack = pool.first;
-        state = PlaybackState(
-          currentTrack: seedTrack,
-          queue: [seedTrack],
-          currentIndex: 0,
-          playerSkin: skin,
-          volumeNormalization: norm,
-          gaplessPlayback: gapless,
-          playbackSpeed: speed,
-        );
-        ensureUpcomingRecommendations();
-      }
+      // Dynamic initial queue based on user's preferred languages
+      Future.microtask(() async {
+        try {
+          final source = ref.read(musicSourceProvider);
+          final recs = await source.getDynamicRecommendations();
+          if (recs.isNotEmpty) {
+            final seedTrack = recs.first;
+            state = PlaybackState(
+              currentTrack: seedTrack,
+              queue: recs,
+              currentIndex: 0,
+              playerSkin: skin,
+              volumeNormalization: norm,
+              gaplessPlayback: gapless,
+              playbackSpeed: speed,
+            );
+            _saveQueue();
+          }
+        } catch (_) {}
+      });
     }
   }
 
@@ -685,6 +690,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         state = state.copyWith(
           currentIndex: nextIdx,
           currentTrack: nextTrackItem,
+          currentPosition: Duration.zero,
+          progress: 0.0,
+          isPlaying: true,
         );
         await _saveQueue();
         final crossfadeSec = StorageService.getCrossfadeDuration();

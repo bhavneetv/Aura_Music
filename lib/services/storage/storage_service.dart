@@ -224,6 +224,44 @@ class StorageService {
     await box.put('listening_history', jsonEncode([]));
   }
 
+  // ── Searched & Played Tracks Tracker ────────────────────────
+
+  static List<Map<String, dynamic>> getSearchedAndPlayedTracks() {
+    final box = Hive.box(_historyBox);
+    final raw = box.get('searched_played_tracks');
+    if (raw == null) return [];
+    try {
+      final decoded = jsonDecode(raw.toString()) as List;
+      return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> addSearchedAndPlayedTrack(Track track) async {
+    final box = Hive.box(_historyBox);
+    final list = getSearchedAndPlayedTracks();
+    
+    // Prevent duplicates by track_id
+    list.removeWhere((item) => item['track_id'] == track.id);
+    
+    final item = {
+      'track_id': track.id,
+      'title': track.title,
+      'artist': track.artist,
+      'album': track.album,
+      'duration': track.duration,
+      'artworkUrl': track.artworkUrl,
+      'audioUrl': track.audioUrl,
+      'genre': track.genre,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+    
+    list.insert(0, item);
+    if (list.length > 100) list.removeLast();
+    await box.put('searched_played_tracks', jsonEncode(list));
+  }
+
   // ── Progress Bar Visual Style ────────────────────────────────
 
   static String getProgressBarStyle() {

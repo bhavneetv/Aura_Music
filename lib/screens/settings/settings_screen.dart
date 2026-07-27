@@ -768,6 +768,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _buildBarStyleOption('android16', 'Android 16 Wave (Stock Squiggly)'),
               _buildBarStyleOption('normal', 'Normal (Material Rounded)'),
               _buildBarStyleOption('snake', 'Snake (Wavy Sine Wave)'),
               _buildBarStyleOption('zigzag', 'Zigzag (Sawtooth Wave)'),

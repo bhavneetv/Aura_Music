@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
@@ -6,12 +7,13 @@ import '../../models/track.dart';
 Future<AudioHandler> initAudioHandler() async {
   return await AudioService.init(
     builder: () => MyAudioHandler(),
-    config: const AudioServiceConfig(
+    config: AudioServiceConfig(
       androidNotificationChannelId: 'com.example.music_app.channel.audio',
       androidNotificationChannelName: 'Aura Vinyl Playback',
-      androidNotificationOngoing: true,
+      androidNotificationOngoing: false,
       androidShowNotificationBadge: true,
       androidStopForegroundOnPause: true,
+      androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
 }
@@ -22,15 +24,55 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   late AudioPlayer _activePlayer;
   late AudioPlayer _fadePlayer;
 
+  final _positionController = StreamController<Duration>.broadcast();
+  final _durationController = StreamController<Duration?>.broadcast();
+  final _playerStateController = StreamController<PlayerState>.broadcast();
+
+  Stream<Duration> get activePositionStream => _positionController.stream;
+  Stream<Duration?> get activeDurationStream => _durationController.stream;
+  Stream<PlayerState> get activePlayerStateStream => _playerStateController.stream;
+
   MyAudioHandler() {
     _activePlayer = _playerA;
     _fadePlayer = _playerB;
-    _activePlayer.playbackEventStream.listen((event) {
-      playbackState.add(_transformEvent(event));
+
+    // Emit an initial idle playback state so Android MediaSession
+    // registers available actions (play, pause, next, prev, seek, stop)
+    // BEFORE any song is loaded. Without this, notification controls
+    // are invisible / non-functional until the first playbackEvent fires.
+    _broadcastState();
+
+    _playerA.playbackEventStream.listen((_) {
+      if (_activePlayer == _playerA) _broadcastState();
     });
-    _fadePlayer.playbackEventStream.listen((event) {
-      if (_fadePlayer.playing) {
-        playbackState.add(_transformEvent(event));
+    _playerB.playbackEventStream.listen((_) {
+      if (_activePlayer == _playerB) _broadcastState();
+    });
+
+    _playerA.positionStream.listen((pos) {
+      if (_activePlayer == _playerA) _positionController.add(pos);
+    });
+    _playerB.positionStream.listen((pos) {
+      if (_activePlayer == _playerB) _positionController.add(pos);
+    });
+
+    _playerA.durationStream.listen((dur) {
+      if (_activePlayer == _playerA) _durationController.add(dur);
+    });
+    _playerB.durationStream.listen((dur) {
+      if (_activePlayer == _playerB) _durationController.add(dur);
+    });
+
+    _playerA.playerStateStream.listen((ps) {
+      if (_activePlayer == _playerA) {
+        _playerStateController.add(ps);
+        _broadcastState();
+      }
+    });
+    _playerB.playerStateStream.listen((ps) {
+      if (_activePlayer == _playerB) {
+        _playerStateController.add(ps);
+        _broadcastState();
       }
     });
   }
@@ -43,24 +85,28 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ── Audio Controls ─────────────────────────────────────────
 
   @override
-  Future<void> play() => _activePlayer.play();
+  Future<void> play() async {
+    await _activePlayer.play();
+    _broadcastState();
+  }
 
   @override
-  Future<void> pause() => _activePlayer.pause();
+  Future<void> pause() async {
+    await _activePlayer.pause();
+    _broadcastState();
+  }
 
   @override
-  Future<void> seek(Duration position) => _activePlayer.seek(position);
+  Future<void> seek(Duration position) async {
+    await _activePlayer.seek(position);
+    _broadcastState();
+  }
 
   @override
   Future<void> stop() async {
     await _activePlayer.stop();
     await _fadePlayer.stop();
-    playbackState.add(
-      playbackState.value.copyWith(
-        processingState: AudioProcessingState.idle,
-        playing: false,
-      ),
-    );
+    _broadcastState();
   }
 
   @override
@@ -188,6 +234,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
       _activePlayer = incomingPlayer;
       _fadePlayer = outgoingPlayer;
+
+      _positionController.add(_activePlayer.position);
+      _durationController.add(_activePlayer.duration);
+      _playerStateController.add(_activePlayer.playerState);
+      _broadcastState();
     } catch (e) {
       print('Crossfade failed fallback to normal play: $e');
       await playTrack(nextTrack);
@@ -208,32 +259,45 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   // ── State Mapping ───────────────────────────────────────────
 
-  PlaybackState _transformEvent(PlaybackEvent event) {
-    return PlaybackState(
+  /// Single source-of-truth for emitting PlaybackState to the system.
+  /// Called from the constructor (initial idle state), every playback
+  /// event, every playerState change, and after every user action
+  /// (play/pause/seek/stop). This ensures the Android MediaSession
+  /// always has the correct set of controls and playing state.
+  void _broadcastState() {
+    const stateMap = {
+      ProcessingState.idle: AudioProcessingState.idle,
+      ProcessingState.loading: AudioProcessingState.loading,
+      ProcessingState.buffering: AudioProcessingState.buffering,
+      ProcessingState.ready: AudioProcessingState.ready,
+      ProcessingState.completed: AudioProcessingState.completed,
+    };
+
+    final isPlaying = _activePlayer.playing;
+
+    playbackState.add(PlaybackState(
       controls: [
         MediaControl.skipToPrevious,
-        if (_activePlayer.playing) MediaControl.pause else MediaControl.play,
+        if (isPlaying) MediaControl.pause else MediaControl.play,
         MediaControl.stop,
         MediaControl.skipToNext,
       ],
       systemActions: const {
+        MediaAction.play,
+        MediaAction.pause,
+        MediaAction.stop,
+        MediaAction.skipToNext,
+        MediaAction.skipToPrevious,
         MediaAction.seek,
         MediaAction.seekForward,
         MediaAction.seekBackward,
       },
       androidCompactActionIndices: const [0, 1, 3],
-      processingState: const {
-        ProcessingState.idle: AudioProcessingState.idle,
-        ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
-        ProcessingState.ready: AudioProcessingState.ready,
-        ProcessingState.completed: AudioProcessingState.completed,
-      }[_activePlayer.processingState]!,
-      playing: _activePlayer.playing,
+      processingState: stateMap[_activePlayer.processingState] ?? AudioProcessingState.idle,
+      playing: isPlaying,
       updatePosition: _activePlayer.position,
       bufferedPosition: _activePlayer.bufferedPosition,
       speed: _activePlayer.speed,
-      queueIndex: event.currentIndex,
-    );
+    ));
   }
 }

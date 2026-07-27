@@ -9,12 +9,15 @@ import '../recommendation/recommendation_engine.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
-  
+
+  // Search mirrors (accurate search results)
   static const List<String> _baseUrls = [
-    'https://saavn-api.vercel.app',
+    'https://jiosaavn-api-unofficial.vercel.app',
     'https://jiosaavn-api-beta.vercel.app',
-    'https://saavn.sumit.co/api',
   ];
+
+  // Audio resolution mirror (returns working CDN stream URLs)
+  static const String _audioResolverUrl = 'https://saavn-api.vercel.app';
 
   Future<dynamic> _fetchFromApi(String endpointPath) async {
     for (final baseUrl in _baseUrls) {
@@ -45,17 +48,38 @@ class JamendoSource implements MusicSource {
 
   @override
   Future<List<Track>> getTrendingTracks() async {
+    final preferredLangs = StorageService.getPreferredLanguages();
+    String query = 'trending';
+    if (preferredLangs.isNotEmpty) {
+      query = preferredLangs.first.toLowerCase();
+    }
     try {
       final page = math.Random().nextInt(3) + 1;
-      final data = await _fetchFromApi('/search/songs?query=trending&page=$page');
+      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
       if (data != null) {
         final tracks = _parseTracks(data);
-        return RecommendationEngine.instance.rankRecommendations(tracks);
+        final resolved = await _resolveAudioUrls(tracks);
+        final filtered = _filterByPreferredLanguages(resolved, preferredLangs);
+        return RecommendationEngine.instance.rankRecommendations(filtered.isNotEmpty ? filtered : resolved);
       }
     } catch (e) {
       print('Error fetching trending tracks: $e');
     }
     return _getMockFallback();
+  }
+
+  List<Track> _filterByPreferredLanguages(List<Track> tracks, List<String> preferredLangs) {
+    if (preferredLangs.isEmpty) return tracks;
+    final upperLangs = preferredLangs.map((l) => l.toUpperCase()).toList();
+    return tracks.where((t) {
+      final g = t.genre.toUpperCase();
+      return upperLangs.any((lang) {
+        if (lang == 'HINDI' || lang == 'BOLLYWOOD') {
+          return g.contains('HINDI') || g.contains('BOLLYWOOD');
+        }
+        return g.contains(lang) || lang.contains(g);
+      });
+    }).toList();
   }
 
   @override
@@ -68,7 +92,16 @@ class JamendoSource implements MusicSource {
       if (data != null) {
         final tracks = _parseTracks(data);
         if (tracks.isNotEmpty) {
-          return tracks;
+          final terms = cleanQuery.toLowerCase().split(' ').where((t) => t.isNotEmpty).toList();
+          final matching = tracks.where((t) {
+            final title = t.title.toLowerCase();
+            final artist = t.artist.toLowerCase();
+            final album = t.album.toLowerCase();
+            return terms.any((term) => title.contains(term) || artist.contains(term) || album.contains(term));
+          }).toList();
+
+          final candidates = matching.isNotEmpty ? matching : tracks;
+          return await _resolveAudioUrls(candidates);
         }
       }
     } catch (e) {
@@ -84,7 +117,8 @@ class JamendoSource implements MusicSource {
       final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
       if (data != null) {
         final tracks = _parseTracks(data);
-        return RecommendationEngine.instance.rankRecommendations(tracks);
+        final resolved = await _resolveAudioUrls(tracks);
+        return RecommendationEngine.instance.rankRecommendations(resolved);
       }
     } catch (e) {
       print('Error fetching tracks by genre "$genre": $e');
@@ -97,48 +131,46 @@ class JamendoSource implements MusicSource {
     final sessionCtx = StorageService.getSessionContext();
     final activeGenre = (sessionCtx['genre'] ?? '').toUpperCase();
     final activeArtist = sessionCtx['artist'] ?? '';
-    final activeLanguage = (sessionCtx['language'] ?? activeGenre).toUpperCase();
-
-    final List<String> primarySeeds = [];
-    final List<String> secondarySeeds = [];
-
-    if (activeGenre.isNotEmpty) {
-      primarySeeds.add(activeGenre);
-      primarySeeds.add('$activeGenre songs');
-      primarySeeds.add('$activeGenre latest');
-    }
-    if (activeLanguage.isNotEmpty && activeLanguage != activeGenre) {
-      primarySeeds.add(activeLanguage);
-    }
-    if (activeArtist.isNotEmpty) {
-      primarySeeds.add(activeArtist);
-      primarySeeds.add('$activeArtist songs');
-    }
 
     final preferredLangs = StorageService.getPreferredLanguages();
     final preferredGenres = StorageService.getPreferredGenres();
-    final history = StorageService.getListeningHistory();
+    final preferredArtists = StorageService.getPreferredArtists();
 
-    for (final item in history.take(3)) {
-      if (item['genre'] != null && item['genre'].toString().isNotEmpty) {
-        secondarySeeds.add(item['genre'].toString());
-      }
-      if (item['artist'] != null && item['artist'].toString().isNotEmpty) {
-        secondarySeeds.add(item['artist'].toString().split(',').first);
+    final List<String> queryPool = [];
+
+    if (preferredLangs.isNotEmpty) {
+      for (final lang in preferredLangs) {
+        final l = lang.toLowerCase();
+        queryPool.add(l);
+        queryPool.add('$l songs');
+        queryPool.add('$l hits');
       }
     }
-    secondarySeeds.addAll(preferredLangs);
-    secondarySeeds.addAll(preferredGenres);
 
-    final List<String> fallbackPool = [
-      'trending', 'punjabi', 'bollywood', 'arijit singh', 'chillout',
-      'lofi beats', 'romantic hits', 'top 50', 'taylor swift', 'pop hits',
-      'acoustic guitar', 'edm party', 'retro 80s', 'kpop', 'drake', 'shreya ghoshal'
-    ];
+    if (preferredGenres.isNotEmpty) {
+      for (final genre in preferredGenres) {
+        queryPool.add(genre.toLowerCase());
+      }
+    }
 
-    final List<String> queryPool = [...primarySeeds, ...secondarySeeds, ...fallbackPool];
+    if (preferredArtists.isNotEmpty) {
+      for (final artist in preferredArtists) {
+        queryPool.add(artist.toLowerCase());
+      }
+    }
+
+    if (activeGenre.isNotEmpty) {
+      queryPool.add(activeGenre.toLowerCase());
+    }
+    if (activeArtist.isNotEmpty) {
+      queryPool.add(activeArtist.toLowerCase());
+    }
+
+    if (queryPool.isEmpty) {
+      queryPool.addAll(['punjabi', 'bollywood', 'hindi songs', 'trending']);
+    }
+
     final List<String> selectedQueries = [];
-
     for (final q in queryPool) {
       if (selectedQueries.length >= 3) break;
       if (!selectedQueries.any((s) => s.toLowerCase() == q.toLowerCase())) {
@@ -146,14 +178,10 @@ class JamendoSource implements MusicSource {
       }
     }
 
-    if (selectedQueries.isEmpty) {
-      selectedQueries.addAll(['trending', 'bollywood', 'punjabi']);
-    }
-
     try {
       final futures = selectedQueries.map((query) async {
         try {
-          final page = math.Random().nextInt(5) + 1;
+          final page = math.Random().nextInt(4) + 1;
           final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
           if (data != null) return _parseTracks(data);
         } catch (_) {}
@@ -173,28 +201,16 @@ class JamendoSource implements MusicSource {
       }
 
       if (merged.isNotEmpty) {
-        return RecommendationEngine.instance.rankRecommendations(
-          merged.values.toList(),
-        );
+        final filtered = _filterByPreferredLanguages(merged.values.toList(), preferredLangs);
+        final candidates = filtered.isNotEmpty ? filtered : merged.values.toList();
+        final resolved = await _resolveAudioUrls(candidates);
+        return RecommendationEngine.instance.rankRecommendations(resolved);
       }
     } catch (e) {
       print('Error fetching dynamic recommendations: $e');
     }
 
-    try {
-      final fallbackQuery = (List.from(fallbackPool)..shuffle()).first;
-      final page = math.Random().nextInt(5) + 1;
-      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(fallbackQuery)}&page=$page');
-      if (data != null) {
-        final tracks = _parseTracks(data);
-        if (tracks.isNotEmpty) {
-          return RecommendationEngine.instance.rankRecommendations(tracks);
-        }
-      }
-    } catch (_) {}
-
-    final fallback = List<Track>.from(Track.mockTracks)..shuffle();
-    return RecommendationEngine.instance.rankRecommendations(fallback);
+    return _getMockFallback();
   }
 
   Future<List<Track>> getContextualRecommendations(Track currentTrack) async {
@@ -236,15 +252,68 @@ class JamendoSource implements MusicSource {
         }
       }
 
+
       if (merged.isNotEmpty) {
+        final resolved = await _resolveAudioUrls(merged.values.toList());
         return RecommendationEngine.instance.rankRecommendations(
-          merged.values.toList(),
+          resolved,
           currentTrack: currentTrack,
         );
       }
     } catch (_) {}
 
     return getDynamicRecommendations();
+  }
+
+  // ── Audio URL Resolution ─────────────────────────────────────
+
+  /// Resolves working audio URLs for tracks by fetching from the audio resolver mirror.
+  /// The search APIs return accurate metadata but broken downloadUrl tokens.
+  /// saavn-api.vercel.app/song/[id] returns working CDN stream URLs.
+  Future<List<Track>> _resolveAudioUrls(List<Track> tracks) async {
+    final List<Track> resolved = [];
+    // Process in parallel batches of 5 for speed
+    final batches = <List<Track>>[];
+    for (var i = 0; i < tracks.length; i += 5) {
+      batches.add(tracks.sublist(i, i + 5 > tracks.length ? tracks.length : i + 5));
+    }
+
+    for (final batch in batches) {
+      final futures = batch.map((track) async {
+        try {
+          final response = await _dio.get(
+            '$_audioResolverUrl/song/${track.id}',
+            options: Options(
+              receiveTimeout: const Duration(seconds: 6),
+              sendTimeout: const Duration(seconds: 4),
+            ),
+          );
+          if (response.statusCode == 200 && response.data != null) {
+            final data = response.data;
+            if (data is Map && data['url'] != null) {
+              final workingUrl = data['url'].toString();
+              if (workingUrl.startsWith('http') && !workingUrl.contains('jiosaavn.com')) {
+                return Track(
+                  id: track.id,
+                  title: track.title,
+                  artist: track.artist,
+                  album: track.album,
+                  duration: track.duration,
+                  artworkUrl: track.artworkUrl,
+                  audioUrl: workingUrl,
+                  genre: track.genre,
+                );
+              }
+            }
+          }
+        } catch (_) {}
+        return track; // fallback to original
+      }).toList();
+
+      resolved.addAll(await Future.wait(futures));
+    }
+
+    return resolved;
   }
 
   // ── Parsers & Helpers ────────────────────────────────────────

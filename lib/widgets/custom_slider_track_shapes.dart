@@ -228,10 +228,94 @@ class NeonSliderTrackShape extends RoundedRectSliderTrackShape {
   }
 }
 
+// ── 4. Android 16 Stock Squiggly Wave Track Shape ─────────────
+
+class Android16SquigglySliderTrackShape extends RoundedRectSliderTrackShape {
+  final double waveAmplitude;
+  final double waveFrequency;
+
+  Android16SquigglySliderTrackShape({
+    this.waveAmplitude = 3.5,
+    this.waveFrequency = 0.07,
+  });
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+    double additionalActiveTrackHeight = 0.0,
+  }) {
+    final Canvas canvas = context.canvas;
+    final Rect trackRect = getPreferredRect(
+      parentBox: parentBox,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+      offset: offset,
+    );
+
+    final Paint activePaint = Paint()
+      ..color = sliderTheme.activeTrackColor ?? Colors.amber
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round;
+
+    final Paint inactivePaint = Paint()
+      ..color = (sliderTheme.inactiveTrackColor ?? Colors.grey).withValues(alpha: 0.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+
+    // 1. Inactive Track: Sleek straight line from pointer to right end
+    if (thumbCenter.dx < trackRect.right) {
+      canvas.drawLine(
+        Offset(thumbCenter.dx, trackRect.top),
+        Offset(trackRect.right, trackRect.top),
+        inactivePaint,
+      );
+    }
+
+    // 2. Active Track: Android 16 Squiggly Sine Wave leading up to pointer
+    if (thumbCenter.dx > trackRect.left) {
+      final Path activePath = Path();
+      bool isFirst = true;
+
+      final double phase = (thumbCenter.dx - trackRect.left) * 0.15;
+
+      for (double x = trackRect.left; x <= thumbCenter.dx; x += 1.5) {
+        final double startFade = math.min((x - trackRect.left) / 16.0, 1.0);
+        final double endFade = math.min((thumbCenter.dx - x) / 10.0, 1.0);
+        final double currentAmp = waveAmplitude * startFade * endFade;
+        final double y = trackRect.top + currentAmp * math.sin((x - trackRect.left) * waveFrequency - phase);
+
+        if (isFirst) {
+          activePath.moveTo(x, y);
+          isFirst = false;
+        } else {
+          activePath.lineTo(x, y);
+        }
+      }
+
+      canvas.drawPath(activePath, activePaint);
+    }
+  }
+}
+
 // ── Helper to resolve track shape based on style name ────────
 
 SliderTrackShape resolveSliderTrackShape(String style) {
   switch (style.toLowerCase()) {
+    case 'android16':
+    case 'android_16':
+      return Android16SquigglySliderTrackShape();
     case 'snake':
       return SnakeSliderTrackShape();
     case 'zigzag':

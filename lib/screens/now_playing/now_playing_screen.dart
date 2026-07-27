@@ -35,6 +35,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   bool _isSummaryExpanded = true;
   String? _lastSummaryTrackId;
 
+  // Karaoke lyrics state
+  final ScrollController _lyricsScrollController = ScrollController();
+  int _activeLyricIndex = -1;
+  int? _tappedLyricIndex;
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +66,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   void dispose() {
     _spinController.dispose();
     _decelController.dispose();
+    _lyricsScrollController.dispose();
     super.dispose();
   }
 
@@ -655,6 +661,17 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   Widget _buildSummaryContent(SongSummary summary, bool isDark, Color accentColor) {
     final textColor = isDark ? Colors.white : Colors.black87;
     final subtleColor = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6);
+    final state = ref.watch(playbackProvider);
+
+    // Calculate active lyric index based on playback progress
+    if (summary.lineByLineExplanations.isNotEmpty) {
+      final lineCount = summary.lineByLineExplanations.length;
+      final newIndex = (state.progress * lineCount).floor().clamp(0, lineCount - 1);
+      if (newIndex != _activeLyricIndex) {
+        _activeLyricIndex = newIndex;
+        _scrollToActiveLyric();
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -663,96 +680,218 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         children: [
           const Divider(height: 1),
           const SizedBox(height: 12),
-          if (summary.theme.isNotEmpty) ...[
-            _buildSummaryRow('🎵', 'Theme', summary.theme, textColor, subtleColor),
-            const SizedBox(height: 10),
-          ],
-          if (summary.emotions.isNotEmpty) ...[
-            _buildSummaryRow('💫', 'Emotions', summary.emotions, textColor, subtleColor),
-            const SizedBox(height: 10),
-          ],
-          if (summary.message.isNotEmpty) ...[
-            _buildSummaryRow('📝', 'Message', summary.message, textColor, subtleColor),
-            const SizedBox(height: 10),
-          ],
-          if (summary.culturalNotes.isNotEmpty) ...[
-            _buildSummaryRow('🌍', 'Cultural Notes', summary.culturalNotes, textColor, subtleColor),
-            const SizedBox(height: 12),
-          ],
+          // Theme & info pills row
+          if (summary.theme.isNotEmpty || summary.emotions.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (summary.theme.isNotEmpty)
+                  _buildInfoPill('🎵', summary.theme, isDark, accentColor),
+                if (summary.emotions.isNotEmpty)
+                  _buildInfoPill('💫', summary.emotions, isDark, accentColor),
+              ],
+            ),
+          if (summary.theme.isNotEmpty || summary.emotions.isNotEmpty)
+            const SizedBox(height: 16),
+
+          // Karaoke Lyrics View
           if (summary.lineByLineExplanations.isNotEmpty) ...[
-            const Divider(height: 1),
-            const SizedBox(height: 12),
+            // Header
             Row(
               children: [
-                Icon(Icons.subtitles_rounded, size: 16, color: accentColor),
-                const SizedBox(width: 6),
+                Icon(Icons.lyrics_rounded, size: 18, color: accentColor),
+                const SizedBox(width: 8),
                 Text(
-                  'LINE-BY-LINE LYRIC EXPLANATION',
+                  'LYRICS & MEANING',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2,
+                    letterSpacing: 1.5,
                     color: accentColor,
+                  ),
+                ),
+                const Spacer(),
+                // Spotify-style "Synced" badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.sync_rounded, size: 10, color: accentColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Synced',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: accentColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            ...summary.lineByLineExplanations.map((item) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+            const SizedBox(height: 16),
+
+            // Karaoke lyrics list
+            ...List.generate(summary.lineByLineExplanations.length, (index) {
+              final item = summary.lineByLineExplanations[index];
+              final isActive = index == _activeLyricIndex;
+              final isPast = index < _activeLyricIndex;
+              final isTapped = _tappedLyricIndex == index;
+              final showMeaning = isActive || isTapped;
+
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _tappedLyricIndex = _tappedLyricIndex == index ? null : index;
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeOutCubic,
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isActive ? 16 : 12,
+                    vertical: isActive ? 14 : 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? accentColor.withValues(alpha: 0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    border: isActive
+                        ? Border.all(color: accentColor.withValues(alpha: 0.25), width: 1)
+                        : null,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Lyric line
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 350),
+                        style: TextStyle(
+                          fontSize: isActive ? 17 : 14,
+                          fontWeight: isActive ? FontWeight.w800 : FontWeight.w500,
+                          color: isActive
+                              ? accentColor
+                              : isPast
+                                  ? textColor.withValues(alpha: 0.35)
+                                  : textColor.withValues(alpha: 0.55),
+                          height: 1.4,
+                          fontFamily: 'Outfit',
+                        ),
+                        child: Text(item.line),
+                      ),
+
+                      // Meaning (shown for active line or tapped line)
+                      AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 300),
+                        crossFadeState: showMeaning
+                            ? CrossFadeState.showFirst
+                            : CrossFadeState.showSecond,
+                        firstChild: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border(
+                                left: BorderSide(
+                                  color: accentColor.withValues(alpha: 0.5),
+                                  width: 2.5,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('💡 ', style: TextStyle(fontSize: 11, color: subtleColor)),
+                                Expanded(
+                                  child: Text(
+                                    item.explanation,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: textColor.withValues(alpha: 0.8),
+                                      height: 1.4,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        secondChild: const SizedBox.shrink(),
+                      ),
+                    ],
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Text('🎤 ', style: TextStyle(fontSize: 12)),
-                        Expanded(
-                          child: Text(
-                            item.line,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              fontStyle: FontStyle.italic,
-                              color: textColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('💡 ', style: TextStyle(fontSize: 12)),
-                        Expanded(
-                          child: Text(
-                            item.explanation,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: textColor.withValues(alpha: 0.85),
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            )),
+              );
+            }),
+          ] else ...[
+            // Fallback: show message and cultural notes
+            if (summary.message.isNotEmpty) ...[
+              _buildSummaryRow('📝', 'Message', summary.message, textColor, subtleColor),
+              const SizedBox(height: 10),
+            ],
+            if (summary.culturalNotes.isNotEmpty) ...[
+              _buildSummaryRow('🌍', 'Cultural Notes', summary.culturalNotes, textColor, subtleColor),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildInfoPill(String emoji, String text, bool isDark, Color accentColor) {
+    final displayText = text.length > 50 ? '${text.substring(0, 50)}...' : text;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              displayText,
+              style: TextStyle(
+                fontSize: 11,
+                color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.7),
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _scrollToActiveLyric() {
+    if (!_lyricsScrollController.hasClients) return;
+    // Each lyric item is approximately 70px tall (with padding)
+    // We don't directly control the parent scroll, but the summary section
+    // is inside the main ListView. We'll use post-frame callback for smooth UX.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_lyricsScrollController.hasClients) return;
+      // Not applicable for inner scroll - the lyrics are part of the outer ListView
+    });
   }
 
   Widget _buildSummaryRow(String emoji, String label, String content, Color textColor, Color subtleColor) {

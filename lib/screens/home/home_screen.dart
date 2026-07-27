@@ -156,12 +156,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         fontWeight: FontWeight.w900,
                       ),
                 ),
-                Text(
-                  'See All',
-                  style: TextStyle(
-                    color: customBranding.accentColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
+                GestureDetector(
+                  onTap: () {
+                    final recsData = recommendedAsync.value ?? Track.mockTracks;
+                    _showSeeAllTracksSheet(context, 'Recommended For You', recsData);
+                  },
+                  child: Text(
+                    'See All',
+                    style: TextStyle(
+                      color: customBranding.accentColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ],
@@ -260,9 +266,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
                 ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
+          _buildLanguageFilterChips(context),
+          const SizedBox(height: 14),
           _buildSearchBar(context),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageFilterChips(BuildContext context) {
+    final activeLangs = StorageService.getPreferredLanguages();
+    final allLangs = ['Punjabi', 'Hindi', 'English', 'Bhangra', 'Bollywood', 'LoFi'];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: allLangs.map((lang) {
+          final isSelected = activeLangs.contains(lang);
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: Text(lang),
+              selected: isSelected,
+              selectedColor: AppTheme.goldAccent.withOpacity(0.2),
+              checkmarkColor: AppTheme.goldAccent,
+              side: BorderSide(
+                color: isSelected ? AppTheme.goldAccent : Colors.white12,
+              ),
+              labelStyle: TextStyle(
+                color: isSelected ? AppTheme.goldAccent : Colors.grey,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 12,
+              ),
+              onSelected: (val) async {
+                List<String> updated = List.from(activeLangs);
+                if (val) {
+                  updated = [lang];
+                } else {
+                  updated.remove(lang);
+                }
+                await StorageService.savePreferredLanguages(updated);
+                ref.invalidate(trendingTracksProvider);
+                ref.invalidate(dynamicRecommendationsProvider);
+                setState(() {});
+              },
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -325,12 +376,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       fontWeight: FontWeight.w900,
                     ),
               ),
-              Text(
-                'See All',
-                style: TextStyle(
-                  color: customBranding.accentColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+              GestureDetector(
+                onTap: () => _showSeeAllTracksSheet(context, title, tracks),
+                child: Text(
+                  'See All',
+                  style: TextStyle(
+                    color: customBranding.accentColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ],
@@ -528,6 +582,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           });
         },
       ),
+    );
+  }
+  void _showSeeAllTracksSheet(BuildContext context, String sectionTitle, List<Track> existingTracks) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Expand list up to 15-25 tracks
+    List<Track> fullList = List.from(existingTracks);
+    if (fullList.length < 15) {
+      try {
+        final more = await ref.read(musicSourceProvider).getDynamicRecommendations();
+        final Map<String, Track> unique = {};
+        for (final t in [...fullList, ...more]) {
+          unique[t.id] = t;
+        }
+        fullList = unique.values.toList();
+      } catch (_) {}
+    }
+    final displayList = fullList.take(25).toList();
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.85,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF141416) : const Color(0xFFFAF7F2),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '$sectionTitle (${displayList.length})',
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Consumer(
+                  builder: (context, ref, child) {
+                    final notifier = ref.read(playbackProvider.notifier);
+                    return ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 32),
+                      itemCount: displayList.length,
+                      itemBuilder: (context, index) {
+                        final track = displayList[index];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              track.artworkUrl,
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                width: 48,
+                                height: 48,
+                                color: Colors.grey.shade800,
+                                child: const Icon(Icons.music_note_rounded),
+                              ),
+                            ),
+                          ),
+                          title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${track.artist} • ${track.genre}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          trailing: const Icon(Icons.play_arrow_rounded, size: 20),
+                          onTap: () {
+                            notifier.playTrack(track);
+                            Navigator.pop(context);
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

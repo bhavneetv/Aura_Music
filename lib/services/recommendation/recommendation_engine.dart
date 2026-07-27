@@ -115,12 +115,22 @@ class RecommendationEngine {
       score -= 500.0;
     }
 
-    // ── 2. LANGUAGE/GENRE CONTINUITY (HIGHEST PRIORITY) ──────────
+    // ── 2. PREFERRED LANGUAGE & GENRE CONTINUITY (HIGHEST PRIORITY) ──────────
+    final preferredLangs = StorageService.getPreferredLanguages();
+    if (preferredLangs.isNotEmpty) {
+      final matchesPreferred = preferredLangs.any((lang) => _genreMatches(candidateGenre, lang.toUpperCase()));
+      if (matchesPreferred) {
+        score += 600.0; // Enforce preferred language
+      } else {
+        score -= 800.0; // Heavily penalize non-preferred languages
+      }
+    }
+
     if (targetGenre.isNotEmpty) {
       if (_genreMatches(candidateGenre, targetGenre)) {
-        score += 300.0; // Strict same-language/genre continuity
+        score += 300.0;
       } else {
-        score -= 350.0; // Heavily penalize cross-language/genre
+        score -= 350.0;
       }
     }
 

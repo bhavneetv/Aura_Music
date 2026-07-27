@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../themes/app_theme.dart';
 
 class VinylRefreshIndicator extends StatefulWidget {
@@ -58,6 +59,7 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
   }
 
   void _startLoading() {
+    HapticFeedback.vibrate(); // 2nd Haptic vibration when refresh begins
     setState(() {
       _isRefreshing = true;
     });
@@ -81,26 +83,39 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
     });
   }
 
+  void _checkHapticThreshold(bool newCanRefresh) {
+    if (newCanRefresh && !_canRefresh) {
+      HapticFeedback.mediumImpact(); // 1st Haptic vibration when pull threshold is reached
+    }
+  }
+
   bool _handleScrollNotification(ScrollNotification notification) {
     if (_isRefreshing) return false;
 
     if (notification is OverscrollNotification) {
       if (notification.overscroll < 0) {
+        final newOffset = _dragOffset + (-notification.overscroll * 0.5);
+        final newCanRefresh = newOffset >= _refreshThreshold;
+        _checkHapticThreshold(newCanRefresh);
         setState(() {
-          _dragOffset += -notification.overscroll * 0.5;
-          _canRefresh = _dragOffset >= _refreshThreshold;
+          _dragOffset = newOffset;
+          _canRefresh = newCanRefresh;
         });
       }
     } else if (notification is ScrollUpdateNotification) {
       final metrics = notification.metrics;
       if (metrics.pixels < 0) {
+        final newOffset = -metrics.pixels;
+        final newCanRefresh = newOffset >= _refreshThreshold;
+        _checkHapticThreshold(newCanRefresh);
         setState(() {
-          _dragOffset = -metrics.pixels;
-          _canRefresh = _dragOffset >= _refreshThreshold;
+          _dragOffset = newOffset;
+          _canRefresh = newCanRefresh;
         });
       } else if (_dragOffset != 0.0 && metrics.pixels >= 0) {
         setState(() {
           _dragOffset = 0.0;
+          _canRefresh = false;
         });
       }
     } else if (notification is ScrollEndNotification) {

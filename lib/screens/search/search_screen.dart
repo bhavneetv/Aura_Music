@@ -17,10 +17,10 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounceTimer;
   List<Track> _filteredTracks = [];
   List<String> _recentSearches = [];
-  final List<String> _trendingSearches = ['Synthwave', 'Ambient', 'Acoustic', 'Jazz', 'Lo-Fi'];
   bool _isSearching = false;
 
   @override
@@ -28,7 +28,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _searchController.addListener(_onSearchChanged);
-    _filteredTracks = Track.mockTracks;
+    _searchFocusNode.addListener(() {
+      setState(() {});
+    });
     _recentSearches = StorageService.getRecentSearches();
   }
 
@@ -36,6 +38,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
@@ -187,6 +190,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                   ),
                   child: TextField(
                     controller: _searchController,
+                    focusNode: _searchFocusNode,
                     style: const TextStyle(fontSize: 14),
                     onSubmitted: (query) async {
                       await StorageService.addSearchQuery(query);
@@ -260,14 +264,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
 
   Widget _buildSongsTab() {
     if (_searchController.text.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.only(bottom: 96, top: 16),
-        children: [
-          _buildChipSection('Recent Searches', _recentSearches, true),
-          const SizedBox(height: 24),
-          _buildChipSection('Trending Now', _trendingSearches, false),
-        ],
-      );
+      if (_searchFocusNode.hasFocus) {
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 96, top: 16),
+          children: [
+            _buildChipSection('Recent Searches', _recentSearches, true),
+          ],
+        );
+      }
+      return _buildHistoryTracksList();
     }
 
     if (_isSearching) {
@@ -277,7 +282,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
           children: [
             CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.goldAccent)),
             SizedBox(height: 16),
-            Text('Searching live Jamendo catalog...', style: TextStyle(color: Colors.grey)),
+            Text('Searching live catalog...', style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
@@ -363,7 +368,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                   overflow: TextOverflow.ellipsis,
                 ),
                 trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
-                onTap: () {
+                onTap: () async {
+                  await StorageService.addSearchedAndPlayedTrack(track);
                   notifier.playTrack(track);
                 },
               ),
@@ -435,6 +441,100 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildHistoryTracksList() {
+    final rawHistory = StorageService.getSearchedAndPlayedTracks();
+    final List<Track> historyTracks = [];
+    for (final item in rawHistory) {
+      if (item['track_id'] != null) {
+        historyTracks.add(
+          Track(
+            id: item['track_id'].toString(),
+            title: item['title']?.toString() ?? 'Track',
+            artist: item['artist']?.toString() ?? 'Unknown Artist',
+            album: item['album']?.toString() ?? 'Single',
+            duration: item['duration']?.toString() ?? '3:30',
+            artworkUrl: item['artworkUrl']?.toString() ?? '',
+            audioUrl: item['audioUrl']?.toString() ?? '',
+            genre: item['genre']?.toString() ?? '',
+          ),
+        );
+      }
+    }
+
+    if (historyTracks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.search_rounded, size: 64, color: Colors.grey.withOpacity(0.4)),
+            const SizedBox(height: 16),
+            const Text(
+              'Search for your favorite songs & artists',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Consumer(
+      builder: (context, ref, child) {
+        final notifier = ref.read(playbackProvider.notifier);
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 96, top: 12),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Text(
+                'Played Songs',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontFamily: 'Outfit',
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            ),
+            ...historyTracks.map((track) {
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    track.artworkUrl,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      width: 48,
+                      height: 48,
+                      color: Colors.grey.shade800,
+                      child: const Icon(Icons.music_note_rounded),
+                    ),
+                  ),
+                ),
+                title: Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '${track.artist} • ${track.genre}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.play_arrow_rounded, size: 20),
+                onTap: () {
+                  notifier.playTrack(track);
+                },
+              );
+            }),
+          ],
+        );
+      },
     );
   }
 
