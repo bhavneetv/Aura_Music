@@ -200,21 +200,26 @@ MEANING: [Narrative of what the author tells us in this line]''';
 
     for (final rawLine in text.split('\n')) {
       final trimmed = rawLine.trim();
-      if (trimmed.startsWith('THEME:')) {
-        theme = trimmed.replaceFirst('THEME:', '').trim();
-      } else if (trimmed.startsWith('EMOTIONS:')) {
-        emotions = trimmed.replaceFirst('EMOTIONS:', '').trim();
-      } else if (trimmed.startsWith('MESSAGE:')) {
-        message = trimmed.replaceFirst('MESSAGE:', '').trim();
-      } else if (trimmed.startsWith('CULTURAL:')) {
-        cultural = trimmed.replaceFirst('CULTURAL:', '').trim();
+      final upper = trimmed.toUpperCase();
+
+      if (upper.contains('THEME:')) {
+        theme = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+      } else if (upper.contains('EMOTIONS:')) {
+        emotions = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+      } else if (upper.contains('MESSAGE:')) {
+        message = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+      } else if (upper.contains('CULTURAL:')) {
+        cultural = trimmed.substring(trimmed.indexOf(':') + 1).trim();
         if (cultural.toLowerCase() == 'none') cultural = '';
-      } else if (trimmed.startsWith('LINE:')) {
-        currentLine = trimmed.replaceFirst('LINE:', '').trim();
-      } else if (trimmed.startsWith('MEANING:') && currentLine.isNotEmpty) {
-        final meaning = trimmed.replaceFirst('MEANING:', '').trim();
-        lines.add(LyricLineExplanation(line: currentLine, explanation: meaning));
-        currentLine = '';
+      } else if (upper.contains('LINE:') || upper.startsWith('LINE ')) {
+        currentLine = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+        currentLine = currentLine.replaceAll(RegExp(r'^[\s\x22\x27]+|[\s\x22\x27]+$'), '');
+      } else if (upper.contains('MEANING:') || upper.contains('EXPLANATION:')) {
+        final meaning = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+        if (currentLine.isNotEmpty && meaning.isNotEmpty) {
+          lines.add(LyricLineExplanation(line: currentLine, explanation: meaning));
+          currentLine = '';
+        }
       }
     }
 
@@ -247,59 +252,50 @@ MEANING: [Narrative of what the author tells us in this line]''';
     if (album.isNotEmpty && album != 'Single') {
       theme += ' from the album "$album"';
     }
-    theme += '. The track captures the essence of $genre artistry with memorable melodic flow.';
+    theme += '. The track captures the essence of $genre musical storytelling with emotive vocal delivery.';
 
-    String emotions = 'Melody, Passion, Rhythm';
-    String message = 'Experience the emotional depth and rhythmic beat of this track.';
+    String emotions = 'Melody, Emotion, Passion, Rhythm';
+    String message = 'Reflects on the personal storytelling and feelings embedded within "$title".';
     String cultural = '';
-
-    List<LyricLineExplanation> lines = [];
 
     if (genreUpper.contains('PUNJABI') || genreUpper.contains('BHANGRA')) {
       theme = '"$title" brings vibrant Punjabi folk energy and modern beat production by $artistClean.';
-      emotions = 'High Energy, Celebration, Cultural Pride, Passion';
-      message = 'Embrace life to the fullest with upbeat rhythms and festive Punjabi expression.';
+      emotions = 'High Energy, Celebration, Cultural Expression, Passion';
+      message = 'Embrace life with upbeat rhythms and festive expression in "$title".';
       cultural = 'Features traditional Punjabi folk phrasing combined with urban basslines.';
-      lines = [
-        LyricLineExplanation(line: 'Ho ni main nakhre tere di kadr karaan...', explanation: 'Here the artist tells us that he deeply cherishes someone\'s graceful presence and takes pride in every moment shared with them.'),
-        LyricLineExplanation(line: 'Wakhra swag ni tera sab ton alag...', explanation: 'In this line, the singer reveals his admiration — telling us that this person\'s unique style and confidence make them stand out from everyone else.'),
-        LyricLineExplanation(line: 'Dil vich vasgi tu sohniye ni...', explanation: 'Now the author conveys that this person has permanently settled in his heart, becoming an inseparable source of joy and inspiration.'),
-        LyricLineExplanation(line: 'Dhol di daag te gidha paavan...', explanation: 'The singer expresses the infectious energy of celebration — telling us about dancing with pure abandon to the festive beat of the dhol drum.'),
-      ];
     } else if (genreUpper.contains('HINDI') || genreUpper.contains('BOLLYWOOD')) {
-      theme = '"$title" delivers a soulful Bollywood melody with emotive vocal performance by $artistClean.';
+      theme = '"$title" delivers a soulful melody with emotive vocal performance by $artistClean.';
       emotions = 'Love, Nostalgia, Emotional Depth, Romance';
-      message = 'Reflects on deep personal relationships and poignant romantic storytelling.';
+      message = 'Reflects on deep personal relationships and poignant romantic storytelling in "$title".';
       cultural = 'Employs classic Indian cinematic arrangements with modern orchestral production.';
-      lines = [
-        LyricLineExplanation(line: 'Tum hi ho, ab tum hi ho, zindagi ab tum hi ho...', explanation: 'Here the author tells us that his entire world now revolves around one person — they are his universe, his peace, and the very purpose of his existence.'),
-        LyricLineExplanation(line: 'Chain bhi, mera dard bhi, meri aashiqui ab tum hi ho...', explanation: 'In this line, the singer reveals that in moments of both joy and pain, his devotion and solace remain anchored entirely in this one person.'),
-        LyricLineExplanation(line: 'Tera mera rishta hai kaisa, ek pal door gawaara nahi...', explanation: 'Now the poet conveys the depth of their bond — telling us that even a single moment of separation feels unbearable and impossible to endure.'),
-        LyricLineExplanation(line: 'Har khata ki hoti hai koi na koi sazaa...', explanation: 'The artist reflects on love\'s sacrifices, telling us that every choice in love carries a consequence that shapes our emotional destiny.'),
-      ];
     } else if (genreUpper.contains('SAD') || genreUpper.contains('HEARTBREAK')) {
-      theme = '"$title" is a tender ballad exploring themes of heartbreak, missing someone, and emotional healing.';
+      theme = '"$title" is a tender ballad by $artistClean exploring themes of heartbreak and emotional healing.';
       emotions = 'Heartbreak, Longing, Melancholy, Solitude';
-      message = 'Finding solace and healing through heartfelt vulnerability.';
-      lines = [
-        LyricLineExplanation(line: 'Kaash yeh pal yahin tham jaaye...', explanation: 'Here the author tells us about a desperate wish — wanting time itself to freeze so they never have to face the cold reality of separation.'),
-        LyricLineExplanation(line: 'Chhod gaye jo raaste akele...', explanation: 'In this line, the singer reveals the loneliness of being left behind — narrating how they now walk a solitary path after someone precious departed.'),
-        LyricLineExplanation(line: 'Dil ko teri hi tamanna rehti hai...', explanation: 'The poet conveys an unending yearning, telling us that despite all the distance, the heart still craves the warmth and presence of the one who left.'),
-      ];
+      message = 'Finding solace and healing through heartfelt vulnerability in "$title".';
     } else if (genreUpper.contains('LOFI') || genreUpper.contains('LO-FI') || genreUpper.contains('CHILL')) {
-      theme = '"$title" offers relaxing lo-fi atmospheric textures and ambient study beats by $artistClean.';
+      theme = '"$title" offers relaxing lo-fi atmospheric textures and ambient beats by $artistClean.';
       emotions = 'Calm, Tranquility, Focus, Relaxation';
-      message = 'Unwind, focus, and let peace take over your surroundings.';
-      lines = [
-        LyricLineExplanation(line: 'Soft rain falling on the windowpane...', explanation: 'Here the artist sets the scene, telling us about a peaceful moment where gentle rain creates a meditative atmosphere for quiet reflection.'),
-        LyricLineExplanation(line: 'Late night thoughts drifting away...', explanation: 'In this passage, the author conveys a sense of release — the day\'s stresses dissolve as soothing sounds guide the mind towards rest and tranquility.'),
-      ];
-    } else {
-      lines = [
-        LyricLineExplanation(line: 'Verse 1: $title rhythm starts to build...', explanation: 'Here the artist begins their narrative, telling us about the mood and atmosphere they\'re creating as the opening rhythm sets the stage.'),
-        LyricLineExplanation(line: 'Chorus: $artist melodic harmony takes center stage...', explanation: 'In the chorus, the singer conveys the emotional core of the song — this is where the central themes of love, life, and human connection resonate most powerfully.'),
-      ];
+      message = 'Unwind, focus, and let peace take over your surroundings with "$title".';
     }
+
+    final List<LyricLineExplanation> lines = [
+      LyricLineExplanation(
+        line: 'Opening verse of "$title"',
+        explanation: 'Here $artistClean sets the scene, introducing the central mood and emotional atmosphere of the song.',
+      ),
+      LyricLineExplanation(
+        line: 'Melodic progression in "$title"',
+        explanation: 'In this section, the singer conveys deep feelings of $emotions, building towards the core story.',
+      ),
+      LyricLineExplanation(
+        line: 'Chorus / Core Refrain',
+        explanation: 'Now the author expresses the main message of the track, telling us how love, life, and personal passion intertwine.',
+      ),
+      LyricLineExplanation(
+        line: 'Concluding movement of "$title"',
+        explanation: 'The artist resolves the musical journey, leaving the listener with a resonant message of emotional connection.',
+      ),
+    ];
 
     return SongSummary(
       theme: theme,

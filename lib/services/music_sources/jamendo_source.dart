@@ -11,6 +11,7 @@ class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
   
   static const List<String> _baseUrls = [
+    'https://saavn-api.vercel.app',
     'https://jiosaavn-api-beta.vercel.app',
     'https://saavn.sumit.co/api',
   ];
@@ -249,28 +250,38 @@ class JamendoSource implements MusicSource {
   // ── Parsers & Helpers ────────────────────────────────────────
 
   List<Track> _parseTracks(dynamic data) {
-    Map<String, dynamic> parsed;
+    dynamic resultsRaw;
     if (data is String) {
       try {
-        parsed = jsonDecode(data) as Map<String, dynamic>;
+        final decoded = jsonDecode(data);
+        if (decoded is List) {
+          resultsRaw = decoded;
+        } else if (decoded is Map<String, dynamic>) {
+          if (decoded['data'] != null) {
+            if (decoded['data'] is Map && decoded['data']['results'] is List) {
+              resultsRaw = decoded['data']['results'];
+            } else if (decoded['data'] is List) {
+              resultsRaw = decoded['data'];
+            }
+          } else if (decoded['results'] is List) {
+            resultsRaw = decoded['results'];
+          }
+        }
       } catch (_) {
         return [];
       }
+    } else if (data is List) {
+      resultsRaw = data;
     } else if (data is Map<String, dynamic>) {
-      parsed = data;
-    } else {
-      return [];
-    }
-
-    dynamic resultsRaw;
-    if (parsed['data'] != null) {
-      if (parsed['data'] is Map && parsed['data']['results'] is List) {
-        resultsRaw = parsed['data']['results'];
-      } else if (parsed['data'] is List) {
-        resultsRaw = parsed['data'];
+      if (data['data'] != null) {
+        if (data['data'] is Map && data['data']['results'] is List) {
+          resultsRaw = data['data']['results'];
+        } else if (data['data'] is List) {
+          resultsRaw = data['data'];
+        }
+      } else if (data['results'] is List) {
+        resultsRaw = data['results'];
       }
-    } else if (parsed['results'] is List) {
-      resultsRaw = parsed['results'];
     }
 
     final results = resultsRaw as List? ?? [];
@@ -324,22 +335,26 @@ class JamendoSource implements MusicSource {
         }
 
         String audioUrl = '';
-        if (item['downloadUrl'] != null && item['downloadUrl'] is List) {
-          final downloads = item['downloadUrl'] as List;
-          for (final d in downloads.reversed) {
-            if (d is Map) {
-              final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-              if (link.isNotEmpty) {
-                audioUrl = link;
+        if (item['url'] != null && item['url'].toString().startsWith('http') && !item['url'].toString().contains('jiosaavn.com')) {
+          audioUrl = item['url'].toString();
+        } else if (item['downloadUrl'] != null) {
+          if (item['downloadUrl'] is List) {
+            final downloads = item['downloadUrl'] as List;
+            for (final d in downloads.reversed) {
+              if (d is Map) {
+                final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+                if (link.isNotEmpty) {
+                  audioUrl = link;
+                  break;
+                }
+              } else if (d is String && d.isNotEmpty) {
+                audioUrl = d;
                 break;
               }
-            } else if (d is String && d.isNotEmpty) {
-              audioUrl = d;
-              break;
             }
+          } else if (item['downloadUrl'] is String) {
+            audioUrl = item['downloadUrl'].toString();
           }
-        } else if (item['downloadUrl'] != null && item['downloadUrl'] is String) {
-          audioUrl = item['downloadUrl'].toString();
         }
 
         if (audioUrl.startsWith('https:/') && !audioUrl.startsWith('https://')) {
