@@ -353,6 +353,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
     if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
+    }
+
     if (audioUrl.isNotEmpty) {
       try {
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
