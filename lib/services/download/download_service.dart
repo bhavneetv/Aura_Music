@@ -41,33 +41,21 @@ class DownloadService extends ChangeNotifier {
   Map<String, DownloadTask> get tasks => _tasks;
 
   List<Track> getDownloadedTracksList() {
-    final Map<String, String> mapped = StorageService.getDownloadedTracks();
-    final List<Track> tracks = [];
-    
-    // Scan standard mock tracks first
-    for (final track in Track.mockTracks) {
-      if (mapped.containsKey(track.id)) {
-        tracks.add(track.copyWith(audioUrl: mapped[track.id]!));
-      }
-    }
-
-
-
-    return tracks;
+    return StorageService.getFullDownloadedTracks();
   }
 
   bool isDownloaded(String trackId) {
-    final mapped = StorageService.getDownloadedTracks();
-    if (!mapped.containsKey(trackId)) return false;
-    final file = File(mapped[trackId]!);
-    return file.existsSync();
+    final localPath = getLocalPath(trackId);
+    if (localPath == null) return false;
+    final file = File(localPath);
+    return file.existsSync() && file.lengthSync() > 0;
   }
 
   String? getLocalPath(String trackId) {
     final mapped = StorageService.getDownloadedTracks();
     if (!mapped.containsKey(trackId)) return null;
     final file = File(mapped[trackId]!);
-    if (file.existsSync()) {
+    if (file.existsSync() && file.lengthSync() > 0) {
       return file.path;
     }
     return null;
@@ -95,8 +83,8 @@ class DownloadService extends ChangeNotifier {
 
       // Download audio URL
       String url = track.audioUrl;
-      if (url.isEmpty) {
-        // Recover first
+      if (url.isEmpty || url.startsWith('file://')) {
+        // Recover stream first
         final res = await _dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
         final results = res.data['data']?['results'] as List?;
         if (results != null && results.isNotEmpty) {
@@ -121,9 +109,9 @@ class DownloadService extends ChangeNotifier {
         },
       );
 
-      // Register complete
+      // Register complete with full track metadata
       _tasks[track.id] = task.copyWith(status: 'completed', progress: 1.0);
-      await StorageService.registerDownload(track.id, localPath);
+      await StorageService.registerDownloadTrack(track, localPath);
       notifyListeners();
       
       // Remove from active task tracker after a delay

@@ -10,6 +10,7 @@ class StorageService {
   static const String _historyBox = 'history_box';
   static const String _downloadsBox = 'downloads_box';
   static const String _queueBox = 'queue_box';
+  static const String _affinityBox = 'affinity_box';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -22,6 +23,8 @@ class StorageService {
     await Hive.openBox(_historyBox);
     await Hive.openBox(_downloadsBox);
     await Hive.openBox(_queueBox);
+    await Hive.openBox(_affinityBox);
+    await Hive.openBox(_summaryBox);
   }
 
   // ── Settings ────────────────────────────────────────────────
@@ -238,9 +241,50 @@ class StorageService {
     final raw = box.get('downloaded_tracks');
     if (raw == null) return {};
     try {
-      return Map<String, String>.from(jsonDecode(raw.toString()) as Map);
+      final Map decoded = jsonDecode(raw.toString()) as Map;
+      final Map<String, String> result = {};
+      decoded.forEach((key, value) {
+        if (value is Map) {
+          result[key.toString()] = value['localPath']?.toString() ?? '';
+        } else {
+          result[key.toString()] = value.toString();
+        }
+      });
+      return result;
     } catch (_) {
       return {};
+    }
+  }
+
+  static List<Track> getFullDownloadedTracks() {
+    final box = Hive.box(_downloadsBox);
+    final raw = box.get('downloaded_tracks');
+    if (raw == null) return [];
+    try {
+      final Map decoded = jsonDecode(raw.toString()) as Map;
+      final List<Track> tracks = [];
+      decoded.forEach((key, val) {
+        if (val is Map) {
+          final localPath = val['localPath']?.toString() ?? '';
+          if (localPath.isNotEmpty) {
+            tracks.add(
+              Track(
+                id: val['id']?.toString() ?? key.toString(),
+                title: val['title']?.toString() ?? 'Downloaded Song',
+                artist: val['artist']?.toString() ?? 'Unknown Artist',
+                album: val['album']?.toString() ?? 'Offline',
+                duration: val['duration']?.toString() ?? '3:30',
+                artworkUrl: val['artworkUrl']?.toString() ?? '',
+                audioUrl: localPath,
+                genre: val['genre']?.toString() ?? 'OFFLINE',
+              ),
+            );
+          }
+        }
+      });
+      return tracks;
+    } catch (_) {
+      return [];
     }
   }
 
@@ -249,18 +293,39 @@ class StorageService {
     return downloads[trackId];
   }
 
-  static Future<void> registerDownload(String trackId, String localPath) async {
+  static Future<void> registerDownloadTrack(Track track, String localPath) async {
     final box = Hive.box(_downloadsBox);
-    final downloads = getDownloadedTracks();
-    downloads[trackId] = localPath;
+    final raw = box.get('downloaded_tracks');
+    Map<String, dynamic> downloads = {};
+    if (raw != null) {
+      try {
+        downloads = Map<String, dynamic>.from(jsonDecode(raw.toString()) as Map);
+      } catch (_) {}
+    }
+    downloads[track.id] = {
+      'id': track.id,
+      'title': track.title,
+      'artist': track.artist,
+      'album': track.album,
+      'duration': track.duration,
+      'artworkUrl': track.artworkUrl,
+      'genre': track.genre,
+      'localPath': localPath,
+      'downloadedAt': DateTime.now().toIso8601String(),
+    };
     await box.put('downloaded_tracks', jsonEncode(downloads));
   }
 
   static Future<void> deleteDownloadRecord(String trackId) async {
     final box = Hive.box(_downloadsBox);
-    final downloads = getDownloadedTracks();
-    downloads.remove(trackId);
-    await box.put('downloaded_tracks', jsonEncode(downloads));
+    final raw = box.get('downloaded_tracks');
+    if (raw != null) {
+      try {
+        final Map downloads = jsonDecode(raw.toString()) as Map;
+        downloads.remove(trackId);
+        await box.put('downloaded_tracks', jsonEncode(downloads));
+      } catch (_) {}
+    }
   }
 
   // ── Playback Queue Box ──────────────────────────────────────
@@ -299,5 +364,193 @@ class StorageService {
       'repeatMode': repeatMode,
     };
     await box.put('state', jsonEncode(state));
+  }
+
+  // ── Affinity Vectors & Session Persistence ─────────────────
+
+  static Map<String, double> getArtistAffinityMap() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('artist_affinity');
+    if (raw == null) return {};
+    try {
+      final decoded = jsonDecode(raw.toString()) as Map;
+      return decoded.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> updateArtistAffinity(String artist, double delta) async {
+    if (artist.isEmpty || artist == 'Unknown Artist') return;
+    final box = Hive.box(_affinityBox);
+    final map = getArtistAffinityMap();
+    final cleanArtist = artist.split(',').first.trim();
+    map[cleanArtist] = ((map[cleanArtist] ?? 0.0) + delta).clamp(0.0, 100.0);
+    await box.put('artist_affinity', jsonEncode(map));
+  }
+
+  static Map<String, double> getGenreAffinityMap() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('genre_affinity');
+    if (raw == null) return {};
+    try {
+      final decoded = jsonDecode(raw.toString()) as Map;
+      return decoded.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> updateGenreAffinity(String genre, double delta) async {
+    if (genre.isEmpty) return;
+    final box = Hive.box(_affinityBox);
+    final map = getGenreAffinityMap();
+    final cleanGenre = genre.trim().toUpperCase();
+    map[cleanGenre] = ((map[cleanGenre] ?? 0.0) + delta).clamp(0.0, 100.0);
+    await box.put('genre_affinity', jsonEncode(map));
+  }
+
+  static List<String> getCooldownHistoryTitles() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('cooldown_history');
+    if (raw == null) return [];
+    try {
+      return List<String>.from(jsonDecode(raw.toString()) as List);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> addCooldownTrackTitle(String title) async {
+    final cleanTitle = title.trim().toLowerCase();
+    if (cleanTitle.isEmpty) return;
+    final box = Hive.box(_affinityBox);
+    final list = getCooldownHistoryTitles();
+    list.remove(cleanTitle);
+    list.add(cleanTitle);
+    if (list.length > 50) list.removeAt(0); // Cap at 50 tracks
+    await box.put('cooldown_history', jsonEncode(list));
+  }
+
+  static Map<String, String> getSessionContext() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('session_context');
+    if (raw == null) return {};
+    try {
+      return Map<String, String>.from(jsonDecode(raw.toString()) as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> setSessionContext({String? genre, String? artist, String? language}) async {
+    final box = Hive.box(_affinityBox);
+    final ctx = getSessionContext();
+    if (genre != null && genre.isNotEmpty) ctx['genre'] = genre.trim().toUpperCase();
+    if (artist != null && artist.isNotEmpty) ctx['artist'] = artist.trim();
+    if (language != null && language.isNotEmpty) ctx['language'] = language.trim().toUpperCase();
+    await box.put('session_context', jsonEncode(ctx));
+  }
+
+  // ── Language Affinity ──────────────────────────────────────────
+
+  static Map<String, double> getLanguageAffinityMap() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('language_affinity');
+    if (raw == null) return {};
+    try {
+      final decoded = jsonDecode(raw.toString()) as Map;
+      return decoded.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> updateLanguageAffinity(String language, double delta) async {
+    if (language.isEmpty) return;
+    final box = Hive.box(_affinityBox);
+    final map = getLanguageAffinityMap();
+    final cleanLang = language.trim().toUpperCase();
+    map[cleanLang] = ((map[cleanLang] ?? 0.0) + delta).clamp(0.0, 100.0);
+    await box.put('language_affinity', jsonEncode(map));
+  }
+
+  // ── Skip History ───────────────────────────────────────────────
+
+  static List<Map<String, String>> getSkipHistory() {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('skip_history');
+    if (raw == null) return [];
+    try {
+      final decoded = jsonDecode(raw.toString()) as List;
+      return decoded.map((e) => Map<String, String>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> addSkipRecord(String artist, String genre, String language) async {
+    final box = Hive.box(_affinityBox);
+    final history = getSkipHistory();
+    history.insert(0, {
+      'artist': artist,
+      'genre': genre.toUpperCase(),
+      'language': language.toUpperCase(),
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    if (history.length > 30) history.removeLast();
+    await box.put('skip_history', jsonEncode(history));
+  }
+
+  // ── Replay Count ───────────────────────────────────────────────
+
+  static int getReplayCount(String trackId) {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('replay_counts');
+    if (raw == null) return 0;
+    try {
+      final decoded = jsonDecode(raw.toString()) as Map;
+      return (decoded[trackId] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<void> incrementReplayCount(String trackId) async {
+    final box = Hive.box(_affinityBox);
+    final raw = box.get('replay_counts');
+    Map<String, dynamic> counts = {};
+    if (raw != null) {
+      try {
+        counts = Map<String, dynamic>.from(jsonDecode(raw.toString()) as Map);
+      } catch (_) {}
+    }
+    counts[trackId] = ((counts[trackId] as num?)?.toInt() ?? 0) + 1;
+    await box.put('replay_counts', jsonEncode(counts));
+  }
+
+  // ── Song Summary Cache ─────────────────────────────────────────
+
+  static const String _summaryBox = 'song_summaries_box';
+
+  static Map<String, dynamic>? getSongSummary(String trackId) {
+    final box = Hive.box(_summaryBox);
+    final raw = box.get(trackId);
+    if (raw == null) return null;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw.toString()) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> saveSongSummary(String trackId, Map<String, dynamic> summary) async {
+    final box = Hive.box(_summaryBox);
+    await box.put(trackId, jsonEncode(summary));
+  }
+
+  static Future<void> clearSongSummary(String trackId) async {
+    final box = Hive.box(_summaryBox);
+    await box.delete(trackId);
   }
 }

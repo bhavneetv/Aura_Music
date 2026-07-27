@@ -6,10 +6,12 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
+import '../../services/ai/song_summary_service.dart';
 import '../../widgets/custom_slider_track_shapes.dart';
 import '../../themes/app_theme.dart';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
+import 'package:shimmer/shimmer.dart';
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
@@ -26,6 +28,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   late AnimationController _decelController;
   late Animation<double> _decelAngleAnimation;
   Offset _albumDragOffset = Offset.zero;
+
+  // Song Summary state
+  SongSummary? _songSummary;
+  bool _isSummaryLoading = false;
+  bool _isSummaryExpanded = true;
+  String? _lastSummaryTrackId;
 
   @override
   void initState() {
@@ -203,6 +211,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             onPressed: () async {
                               triggerHaptic(HapticFeedbackType.selection);
                               await StorageService.toggleFavorite('trackIds', track.id);
+                              // Notify recommendation engine about the like
+                              if (StorageService.isFavorite('trackIds', track.id)) {
+                                ref.read(playbackProvider.notifier).onTrackLiked(track);
+                              }
                               setState(() {});
                             },
                           ),
@@ -477,9 +489,311 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 ),
 
                 const SizedBox(height: 24),
+
+                // ── Song Summary Section ──────────────────────
+                _buildSongSummarySection(track, isDark, customBranding.accentColor),
+
+                const SizedBox(height: 24),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // ── Song Summary Logic ────────────────────────────────────────
+
+  void _fetchSongSummary(Track track, {bool forceRefresh = false}) {
+    if (_isSummaryLoading && !forceRefresh) return;
+    if (_lastSummaryTrackId == track.id && _songSummary != null && !forceRefresh) return;
+
+    setState(() {
+      _isSummaryLoading = true;
+      _lastSummaryTrackId = track.id;
+      if (forceRefresh) _songSummary = null;
+    });
+
+    SongSummaryService.instance.getSummary(
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      genre: track.genre,
+      forceRefresh: forceRefresh,
+    ).then((summary) {
+      if (mounted && _lastSummaryTrackId == track.id) {
+        setState(() {
+          _songSummary = summary;
+          _isSummaryLoading = false;
+        });
+      }
+    }).catchError((_) {
+      if (mounted) {
+        setState(() => _isSummaryLoading = false);
+      }
+    });
+  }
+
+  Widget _buildSongSummarySection(Track track, bool isDark, Color accentColor) {
+    // Auto-fetch summary when track changes or if summary is missing
+    if (_lastSummaryTrackId != track.id || (_songSummary == null && !_isSummaryLoading)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongSummary(track));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        decoration: BoxDecoration(
+          color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row (always visible)
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                setState(() => _isSummaryExpanded = !_isSummaryExpanded);
+                if (_isSummaryExpanded && _songSummary == null && !_isSummaryLoading) {
+                  _fetchSongSummary(track);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: accentColor, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Song Summary',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          if (!_isSummaryExpanded && _songSummary != null)
+                            Text(
+                              _songSummary!.theme.length > 60 
+                                ? '${_songSummary!.theme.substring(0, 60)}...' 
+                                : _songSummary!.theme,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.5),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (_isSummaryLoading)
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: accentColor),
+                      )
+                    else
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isSummaryExpanded)
+                            IconButton(
+                              icon: Icon(Icons.refresh_rounded, color: Colors.grey, size: 18),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              onPressed: () => _fetchSongSummary(track, forceRefresh: true),
+                            ),
+                          Icon(
+                            _isSummaryExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                            color: Colors.grey,
+                            size: 22,
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Expanded content
+            if (_isSummaryExpanded)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                child: _isSummaryLoading
+                    ? _buildSummaryShimmer(isDark)
+                    : _songSummary != null
+                        ? _buildSummaryContent(_songSummary!, isDark, accentColor)
+                        : Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'Tap refresh to generate a summary for this song.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryContent(SongSummary summary, bool isDark, Color accentColor) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subtleColor = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          if (summary.theme.isNotEmpty) ...[
+            _buildSummaryRow('🎵', 'Theme', summary.theme, textColor, subtleColor),
+            const SizedBox(height: 10),
+          ],
+          if (summary.emotions.isNotEmpty) ...[
+            _buildSummaryRow('💫', 'Emotions', summary.emotions, textColor, subtleColor),
+            const SizedBox(height: 10),
+          ],
+          if (summary.message.isNotEmpty) ...[
+            _buildSummaryRow('📝', 'Message', summary.message, textColor, subtleColor),
+            const SizedBox(height: 10),
+          ],
+          if (summary.culturalNotes.isNotEmpty) ...[
+            _buildSummaryRow('🌍', 'Cultural Notes', summary.culturalNotes, textColor, subtleColor),
+            const SizedBox(height: 12),
+          ],
+          if (summary.lineByLineExplanations.isNotEmpty) ...[
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.subtitles_rounded, size: 16, color: accentColor),
+                const SizedBox(width: 6),
+                Text(
+                  'LINE-BY-LINE LYRIC EXPLANATION',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                    color: accentColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...summary.lineByLineExplanations.map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text('🎤 ', style: TextStyle(fontSize: 12)),
+                        Expanded(
+                          child: Text(
+                            item.line,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              fontStyle: FontStyle.italic,
+                              color: textColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('💡 ', style: TextStyle(fontSize: 12)),
+                        Expanded(
+                          child: Text(
+                            item.explanation,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: textColor.withValues(alpha: 0.85),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String emoji, String label, String content, Color textColor, Color subtleColor) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 16)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: subtleColor)),
+              const SizedBox(height: 2),
+              Text(content, style: TextStyle(fontSize: 13, color: textColor, height: 1.4)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryShimmer(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Shimmer.fromColors(
+        baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+        highlightColor: isDark ? Colors.grey[600]! : Colors.grey[100]!,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Container(width: double.infinity, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+            const SizedBox(height: 8),
+            Container(width: 200, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+            const SizedBox(height: 12),
+            Container(width: double.infinity, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+            const SizedBox(height: 8),
+            Container(width: 150, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+          ],
         ),
       ),
     );

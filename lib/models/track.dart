@@ -41,9 +41,9 @@ class Track {
     );
   }
 
-  // Mock tracks representing Creative Commons tracks
-  static List<Track> get mockTracks => const [
-    Track(
+  // Mock tracks representing Creative Commons & fallback tracks
+  static List<Track> get mockTracks => [
+    const Track(
       id: '1',
       title: 'Midnight Sun',
       artist: 'Aether Flow',
@@ -53,7 +53,7 @@ class Track {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
       genre: 'Chillout',
     ),
-    Track(
+    const Track(
       id: '2',
       title: 'Golden Horizon',
       artist: 'Solaris Duo',
@@ -63,7 +63,7 @@ class Track {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       genre: 'Ambient',
     ),
-    Track(
+    const Track(
       id: '3',
       title: 'Neon Drift',
       artist: 'Synthetica',
@@ -73,7 +73,7 @@ class Track {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
       genre: 'Synthwave',
     ),
-    Track(
+    const Track(
       id: '4',
       title: 'Velvet Echoes',
       artist: 'Luna Eclipse',
@@ -83,7 +83,7 @@ class Track {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
       genre: 'Indie Pop',
     ),
-    Track(
+    const Track(
       id: '5',
       title: 'Starlight Voyage',
       artist: 'Cosmo Ranger',
@@ -93,7 +93,7 @@ class Track {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
       genre: 'Chillout',
     ),
-    Track(
+    const Track(
       id: '6',
       title: 'Autumn Rain',
       artist: 'Whispering Winds',
@@ -102,6 +102,66 @@ class Track {
       artworkUrl: 'https://images.unsplash.com/photo-1501630834273-4b5604d2ee31?w=500&auto=format&fit=crop&q=60',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
       genre: 'Acoustic',
+    ),
+    const Track(
+      id: '7',
+      title: 'Desi Rhythm',
+      artist: 'Amrit Pal',
+      album: 'Punjabi Beats',
+      duration: '3:30',
+      artworkUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+      genre: 'Punjabi',
+    ),
+    const Track(
+      id: '8',
+      title: 'Tum Hi Ho Vibe',
+      artist: 'Arijit Vibes',
+      album: 'Romantic Melodies',
+      duration: '4:15',
+      artworkUrl: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+      genre: 'Bollywood',
+    ),
+    const Track(
+      id: '9',
+      title: 'Midnight Coffee Lofi',
+      artist: 'Chilled Cow',
+      album: 'Study Sessions',
+      duration: '2:45',
+      artworkUrl: 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
+      genre: 'Lo-Fi',
+    ),
+    const Track(
+      id: '10',
+      title: 'City Street Flow',
+      artist: 'Metro Beats',
+      album: 'Urban Nights',
+      duration: '3:10',
+      artworkUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3',
+      genre: 'Hip-Hop',
+    ),
+    const Track(
+      id: '11',
+      title: 'Bhangra Grooves',
+      artist: 'Diljit Sound',
+      album: 'Bhangra Fire',
+      duration: '3:40',
+      artworkUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3',
+      genre: 'Punjabi',
+    ),
+    const Track(
+      id: '12',
+      title: 'Sufi Soul',
+      artist: 'Rahat Melodies',
+      album: 'Mystic Echoes',
+      duration: '4:50',
+      artworkUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=60',
+      audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3',
+      genre: 'Bollywood',
     ),
   ];
 }

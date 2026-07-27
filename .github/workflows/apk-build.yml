@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v2.0
+      RELEASE_TAG: v2.2
       RELEASE_NAME: Flutter App v1.0.2
 
     steps:
@@ -41,7 +41,7 @@ jobs:
         continue-on-error: true
 
       - name: Build Release APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
 
       - name: Verify APK
         run: ls -lh build/app/outputs/flutter-apk/

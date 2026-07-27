@@ -9,6 +9,8 @@ import 'package:dio/dio.dart';
 import '../models/track.dart';
 import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
+import '../services/recommendation/recommendation_engine.dart';
+import '../services/music_sources/jamendo_source.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
 
@@ -142,6 +144,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   PlaybackState build() {
     _handler = ref.watch(audioHandlerProvider) as MyAudioHandler;
 
+    // Bind stock notification and remote control action callbacks
+    _handler.onNextRequested = () => nextTrack();
+    _handler.onPreviousRequested = () => previousTrack();
+
     // Load saved settings from Hive
     final savedSkin = StorageService.getSetting('player_skin', defaultValue: 'vinyl') as String;
     final savedNorm = StorageService.getSetting('volume_normalization', defaultValue: false) as bool;
@@ -164,13 +170,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
       }
 
-      // Crossfade handling
+      // Crossfade handling with equal-power overlapping transition
       if (StorageService.isCrossfadeEnabled() && dur.inMilliseconds > 0) {
         final crossfadeSec = StorageService.getCrossfadeDuration();
         final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
         if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000) && !_isCrossfading) {
           _isCrossfading = true;
-          nextTrack();
+          nextTrack(isCrossfade: true);
           Future.delayed(Duration(seconds: crossfadeSec + 1), () {
             _isCrossfading = false;
           });
@@ -263,11 +269,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         print('Failed to restore saved queue: $e');
       }
     } else {
-      // Default initial state
+      // Dynamic non-static initial state
       if (Track.mockTracks.isNotEmpty) {
+        final pool = List<Track>.from(Track.mockTracks)..shuffle();
+        final seedTrack = pool.first;
         state = PlaybackState(
-          currentTrack: Track.mockTracks[0],
-          queue: List.from(Track.mockTracks),
+          currentTrack: seedTrack,
+          queue: [seedTrack],
           currentIndex: 0,
           playerSkin: skin,
           volumeNormalization: norm,
@@ -293,12 +301,43 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   void playTrack(Track track) async {
     triggerHaptic(HapticFeedbackType.selection);
 
-    // Add to queue if not present, and update index
-    List<Track> currentQueue = List.from(state.queue);
-    int idx = currentQueue.indexWhere((t) => t.id == track.id);
-    if (idx == -1) {
-      currentQueue.add(track);
-      idx = currentQueue.length - 1;
+    // Check if session context changed (e.g. user selected a song from a different genre)
+    final prevContext = StorageService.getSessionContext();
+    final newGenre = track.genre.trim().toUpperCase();
+    final newArtist = track.artist.split(',').first.trim();
+
+    bool contextPivoted = false;
+    if (newGenre.isNotEmpty && prevContext['genre'] != null && prevContext['genre']!.isNotEmpty && prevContext['genre'] != newGenre) {
+      contextPivoted = true;
+    }
+
+    // Record real-time telemetry and update session context in Hive DB
+    RecommendationEngine.instance.recordTrackStarted(track);
+
+    List<Track> currentQueue;
+    int idx;
+
+    if (contextPivoted) {
+      // Rebuild clean queue starting with the new genre seed track
+      currentQueue = [track];
+      idx = 0;
+    } else {
+      currentQueue = List.from(state.queue);
+      final titleKey = track.title.trim().toLowerCase();
+      currentQueue.removeWhere((t) => t.id == track.id || t.title.trim().toLowerCase() == titleKey);
+
+      idx = currentQueue.indexWhere((t) => t.id == track.id);
+      if (idx == -1) {
+        currentQueue.add(track);
+        idx = currentQueue.length - 1;
+      }
+
+      // Re-rank upcoming tracks against the new current track context
+      if (idx + 1 < currentQueue.length) {
+        final upcoming = currentQueue.sublist(idx + 1);
+        final reranked = RecommendationEngine.instance.rerankUpcomingQueue(upcoming, track);
+        currentQueue = currentQueue.sublist(0, idx + 1)..addAll(reranked);
+      }
     }
     
     state = state.copyWith(
@@ -312,11 +351,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     // Check if downloaded locally first
     final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
-    if (downloadedPath != null && File(downloadedPath).existsSync()) {
+    if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
     } else {
       bool urlIsWorking = false;
-      if (audioUrl.isNotEmpty) {
+      if (audioUrl.isNotEmpty && audioUrl.startsWith('http')) {
         try {
           final dio = Dio();
           final response = await dio.head(
@@ -329,7 +368,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         } catch (_) {}
       }
 
-      if (!urlIsWorking) {
+      if (!urlIsWorking && !audioUrl.startsWith('/')) {
         print('🚨 Stale URL detected. Recovering fresh stream for ${track.title}...');
         try {
           final dio = Dio();
@@ -383,42 +422,46 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (remainingUpcoming >= 5) return;
 
     try {
+      // Use contextual recommendations anchored to the current track
       final source = ref.read(musicSourceProvider);
-      List<Track> recommendations = await source.getDynamicRecommendations();
+      List<Track> recommendations;
+      if (source is JamendoSource) {
+        recommendations = await source.getContextualRecommendations(state.currentTrack!);
+      } else {
+        recommendations = await source.getDynamicRecommendations();
+      }
+
       if (recommendations.isEmpty) {
         String genreQuery = state.currentTrack!.genre.trim();
         if (genreQuery.isEmpty) genreQuery = 'PUNJABI';
         recommendations = await source.getTracksByGenre(genreQuery);
       }
 
-      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
-      List<Track> filtered = recommendations.where((t) => !existingIds.contains(t.id)).toList();
-      filtered.shuffle();
+      final Set<String> existingTitles = state.queue.map((t) => t.title.trim().toLowerCase()).toSet();
+      List<Track> ranked = RecommendationEngine.instance.rankRecommendations(
+        recommendations,
+        currentTrack: state.currentTrack,
+        excludeIds: existingTitles,
+      );
 
-      if (filtered.isEmpty) {
-        filtered = List<Track>.from(Track.mockTracks)..shuffle();
-        filtered.removeWhere((t) => existingIds.contains(t.id));
+      if (ranked.isEmpty) {
+        final freshBatch = await source.getDynamicRecommendations();
+        ranked = RecommendationEngine.instance.rankRecommendations(
+          freshBatch,
+          currentTrack: state.currentTrack,
+          excludeIds: existingTitles,
+        );
       }
 
-      if (filtered.isNotEmpty) {
+      if (ranked.isNotEmpty) {
         final needed = 5 - remainingUpcoming;
-        final toAdd = filtered.take(needed).toList();
+        final toAdd = ranked.take(needed).toList();
         final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
         state = state.copyWith(queue: updatedQueue);
         await _saveQueue();
       }
     } catch (e) {
       print('Error filling upcoming recommendations: $e');
-      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
-      final filtered = List<Track>.from(Track.mockTracks)..shuffle();
-      filtered.removeWhere((t) => existingIds.contains(t.id));
-      if (filtered.isNotEmpty) {
-        final needed = 5 - remainingUpcoming;
-        final toAdd = filtered.take(needed).toList();
-        final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
-        state = state.copyWith(queue: updatedQueue);
-        await _saveQueue();
-      }
     }
   }
 
@@ -450,7 +493,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   void addToQueue(Track track) {
     List<Track> updated = List.from(state.queue);
-    updated.removeWhere((t) => t.id == track.id);
+    final titleKey = track.title.trim().toLowerCase();
+    updated.removeWhere((t) => t.id == track.id || t.title.trim().toLowerCase() == titleKey);
     final insertIdx = (state.currentIndex >= 0 && state.currentIndex < updated.length)
         ? state.currentIndex + 1
         : updated.length;
@@ -538,40 +582,61 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final current = state.currentTrack;
     if (current == null) return;
 
-    // Use current song's genre/language (e.g. "PUNJABI", "HINDI", etc.)
-    // If it is empty, default to "PUNJABI"
-    String genreQuery = current.genre.trim();
-    if (genreQuery.isEmpty) {
-      genreQuery = 'PUNJABI';
+    // Prune queue if too long to maintain responsive state
+    List<Track> workingQueue = List.from(state.queue);
+    int workingIdx = state.currentIndex;
+    if (workingIdx > 5) {
+      workingQueue = workingQueue.sublist(workingIdx - 5);
+      workingIdx = 5;
+      state = state.copyWith(queue: workingQueue, currentIndex: workingIdx);
     }
 
     try {
       final source = ref.read(musicSourceProvider);
-      List<Track> recommendations = await source.getTracksByGenre(genreQuery);
+      List<Track> recommendations = await source.getDynamicRecommendations();
 
-      // If recommendations is empty or error, fallback to onboarding preferred languages
-      if (recommendations.isEmpty) {
-        final prefs = StorageService.getPreferredLanguages();
-        if (prefs.isNotEmpty) {
-          recommendations = await source.getTracksByGenre(prefs.first);
+      final Set<String> existingIds = workingQueue.map((t) => t.id).toSet();
+      final Set<String> existingTitles = workingQueue.map((t) => t.title.trim().toLowerCase()).toSet();
+
+      List<Track> ranked = RecommendationEngine.instance.rankRecommendations(
+        recommendations,
+        currentTrack: current,
+        excludeIds: existingTitles,
+      );
+
+      // If all candidates in current batch were excluded, query fresh dynamic recommendations again
+      if (ranked.isEmpty) {
+        final freshBatch = await source.getDynamicRecommendations();
+        freshBatch.shuffle();
+        ranked = RecommendationEngine.instance.rankRecommendations(
+          freshBatch,
+          currentTrack: current,
+          excludeIds: existingTitles,
+        );
+
+        if (ranked.isEmpty && freshBatch.isNotEmpty) {
+          ranked = freshBatch.where((t) => !existingTitles.contains(t.title.trim().toLowerCase())).toList();
         }
       }
 
-      // Filter out songs currently in queue to prevent immediate repeats
-      final Set<String> existingIds = state.queue.map((t) => t.id).toSet();
-      final filtered = recommendations.where((t) => !existingIds.contains(t.id)).toList();
-
       Track? nextTrackToPlay;
-      if (filtered.isNotEmpty) {
-        // Pick the first one from the filtered recommendations
-        nextTrackToPlay = filtered.first;
+      if (ranked.isNotEmpty) {
+        nextTrackToPlay = ranked.first;
       } else if (recommendations.isNotEmpty) {
-        // Fallback to any recommended song if all are already in queue
-        nextTrackToPlay = recommendations.first;
+        final unplayed = recommendations.where((t) => !existingTitles.contains(t.title.trim().toLowerCase())).toList();
+        if (unplayed.isNotEmpty) {
+          unplayed.shuffle();
+          nextTrackToPlay = unplayed.first;
+        } else {
+          // Generate dynamic variation if all songs have been played
+          final sample = (List.from(recommendations)..shuffle()).first;
+          nextTrackToPlay = sample.copyWith(
+            id: '${sample.id}_${DateTime.now().millisecondsSinceEpoch}',
+          );
+        }
       }
 
       if (nextTrackToPlay != null) {
-        // Add to queue and play
         final updatedQueue = List<Track>.from(state.queue)..add(nextTrackToPlay);
         final nextIdx = updatedQueue.length - 1;
         state = state.copyWith(
@@ -587,41 +652,110 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
-  void nextTrack() async {
-    if (state.queue.isEmpty) return;
-    
-    if (state.repeatMode == RepeatMode.one && state.currentTrack != null) {
-      // Repeat one
-      playTrack(state.currentTrack!);
-      return;
-    }
+  bool _isSwitchingTrack = false;
 
-    int nextIdx = state.currentIndex + 1;
-    if (nextIdx >= state.queue.length) {
-      if (state.repeatMode == RepeatMode.all) {
-        nextIdx = 0;
-        playTrack(state.queue[nextIdx]);
-      } else {
-        // Autoplay recommended song just like Spotify
-        await _autoPlayNextRecommended();
-      }
-      return;
-    }
+  void nextTrack({bool isCrossfade = false}) async {
+    if (state.queue.isEmpty || _isSwitchingTrack) return;
+    _isSwitchingTrack = true;
     
-    playTrack(state.queue[nextIdx]);
+    try {
+      // Log previous track telemetry and handle skip realignments
+      if (state.currentTrack != null) {
+        final skippedTrack = state.currentTrack!;
+        final playedSec = state.currentPosition.inSeconds;
+
+        RecommendationEngine.instance.recordTrackEnded(
+          skippedTrack,
+          state.currentPosition,
+          state.totalDuration,
+        );
+
+        // If skipped early (< 30s), treat as negative feedback
+        if (playedSec < 30) {
+          final skippedGenre = skippedTrack.genre.trim().toUpperCase();
+          final skippedArtist = skippedTrack.artist.split(',').first.trim();
+
+          // Check if the skipped song's genre differs from the active session
+          final sessionCtx = StorageService.getSessionContext();
+          final activeGenre = sessionCtx['genre'] ?? '';
+
+          if (skippedGenre.isNotEmpty && activeGenre.isNotEmpty && skippedGenre != activeGenre) {
+            // Skipped a mismatched genre — purge all tracks of that genre from upcoming queue
+            if (state.currentIndex + 1 < state.queue.length) {
+              List<Track> cleanedQueue = List.from(state.queue);
+              final upcoming = cleanedQueue.sublist(state.currentIndex + 1);
+              upcoming.removeWhere((t) => t.genre.trim().toUpperCase() == skippedGenre);
+              cleanedQueue = cleanedQueue.sublist(0, state.currentIndex + 1)..addAll(upcoming);
+              state = state.copyWith(queue: cleanedQueue);
+            }
+          } else if (skippedGenre.isNotEmpty && state.currentIndex + 1 < state.queue.length) {
+            // Skipped within same genre — re-rank upcoming to deprioritize similar tracks
+            List<Track> cleanedQueue = List.from(state.queue);
+            final upcoming = cleanedQueue.sublist(state.currentIndex + 1);
+            // Remove tracks by the same skipped artist
+            upcoming.removeWhere((t) => t.artist.split(',').first.trim().toLowerCase() == skippedArtist.toLowerCase());
+            cleanedQueue = cleanedQueue.sublist(0, state.currentIndex + 1)..addAll(upcoming);
+            state = state.copyWith(queue: cleanedQueue);
+          }
+        }
+      }
+
+      if (state.repeatMode == RepeatMode.one && state.currentTrack != null) {
+        playTrack(state.currentTrack!);
+        return;
+      }
+
+      int nextIdx = state.currentIndex + 1;
+      if (nextIdx >= state.queue.length) {
+        if (state.repeatMode == RepeatMode.all) {
+          nextIdx = 0;
+        } else {
+          await _autoPlayNextRecommended();
+          return;
+        }
+      }
+
+      final nextTrackItem = state.queue[nextIdx];
+
+      if (isCrossfade && StorageService.isCrossfadeEnabled()) {
+        state = state.copyWith(
+          currentIndex: nextIdx,
+          currentTrack: nextTrackItem,
+        );
+        await _saveQueue();
+        final crossfadeSec = StorageService.getCrossfadeDuration();
+        await _handler.crossfadeToTrack(nextTrackItem, crossfadeSec);
+        _preloadNextTrack();
+        ensureUpcomingRecommendations();
+      } else {
+        playTrack(nextTrackItem);
+      }
+    } finally {
+      Future.delayed(const Duration(milliseconds: 350), () {
+        _isSwitchingTrack = false;
+      });
+    }
   }
 
   void previousTrack() {
-    if (state.queue.isEmpty) return;
-    int prevIdx = state.currentIndex - 1;
-    if (prevIdx < 0) {
-      if (state.repeatMode == RepeatMode.all) {
-        prevIdx = state.queue.length - 1;
-      } else {
-        prevIdx = 0;
+    if (state.queue.isEmpty || _isSwitchingTrack) return;
+    _isSwitchingTrack = true;
+    
+    try {
+      int prevIdx = state.currentIndex - 1;
+      if (prevIdx < 0) {
+        if (state.repeatMode == RepeatMode.all) {
+          prevIdx = state.queue.length - 1;
+        } else {
+          prevIdx = 0;
+        }
       }
+      playTrack(state.queue[prevIdx]);
+    } finally {
+      Future.delayed(const Duration(milliseconds: 350), () {
+        _isSwitchingTrack = false;
+      });
     }
-    playTrack(state.queue[prevIdx]);
   }
 
   // ── Audio Core Modifiers ────────────────────────────────────
@@ -690,6 +824,23 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       sleepTimerMinutes: null,
       sleepTimerTimeRemaining: null,
     );
+  }
+
+  /// Called when user likes/favorites a track — boosts affinity and re-ranks queue
+  void onTrackLiked(Track track) {
+    RecommendationEngine.instance.recordTrackLiked(track);
+
+    // Re-rank upcoming queue with boosted affinities
+    if (state.currentTrack != null && state.currentIndex + 1 < state.queue.length) {
+      final upcoming = List<Track>.from(state.queue.sublist(state.currentIndex + 1));
+      final reranked = RecommendationEngine.instance.rerankUpcomingQueue(upcoming, state.currentTrack!);
+      final updatedQueue = List<Track>.from(state.queue.sublist(0, state.currentIndex + 1))..addAll(reranked);
+      state = state.copyWith(queue: updatedQueue);
+      _saveQueue();
+    }
+
+    // Trigger fresh recommendations to fill queue with similar content
+    ensureUpcomingRecommendations();
   }
 }
 

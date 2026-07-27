@@ -101,7 +101,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         : [const Color(0xFFFAF6F0), const Color(0xFFEFE9E0)];
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0C0C0C) : const Color(0xFFFAF6F0),
       body: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: BoxDecoration(
           gradient: RadialGradient(
             center: Alignment.center,
@@ -109,41 +112,37 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
             colors: bgColors,
           ),
         ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Ambient soft vignette/glow behind the disc
-            Positioned(
-              top: MediaQuery.of(context).size.height * 0.22,
-              child: Container(
-                width: 320,
-                height: 320,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.goldAccent.withOpacity(isDark ? 0.08 : 0.15),
-                      blurRadius: 100,
-                      spreadRadius: 20,
-                    ),
-                  ],
+        child: SafeArea(
+          child: Stack(
+            children: [
+              // Ambient soft vignette/glow behind the disc (dead center)
+              Center(
+                child: Container(
+                  width: 220,
+                  height: 220,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.goldAccent.withOpacity(isDark ? 0.15 : 0.22),
+                        blurRadius: 70,
+                        spreadRadius: 15,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
-            // Center content area
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Vinyl Record & Needle stack
-                SizedBox(
-                  width: 340,
-                  height: 340,
+              // Vinyl Record & Needle stack (dead center of screen)
+              Center(
+                child: SizedBox(
+                  width: 240,
+                  height: 240,
                   child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      // Rotating Vinyl Record
-                      Align(
-                        alignment: Alignment.center,
+                      // Rotating Vinyl Record (dead center)
+                      Center(
                         child: Hero(
                           tag: 'now_playing_vinyl',
                           flightShuttleBuilder: (
@@ -160,24 +159,24 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                           },
                           child: RotationTransition(
                             turns: _rotationController,
-                            child: const VinylRecordWidget(size: 280),
+                            child: const VinylRecordWidget(size: 200),
                           ),
                         ),
                       ),
 
                       // Animated Tonearm/Needle
                       Positioned(
-                        top: 20,
-                        right: 20,
+                        top: 5,
+                        right: 10,
                         child: AnimatedBuilder(
                           animation: _needleRotationAnimation,
                           builder: (context, child) {
                             return Transform.rotate(
                               angle: _needleRotationAnimation.value,
-                              origin: const Offset(45, -45), // Rotate from the tonearm pivot base
+                              origin: const Offset(25, -25), // Rotate from the tonearm pivot base
                               child: SizedBox(
-                                width: 140,
-                                height: 200,
+                                width: 90,
+                                height: 130,
                                 child: CustomPaint(
                                   painter: TonearmPainter(isDark: isDark),
                                 ),
@@ -189,10 +188,14 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     ],
                   ),
                 ),
-                const SizedBox(height: 40),
+              ),
 
-                // Brand text fading & sliding up
-                AnimatedBuilder(
+              // Brand text positioned cleanly near bottom
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 48,
+                child: AnimatedBuilder(
                   animation: _fadeTextController,
                   builder: (context, child) {
                     return Opacity(
@@ -204,23 +207,24 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     );
                   },
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'AURA',
                         style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                               fontFamily: 'Outfit',
-                              fontSize: 36,
+                              fontSize: 32,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 6,
                               color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
                             ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Text(
                         'Vinyl Music Player',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               fontFamily: 'Outfit',
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w300,
                               letterSpacing: 2,
                               color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)
@@ -230,9 +234,9 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     ],
                   ),
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );

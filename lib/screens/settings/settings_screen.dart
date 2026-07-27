@@ -527,7 +527,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('v2.0.0 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          trailing: Text('v2.2 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
