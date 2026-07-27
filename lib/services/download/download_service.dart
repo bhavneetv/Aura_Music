@@ -84,11 +84,25 @@ class DownloadService extends ChangeNotifier {
       // Download audio URL
       String url = track.audioUrl;
       if (url.isEmpty || url.startsWith('file://')) {
-        // Recover stream first
-        final res = await _dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
-        final results = res.data['data']?['results'] as List?;
-        if (results != null && results.isNotEmpty) {
-          url = results.first['downloadUrl']?.last['url']?.toString() ?? '';
+        for (final baseUrl in ['https://jiosaavn-api-beta.vercel.app', 'https://saavn.sumit.co/api']) {
+          try {
+            final res = await _dio.get('$baseUrl/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
+            final data = res.data;
+            List? results;
+            if (data != null && data['data'] != null) {
+              results = data['data'] is Map ? data['data']['results'] as List? : data['data'] as List?;
+            } else if (data != null && data['results'] != null) {
+              results = data['results'] as List?;
+            }
+            if (results != null && results.isNotEmpty) {
+              final downloads = results.first['downloadUrl'] as List?;
+              if (downloads != null && downloads.isNotEmpty) {
+                final last = downloads.last;
+                url = last is Map ? (last['url']?.toString() ?? last['link']?.toString() ?? '') : last.toString();
+                if (url.isNotEmpty) break;
+              }
+            }
+          } catch (_) {}
         }
       }
 

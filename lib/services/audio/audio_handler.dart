@@ -132,6 +132,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _activePlayer.play();
     } catch (e) {
       print('Error playing audio source: $e');
+      rethrow;
     }
   }
 

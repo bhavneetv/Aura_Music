@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
@@ -16,6 +17,7 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
   List<Track> _filteredTracks = [];
   List<String> _recentSearches = [];
   final List<String> _trendingSearches = ['Synthwave', 'Ambient', 'Acoustic', 'Jazz', 'Lo-Fi'];
@@ -34,10 +36,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
-  void _onSearchChanged() async {
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       setState(() {
@@ -51,22 +55,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
       _isSearching = true;
     });
 
-    try {
-      final results = await ref.read(musicSourceProvider).searchTracks(query);
-      if (mounted && _searchController.text.trim() == query) {
-        setState(() {
-          _filteredTracks = results;
-          _isSearching = false;
-        });
-        StorageService.addSearchQuery(query);
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final results = await ref.read(musicSourceProvider).searchTracks(query);
+        if (mounted && _searchController.text.trim() == query) {
+          setState(() {
+            _filteredTracks = results;
+            _isSearching = false;
+          });
+          StorageService.addSearchQuery(query);
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _isSearching = false;
+          });
+        }
       }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _isSearching = false;
-        });
-      }
-    }
+    });
   }
 
   void _showFilterBottomSheet(BuildContext context) {

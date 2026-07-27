@@ -353,64 +353,29 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
     if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
-    } else {
-      bool urlIsWorking = false;
-      if (audioUrl.isNotEmpty && audioUrl.startsWith('http')) {
-        try {
-          final dio = Dio();
-          final response = await dio.head(
-            audioUrl,
-            options: Options(validateStatus: (s) => s != null && s < 400),
-          );
-          if (response.statusCode == 200) {
-            urlIsWorking = true;
-          }
-        } catch (_) {}
-      }
-
-      if (!urlIsWorking && !audioUrl.startsWith('/')) {
-        print('🚨 Stale URL detected. Recovering fresh stream for ${track.title}...');
-        try {
-          final dio = Dio();
-          final response = await dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
-          final results = response.data['data']?['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            final freshUrl = results.first['downloadUrl']?.last['url']?.toString() ?? '';
-            if (freshUrl.isNotEmpty) {
-              audioUrl = freshUrl;
-              
-              // Healed track update
-              final healed = Track(
-                id: track.id,
-                title: track.title,
-                artist: track.artist,
-                album: track.album,
-                duration: track.duration,
-                artworkUrl: track.artworkUrl,
-                audioUrl: freshUrl,
-                genre: track.genre,
-              );
-              currentQueue[idx] = healed;
-              state = state.copyWith(queue: currentQueue, currentTrack: healed);
-              await _saveQueue();
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
     if (audioUrl.isNotEmpty) {
       try {
-        // Track stats for History/Recently Played Box
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
-        
         await _handler.playTrack(track.copyWith(audioUrl: audioUrl));
 
-        // Preload next track in queue & ensure upcoming recommendations filled
         _preloadNextTrack();
         ensureUpcomingRecommendations();
       } catch (e) {
-        print('ExoPlayer play failed: $e');
+        print('ExoPlayer play failed for ${track.title}: $e');
+        // Try recovering fresh URL once if stream failed
+        try {
+          final source = ref.read(musicSourceProvider);
+          final freshResults = await source.searchTracks('${track.title} ${track.artist}');
+          if (freshResults.isNotEmpty) {
+            final freshTrack = freshResults.first;
+            if (freshTrack.audioUrl.isNotEmpty && freshTrack.audioUrl != audioUrl) {
+              await _handler.playTrack(freshTrack);
+              _preloadNextTrack();
+              ensureUpcomingRecommendations();
+              return;
+            }
+          }
+        } catch (_) {}
       }
     }
   }
@@ -473,17 +438,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       if (localPath == null || !File(localPath).existsSync()) {
         try {
           if (nextTrackItem.audioUrl.isEmpty) {
-            final dio = Dio();
-            final response = await dio.get('https://saavn.sumit.co/api/search/songs?query=${Uri.encodeComponent("${nextTrackItem.title} ${nextTrackItem.artist}")}');
-            final results = response.data['data']?['results'] as List?;
-            if (results != null && results.isNotEmpty) {
-              final freshUrl = results.first['downloadUrl']?.last['url']?.toString() ?? '';
-              if (freshUrl.isNotEmpty) {
-                final List<Track> updatedQueue = List.from(state.queue);
-                updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
-                state = state.copyWith(queue: updatedQueue);
-                _saveQueue();
-              }
+            final source = ref.read(musicSourceProvider);
+            final results = await source.searchTracks('${nextTrackItem.title} ${nextTrackItem.artist}');
+            if (results.isNotEmpty && results.first.audioUrl.isNotEmpty) {
+              final freshUrl = results.first.audioUrl;
+              final List<Track> updatedQueue = List.from(state.queue);
+              updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
+              state = state.copyWith(queue: updatedQueue);
+              _saveQueue();
             }
           }
         } catch (_) {}

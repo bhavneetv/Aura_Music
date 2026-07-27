@@ -9,46 +9,86 @@ import '../recommendation/recommendation_engine.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
-  static const String _baseUrl = 'https://saavn.sumit.co/api';
+  
+  static const List<String> _baseUrls = [
+    'https://jiosaavn-api-beta.vercel.app',
+    'https://saavn.sumit.co/api',
+  ];
+
+  Future<dynamic> _fetchFromApi(String endpointPath) async {
+    for (final baseUrl in _baseUrls) {
+      try {
+        final url = '$baseUrl$endpointPath';
+        final response = await _dio.get(
+          url,
+          options: Options(
+            receiveTimeout: const Duration(seconds: 8),
+            sendTimeout: const Duration(seconds: 5),
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          ),
+        );
+        if (response.statusCode == 200 && response.data != null) {
+          final tracks = _parseTracks(response.data);
+          if (tracks.isNotEmpty) {
+            return response.data;
+          }
+        }
+      } catch (e) {
+        print('API mirror failed ($baseUrl$endpointPath): $e');
+      }
+    }
+    return null;
+  }
 
   @override
   Future<List<Track>> getTrendingTracks() async {
     try {
       final page = math.Random().nextInt(3) + 1;
-      final response = await _dio.get('$_baseUrl/search/songs?query=trending&page=$page');
-      final tracks = _parseTracks(response.data);
-      return RecommendationEngine.instance.rankRecommendations(tracks);
+      final data = await _fetchFromApi('/search/songs?query=trending&page=$page');
+      if (data != null) {
+        final tracks = _parseTracks(data);
+        return RecommendationEngine.instance.rankRecommendations(tracks);
+      }
     } catch (e) {
       print('Error fetching trending tracks: $e');
-      return _getMockFallback();
     }
+    return _getMockFallback();
   }
 
   @override
   Future<List<Track>> searchTracks(String query) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return [];
+
     try {
-      final response = await _dio.get('$_baseUrl/search/songs?query=$query');
-      final tracks = _parseTracks(response.data);
-      if (tracks.isNotEmpty) {
-        return tracks;
+      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(cleanQuery)}');
+      if (data != null) {
+        final tracks = _parseTracks(data);
+        if (tracks.isNotEmpty) {
+          return tracks;
+        }
       }
     } catch (e) {
-      print('Error searching tracks: $e');
+      print('Error searching tracks for "$cleanQuery": $e');
     }
-    return _filterMockTracks(query);
+    return _filterMockTracks(cleanQuery);
   }
 
   @override
   Future<List<Track>> getTracksByGenre(String genre) async {
     try {
       final page = math.Random().nextInt(4) + 1;
-      final response = await _dio.get('$_baseUrl/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
-      final tracks = _parseTracks(response.data);
-      return RecommendationEngine.instance.rankRecommendations(tracks);
+      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
+      if (data != null) {
+        final tracks = _parseTracks(data);
+        return RecommendationEngine.instance.rankRecommendations(tracks);
+      }
     } catch (e) {
       print('Error fetching tracks by genre "$genre": $e');
-      return _getMockFallback();
     }
+    return _getMockFallback();
   }
 
   @override
@@ -58,11 +98,9 @@ class JamendoSource implements MusicSource {
     final activeArtist = sessionCtx['artist'] ?? '';
     final activeLanguage = (sessionCtx['language'] ?? activeGenre).toUpperCase();
 
-    // Build prioritized seed queries based on active listening context
     final List<String> primarySeeds = [];
     final List<String> secondarySeeds = [];
 
-    // Primary: exact language/genre of current session
     if (activeGenre.isNotEmpty) {
       primarySeeds.add(activeGenre);
       primarySeeds.add('$activeGenre songs');
@@ -76,7 +114,6 @@ class JamendoSource implements MusicSource {
       primarySeeds.add('$activeArtist songs');
     }
 
-    // Secondary: user preferences and history
     final preferredLangs = StorageService.getPreferredLanguages();
     final preferredGenres = StorageService.getPreferredGenres();
     final history = StorageService.getListeningHistory();
@@ -92,18 +129,15 @@ class JamendoSource implements MusicSource {
     secondarySeeds.addAll(preferredLangs);
     secondarySeeds.addAll(preferredGenres);
 
-    // Fallback pool
     final List<String> fallbackPool = [
       'trending', 'punjabi', 'bollywood', 'arijit singh', 'chillout',
       'lofi beats', 'romantic hits', 'top 50', 'taylor swift', 'pop hits',
       'acoustic guitar', 'edm party', 'retro 80s', 'kpop', 'drake', 'shreya ghoshal'
     ];
 
-    // MULTI-QUERY STRATEGY: Fire 3 parallel API queries for a richer candidate pool
     final List<String> queryPool = [...primarySeeds, ...secondarySeeds, ...fallbackPool];
     final List<String> selectedQueries = [];
 
-    // Pick top 3 distinct queries
     for (final q in queryPool) {
       if (selectedQueries.length >= 3) break;
       if (!selectedQueries.any((s) => s.toLowerCase() == q.toLowerCase())) {
@@ -116,22 +150,17 @@ class JamendoSource implements MusicSource {
     }
 
     try {
-      // Fire parallel API requests
       final futures = selectedQueries.map((query) async {
         try {
           final page = math.Random().nextInt(5) + 1;
-          final response = await _dio.get(
-            '$_baseUrl/search/songs?query=${Uri.encodeComponent(query)}&page=$page',
-          );
-          return _parseTracks(response.data);
-        } catch (_) {
-          return <Track>[];
-        }
+          final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
+          if (data != null) return _parseTracks(data);
+        } catch (_) {}
+        return <Track>[];
       }).toList();
 
       final results = await Future.wait(futures);
 
-      // Merge and deduplicate all results
       final Map<String, Track> merged = {};
       for (final batch in results) {
         for (final track in batch) {
@@ -151,14 +180,15 @@ class JamendoSource implements MusicSource {
       print('Error fetching dynamic recommendations: $e');
     }
 
-    // Single fallback attempt
     try {
       final fallbackQuery = (List.from(fallbackPool)..shuffle()).first;
       final page = math.Random().nextInt(5) + 1;
-      final response = await _dio.get('$_baseUrl/search/songs?query=${Uri.encodeComponent(fallbackQuery)}&page=$page');
-      final tracks = _parseTracks(response.data);
-      if (tracks.isNotEmpty) {
-        return RecommendationEngine.instance.rankRecommendations(tracks);
+      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(fallbackQuery)}&page=$page');
+      if (data != null) {
+        final tracks = _parseTracks(data);
+        if (tracks.isNotEmpty) {
+          return RecommendationEngine.instance.rankRecommendations(tracks);
+        }
       }
     } catch (_) {}
 
@@ -166,7 +196,6 @@ class JamendoSource implements MusicSource {
     return RecommendationEngine.instance.rankRecommendations(fallback);
   }
 
-  /// Context-specific recommendations anchored to a specific track
   Future<List<Track>> getContextualRecommendations(Track currentTrack) async {
     final genre = currentTrack.genre.trim().toUpperCase();
     final artist = currentTrack.artist.split(',').first.trim();
@@ -189,13 +218,10 @@ class JamendoSource implements MusicSource {
       final futures = queries.take(3).map((query) async {
         try {
           final page = math.Random().nextInt(5) + 1;
-          final response = await _dio.get(
-            '$_baseUrl/search/songs?query=${Uri.encodeComponent(query)}&page=$page',
-          );
-          return _parseTracks(response.data);
-        } catch (_) {
-          return <Track>[];
-        }
+          final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
+          if (data != null) return _parseTracks(data);
+        } catch (_) {}
+        return <Track>[];
       }).toList();
 
       final results = await Future.wait(futures);
@@ -236,56 +262,86 @@ class JamendoSource implements MusicSource {
       return [];
     }
 
-    final dataMap = parsed['data'];
-    if (dataMap == null) return [];
+    dynamic resultsRaw;
+    if (parsed['data'] != null) {
+      if (parsed['data'] is Map && parsed['data']['results'] is List) {
+        resultsRaw = parsed['data']['results'];
+      } else if (parsed['data'] is List) {
+        resultsRaw = parsed['data'];
+      }
+    } else if (parsed['results'] is List) {
+      resultsRaw = parsed['results'];
+    }
 
-    final results = dataMap['results'] as List? ?? [];
+    final results = resultsRaw as List? ?? [];
     final List<Track> tracks = [];
 
     for (final item in results) {
+      if (item is! Map) continue;
       try {
         final id = item['id']?.toString() ?? '';
-        final title = item['name']?.toString() ?? 'Unknown Track';
+        final title = item['name']?.toString() ?? item['title']?.toString() ?? 'Unknown Track';
         
-        // Parse primary artists
         String artist = 'Unknown Artist';
-        if (item['artists'] != null && item['artists']['primary'] != null) {
-          final primary = item['artists']['primary'] as List;
-          if (primary.isNotEmpty) {
-            artist = primary.map((a) => a['name']?.toString() ?? '').where((name) => name.isNotEmpty).join(', ');
+        if (item['artists'] != null) {
+          if (item['artists'] is Map && item['artists']['primary'] != null) {
+            final primary = item['artists']['primary'] as List;
+            if (primary.isNotEmpty) {
+              artist = primary.map((a) => a is Map ? (a['name']?.toString() ?? '') : a.toString()).where((n) => n.isNotEmpty).join(', ');
+            }
+          } else if (item['artists'] is String) {
+            artist = item['artists'].toString();
+          }
+        } else if (item['primaryArtists'] != null) {
+          artist = item['primaryArtists'].toString();
+        }
+
+        String album = 'Single';
+        if (item['album'] != null) {
+          if (item['album'] is Map && item['album']['name'] != null) {
+            album = item['album']['name'].toString();
+          } else if (item['album'] is String) {
+            album = item['album'].toString();
           }
         }
 
-        // Parse album name
-        String album = 'Single';
-        if (item['album'] != null && item['album']['name'] != null) {
-          album = item['album']['name'].toString();
-        }
-
-        // Parse duration in seconds and format as "MM:SS"
         final durationSec = int.tryParse(item['duration']?.toString() ?? '180') ?? 180;
         final duration = _formatDuration(durationSec);
 
-        // Parse artwork image URL (prefer highest resolution)
         String artworkUrl = '';
         if (item['image'] != null && item['image'] is List) {
           final images = item['image'] as List;
           if (images.isNotEmpty) {
-            artworkUrl = images.last['url']?.toString() ?? images.last['link']?.toString() ?? '';
+            final last = images.last;
+            if (last is Map) {
+              artworkUrl = last['url']?.toString() ?? last['link']?.toString() ?? '';
+            } else {
+              artworkUrl = last.toString();
+            }
           }
+        } else if (item['image'] != null && item['image'] is String) {
+          artworkUrl = item['image'].toString();
         }
 
-        // Parse audio download URL (prefer 320kbps high quality)
         String audioUrl = '';
         if (item['downloadUrl'] != null && item['downloadUrl'] is List) {
           final downloads = item['downloadUrl'] as List;
-          if (downloads.isNotEmpty) {
-            // Find highest quality or fallback to last
-            audioUrl = downloads.last['url']?.toString() ?? downloads.last['link']?.toString() ?? '';
+          for (final d in downloads.reversed) {
+            if (d is Map) {
+              final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+              if (link.isNotEmpty) {
+                audioUrl = link;
+                break;
+              }
+            } else if (d is String && d.isNotEmpty) {
+              audioUrl = d;
+              break;
+            }
           }
+        } else if (item['downloadUrl'] != null && item['downloadUrl'] is String) {
+          audioUrl = item['downloadUrl'].toString();
         }
 
-        // Fix malformed URL schemes (critical for ExoPlayer)
         if (audioUrl.startsWith('https:/') && !audioUrl.startsWith('https://')) {
           audioUrl = audioUrl.replaceFirst('https:/', 'https://');
         } else if (audioUrl.startsWith('http:/') && !audioUrl.startsWith('http://')) {
@@ -330,9 +386,10 @@ class JamendoSource implements MusicSource {
   }
 
   List<Track> _filterMockTracks(String query) {
+    final lower = query.toLowerCase();
     return Track.mockTracks.where((track) {
-      return track.title.toLowerCase().contains(query.toLowerCase()) ||
-          track.artist.toLowerCase().contains(query.toLowerCase());
+      return track.title.toLowerCase().contains(lower) ||
+          track.artist.toLowerCase().contains(lower);
     }).toList();
   }
 }
