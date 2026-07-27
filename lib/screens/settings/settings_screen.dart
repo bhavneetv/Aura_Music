@@ -7,6 +7,7 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../equalizer/equalizer_screen.dart';
+import '../../services/update/update_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -519,6 +520,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _buildSectionHeader('ABOUT', customBranding.accentColor),
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+          title: const Text('Check for Updates', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          subtitle: const Text('Check GitHub for latest release'),
+          trailing: Icon(Icons.system_update_rounded, color: customBranding.accentColor),
+          onTap: () => UpdateService.checkForUpdates(context, silentIfLatest: true),
+        ),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
           title: const Text('Share App', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
           subtitle: const Text('Share download link & QR Code'),
           trailing: Icon(Icons.qr_code_2_rounded, color: customBranding.accentColor),
@@ -527,12 +535,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('v2.2 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          trailing: Text('v2.3 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('Developer License', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
           trailing: Text('Creative Commons & JioSaavn API', style: TextStyle(color: Colors.grey, fontSize: 13)),
+        ),
+        const SizedBox(height: 28),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Made with ',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const Text(
+                  '❤️',
+                  style: TextStyle(fontSize: 14),
+                ),
+                Text(
+                  ' by ',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  'Bhavneet Verma',
+                  style: TextStyle(
+                    color: customBranding.accentColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
