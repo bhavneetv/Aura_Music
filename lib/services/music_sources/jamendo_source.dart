@@ -10,9 +10,8 @@ import '../audio/audio_url_resolver.dart';
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
 
-  // Search mirrors (saavn-api.vercel.app returns valid 200 OK CDN URLs)
+  // Search mirrors (jiosaavn-api-beta returns accurate search results for any artist/query)
   static const List<String> _baseUrls = [
-    'https://saavn-api.vercel.app',
     'https://jiosaavn-api-beta.vercel.app',
     'https://jiosaavn-api-unofficial.vercel.app',
   ];

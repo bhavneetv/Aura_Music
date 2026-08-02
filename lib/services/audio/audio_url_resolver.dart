@@ -1,17 +1,16 @@
 import 'package:dio/dio.dart';
 import '../../models/track.dart';
 
-/// Multi-strategy audio URL resolver with URL validation.
-/// Re-searches by title+artist across multiple API mirrors,
-/// validates CDN URLs with HEAD requests, and tries multiple
-/// quality levels to find a working stream.
+/// Multi-strategy audio URL resolver.
+/// Primary strategy: Song ID lookup on saavn-api.vercel.app/song/[id]
+/// which decrypts and returns fresh 200 OK playable CDN URLs.
 class AudioUrlResolver {
   static final AudioUrlResolver instance = AudioUrlResolver._();
   AudioUrlResolver._();
 
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 6),
-    receiveTimeout: const Duration(seconds: 6),
+    connectTimeout: const Duration(seconds: 5),
+    receiveTimeout: const Duration(seconds: 5),
     sendTimeout: const Duration(seconds: 3),
     headers: {
       'User-Agent':
@@ -19,9 +18,8 @@ class AudioUrlResolver {
     },
   ));
 
-  // Search API mirrors — saavn-api.vercel.app returns valid 200 OK CDN URLs
+  // Search API mirrors for re-search fallback (excludes saavn-api search which returns static Hindi songs)
   static const List<String> _searchMirrors = [
-    'https://saavn-api.vercel.app',
     'https://jiosaavn-api-beta.vercel.app',
     'https://jiosaavn-api-unofficial.vercel.app',
   ];
@@ -30,25 +28,33 @@ class AudioUrlResolver {
   Future<String?> resolveAudioUrl(Track track, {bool forceFresh = false}) async {
     print('[AURA-RESOLVER] resolveAudioUrl for: "${track.title}" (id: ${track.id}) forceFresh=$forceFresh');
 
-    // Strategy 1: Original URL if it's a valid CDN link and we're not retrying
+    // Strategy 1: Original URL if it's already a direct CDN link and valid
     if (!forceFresh && _isDirectCdnLink(track.audioUrl)) {
       print('[AURA-RESOLVER] Strategy 1: Using existing CDN link');
       return track.audioUrl;
     }
 
-    // Strategy 2: Re-search across all mirrors, collect ALL candidate URLs,
-    // then validate them with HEAD requests
+    // Strategy 2: Direct Song ID lookup on saavn-api.vercel.app/song/[id]
+    // This is the most reliable endpoint for obtaining 200 OK CDN URLs
+    if (track.id.isNotEmpty) {
+      final songByIdUrl = await _tryGetSongById(track.id);
+      if (songByIdUrl != null) {
+        print('[AURA-RESOLVER] Strategy 2 SUCCESS: Got live URL from song ID lookup');
+        return songByIdUrl;
+      }
+    }
+
+    // Strategy 3: Re-search by title+artist on working search mirrors
     final candidates = await _collectCandidateUrls(track);
     if (candidates.isNotEmpty) {
-      print('[AURA-RESOLVER] Collected ${candidates.length} candidate URLs, validating...');
       final validUrl = await _findFirstPlayableUrl(candidates);
       if (validUrl != null) {
-        print('[AURA-RESOLVER] Strategy 2 SUCCESS: Validated working URL');
+        print('[AURA-RESOLVER] Strategy 3 SUCCESS: Got validated URL from re-search');
         return validUrl;
       }
     }
 
-    // Strategy 3: Return original URL as last resort if not forceFresh
+    // Strategy 4: Return original URL as last resort if not forceFresh
     if (!forceFresh && track.audioUrl.startsWith('http')) {
       print('[AURA-RESOLVER] Returning original URL as last resort');
       return track.audioUrl;
@@ -77,14 +83,39 @@ class AudioUrlResolver {
     return resolved;
   }
 
-  // ── Collect candidate URLs from all mirrors ────────────────────
+  // ── Strategy 2: Song ID Lookup ──────────────────────────────────
+
+  Future<String?> _tryGetSongById(String trackId) async {
+    final endpoints = [
+      'https://saavn-api.vercel.app/song/$trackId',
+      'https://jiosaavn-api-beta.vercel.app/songs?id=$trackId',
+    ];
+
+    for (final url in endpoints) {
+      try {
+        print('[AURA-RESOLVER] Trying song ID lookup: $url');
+        final response = await _dio.get(url);
+        if (response.statusCode == 200 && response.data != null) {
+          final cdnUrl = _extractCdnUrlFromData(response.data);
+          if (cdnUrl != null && _isDirectCdnLink(cdnUrl)) {
+            // Verify HEAD accessibility
+            if (await _isUrlPlayable(cdnUrl)) {
+              return cdnUrl;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  // ── Strategy 3: Collect & validate candidate URLs ───────────────
 
   Future<List<String>> _collectCandidateUrls(Track track) async {
     final List<String> candidates = [];
     final query = '${track.title} ${track.artist}'.trim();
     if (query.isEmpty) return candidates;
 
-    // Also try title-only as a fallback query
     final queries = [query];
     if (track.artist.isNotEmpty) {
       queries.add(track.title.trim());
@@ -100,22 +131,9 @@ class AudioUrlResolver {
           if (response.statusCode == 200 && response.data != null) {
             final urls = _extractMatchingUrls(response.data, track);
             for (final url in urls) {
-              if (!candidates.contains(url)) {
-                candidates.add(url);
-              }
-            }
-            // Also generate quality variants for each CDN URL
-            final variants = <String>[];
-            for (final url in urls) {
-              variants.addAll(_generateQualityVariants(url));
-            }
-            for (final v in variants) {
-              if (!candidates.contains(v)) {
-                candidates.add(v);
-              }
+              if (!candidates.contains(url)) candidates.add(url);
             }
           }
-          // If we already have enough candidates from this mirror, move on
           if (candidates.length >= 6) break;
         } catch (_) {}
       }
@@ -125,23 +143,7 @@ class AudioUrlResolver {
     return candidates;
   }
 
-  /// Given a CDN URL like .../hash_320.mp4, generate 160, 96, 48 variants
-  List<String> _generateQualityVariants(String url) {
-    final variants = <String>[];
-    if (!url.contains('aac.saavncdn.com')) return variants;
-
-    // Pattern: anything_320.mp4 → try _160.mp4, _96.mp4, _48.mp4
-    final qualities = ['160', '96', '48', '320'];
-    for (final q in qualities) {
-      final variant = url.replaceFirst(RegExp(r'_\d+\.mp4$'), '_$q.mp4');
-      if (variant != url && !variants.contains(variant)) {
-        variants.add(variant);
-      }
-    }
-    return variants;
-  }
-
-  // ── Validate URLs with HEAD request ────────────────────────────
+  // ── URL Validation Helpers ─────────────────────────────────────
 
   Future<String?> _findFirstPlayableUrl(List<String> urls) async {
     for (final url in urls) {
@@ -150,7 +152,6 @@ class AudioUrlResolver {
         return url;
       }
     }
-    print('[AURA-RESOLVER] ✗ None of ${urls.length} candidate URLs passed HEAD check');
     return null;
   }
 
@@ -166,7 +167,6 @@ class AudioUrlResolver {
       );
       return response.statusCode != null && response.statusCode! < 400;
     } catch (_) {
-      // HEAD might not be supported, try a range GET instead
       try {
         final response = await _dio.get(
           url,
@@ -185,9 +185,30 @@ class AudioUrlResolver {
     }
   }
 
-  // ── URL Extraction with title matching ─────────────────────────
+  // ── Data Extraction Helpers ────────────────────────────────────
 
-  /// Extract all CDN URLs from search results that match the track.
+  String? _extractCdnUrlFromData(dynamic data) {
+    if (data is Map) {
+      // Check direct 'url' field (saavn-api.vercel.app returns direct CDN URL here)
+      if (data['url'] != null) {
+        final url = data['url'].toString();
+        if (_isDirectCdnLink(url)) return url;
+      }
+      // Check nested under 'data'
+      if (data['data'] != null) {
+        final nested = _extractCdnUrlFromData(data['data']);
+        if (nested != null) return nested;
+      }
+      return _extractCdnUrlFromItem(data);
+    } else if (data is List && data.isNotEmpty) {
+      for (final item in data) {
+        final url = _extractCdnUrlFromData(item);
+        if (url != null) return url;
+      }
+    }
+    return null;
+  }
+
   List<String> _extractMatchingUrls(dynamic data, Track originalTrack) {
     final results = _extractResultsList(data);
     if (results == null || results.isEmpty) return [];
@@ -197,89 +218,46 @@ class AudioUrlResolver {
     final targetWords = _extractWords(targetTitle);
     final urls = <String>[];
 
-    // Pass 1: Title + artist match (highest confidence)
     for (final item in results) {
       if (item is! Map) continue;
       final name = (item['name']?.toString() ?? item['title']?.toString() ?? '').toLowerCase();
-      final artist = (item['artists']?.toString() ??
-              item['primaryArtists']?.toString() ??
-              item['artist']?.toString() ??
-              '')
-          .toLowerCase();
+      final artist = (item['artists']?.toString() ?? item['primaryArtists']?.toString() ?? '').toLowerCase();
 
       if (_titlesMatch(targetTitle, targetWords, name)) {
         if (targetArtist.isEmpty || _fuzzyContains(artist, targetArtist)) {
-          final itemUrls = _extractAllCdnUrlsFromItem(item);
-          print('[AURA-RESOLVER] Matched: "$name" by "$artist" → ${itemUrls.length} URLs');
-          urls.addAll(itemUrls);
+          final itemUrl = _extractCdnUrlFromItem(item);
+          if (itemUrl != null && !urls.contains(itemUrl)) {
+            urls.add(itemUrl);
+          }
         }
       }
-    }
-
-    // Pass 2: Title match only (no artist requirement)
-    if (urls.isEmpty) {
-      for (final item in results) {
-        if (item is! Map) continue;
-        final name = (item['name']?.toString() ?? item['title']?.toString() ?? '').toLowerCase();
-        if (_titlesMatch(targetTitle, targetWords, name)) {
-          final itemUrls = _extractAllCdnUrlsFromItem(item);
-          print('[AURA-RESOLVER] Title-only match: "$name" → ${itemUrls.length} URLs');
-          urls.addAll(itemUrls);
-        }
-      }
-    }
-
-    if (urls.isEmpty) {
-      print('[AURA-RESOLVER] No confident match found in ${results.length} results');
     }
     return urls;
   }
 
-  // ── Extract ALL quality CDN URLs from a single result item ─────
+  String? _extractCdnUrlFromItem(Map item) {
+    if (item['url'] != null) {
+      final url = item['url'].toString();
+      if (_isDirectCdnLink(url)) return url;
+    }
 
-  List<String> _extractAllCdnUrlsFromItem(Map item) {
-    final urls = <String>[];
-
-    // Check 'downloadUrl' / 'download_url' arrays (multiple quality levels)
     for (final key in ['downloadUrl', 'download_url']) {
       final val = item[key];
       if (val is List) {
-        // Iterate all quality levels (reversed = highest first)
         for (final d in val.reversed) {
           if (d is Map) {
             final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-            if (link.isNotEmpty && _isDirectCdnLink(link) && !urls.contains(link)) {
-              urls.add(link);
-            }
-          } else if (d is String && _isDirectCdnLink(d) && !urls.contains(d)) {
-            urls.add(d);
+            if (link.isNotEmpty && _isDirectCdnLink(link)) return link;
+          } else if (d is String && _isDirectCdnLink(d)) {
+            return d;
           }
         }
-      } else if (val is String && _isDirectCdnLink(val) && !urls.contains(val)) {
-        urls.add(val);
+      } else if (val is String && _isDirectCdnLink(val)) {
+        return val;
       }
     }
-
-    // Check direct 'url' field
-    if (item['url'] != null) {
-      final url = item['url'].toString();
-      if (_isDirectCdnLink(url) && !urls.contains(url)) {
-        urls.add(url);
-      }
-    }
-
-    // Check 'media_url'
-    if (item['media_url'] != null) {
-      final url = item['media_url'].toString();
-      if (_isDirectCdnLink(url) && !urls.contains(url)) {
-        urls.add(url);
-      }
-    }
-
-    return urls;
+    return null;
   }
-
-  // ── Results list extraction ────────────────────────────────────
 
   List? _extractResultsList(dynamic data) {
     if (data is List) return data;
@@ -294,8 +272,6 @@ class AudioUrlResolver {
     }
     return null;
   }
-
-  // ── Title matching helpers ─────────────────────────────────────
 
   bool _titlesMatch(String target, Set<String> targetWords, String candidate) {
     if (target == candidate) return true;
@@ -328,14 +304,11 @@ class AudioUrlResolver {
         .toSet();
   }
 
-  // ── CDN link detection ─────────────────────────────────────────
-
   bool _isDirectCdnLink(String url) {
     if (url.isEmpty) return false;
     if (url.contains('saavn-api.vercel.app') ||
         url.contains('jiosaavn-api') ||
         url.contains('jiosaavn.com') ||
-        url.contains('saavn.dev/api') ||
         url.contains('vercel.app')) {
       return false;
     }
