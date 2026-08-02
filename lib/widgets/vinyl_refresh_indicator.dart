@@ -158,8 +158,8 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: isDark 
-                      ? Colors.black.withOpacity(0.04) 
-                      : Colors.white.withOpacity(0.04),
+                      ? Colors.black.withValues(alpha: 0.04) 
+                      : Colors.white.withValues(alpha: 0.04),
                 ),
                 child: Opacity(
                   opacity: math.min(headerHeight / _refreshThreshold, 1.0),
@@ -190,12 +190,12 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
                         shape: BoxShape.circle,
                         color: const Color(0xFF141414), // Vinyl base charcoal
                         border: Border.all(
-                          color: AppTheme.goldAccent.withOpacity(0.4),
+                          color: AppTheme.goldAccent.withValues(alpha: 0.4),
                           width: 1.5,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
+                            color: Colors.black.withValues(alpha: 0.3),
                             blurRadius: 6,
                             offset: const Offset(0, 3),
                           ),
@@ -211,7 +211,7 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.08),
+                                color: Colors.white.withValues(alpha: 0.08),
                                 width: 0.8,
                               ),
                             ),
@@ -222,7 +222,7 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.08),
+                                color: Colors.white.withValues(alpha: 0.08),
                                 width: 0.8,
                               ),
                             ),
