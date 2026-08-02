@@ -98,6 +98,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> seek(Duration position) async {
+    _positionController.add(position);
     await _activePlayer.seek(position);
     _broadcastState();
   }

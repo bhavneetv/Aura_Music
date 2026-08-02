@@ -34,6 +34,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   late Animation<double> _decelAngleAnimation;
   Offset _albumDragOffset = Offset.zero;
 
+  // Smooth seeking slider state
+  bool _isDraggingProgress = false;
+  double _dragProgressValue = 0.0;
+
   // Song Summary state
   SongSummary? _songSummary;
   bool _isSummaryLoading = false;
@@ -661,38 +665,64 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 const SizedBox(height: 20),
 
                 // Progress Slider
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Column(
-                    children: [
-                      SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3.5,
-                          activeTrackColor: customBranding.accentColor,
-                          thumbColor: customBranding.accentColor,
-                          trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                        ),
-                        child: Slider(
-                          value: state.progress,
-                          onChanged: (val) {
-                            notifier.seek(val);
-                          },
-                        ),
+                Builder(
+                  builder: (context) {
+                    final sliderValue = _isDraggingProgress
+                        ? _dragProgressValue.clamp(0.0, 1.0)
+                        : state.progress.clamp(0.0, 1.0);
+                    final currentDisplayPosition = _isDraggingProgress
+                        ? Duration(milliseconds: (_dragProgressValue * state.totalDuration.inMilliseconds).round())
+                        : state.currentPosition;
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        children: [
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3.5,
+                              activeTrackColor: customBranding.accentColor,
+                              thumbColor: customBranding.accentColor,
+                              trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                            ),
+                            child: Slider(
+                              value: sliderValue,
+                              onChangeStart: (val) {
+                                triggerHaptic(HapticFeedbackType.selection);
+                                setState(() {
+                                  _isDraggingProgress = true;
+                                  _dragProgressValue = val;
+                                });
+                              },
+                              onChanged: (val) {
+                                setState(() {
+                                  _dragProgressValue = val;
+                                });
+                              },
+                              onChangeEnd: (val) {
+                                notifier.seek(val);
+                                setState(() {
+                                  _isDraggingProgress = false;
+                                });
+                              },
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(_formatDuration(currentDisplayPosition), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                Text(_formatDuration(state.totalDuration), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(_formatDuration(state.currentPosition), style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                            Text(_formatDuration(state.totalDuration), style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
 
                 const SizedBox(height: 16),

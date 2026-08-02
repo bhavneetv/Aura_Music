@@ -811,8 +811,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   void seek(double progress) {
     final dur = state.totalDuration;
-    final targetMs = (progress.clamp(0.0, 1.0) * dur.inMilliseconds).round();
-    _handler.seek(Duration(milliseconds: targetMs));
+    final double clampedProgress = progress.clamp(0.0, 1.0);
+    final targetMs = (clampedProgress * dur.inMilliseconds).round();
+    final targetPos = Duration(milliseconds: targetMs);
+    state = state.copyWith(currentPosition: targetPos, progress: clampedProgress);
+    _handler.seek(targetPos);
   }
 
   void seekToDuration(Duration position) {
