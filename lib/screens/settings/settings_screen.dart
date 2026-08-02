@@ -24,6 +24,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   double _crossfadeDuration = 5.0;
   bool _hapticsEnabled = true;
   String _progressBarStyle = 'normal';
+  String _summaryLanguage = 'en';
 
   @override
   void initState() {
@@ -34,6 +35,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _crossfadeDuration = StorageService.getCrossfadeDuration().toDouble();
     _hapticsEnabled = StorageService.isHapticsEnabled();
     _progressBarStyle = StorageService.getProgressBarStyle();
+    _summaryLanguage = StorageService.getSetting('summary_language', defaultValue: 'en') as String;
   }
 
   @override
@@ -154,6 +156,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     }).toList(),
                   ),
                   const SizedBox(height: 20),
+
+                  // Curated Color Presets
+                  const Text('Theme Preset Palettes', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildPresetChip('Aura Gold', 255, 199, 44, activeCustomState, customNotifier, setDialogState),
+                      _buildPresetChip('Cyberpunk', 0, 240, 255, activeCustomState, customNotifier, setDialogState),
+                      _buildPresetChip('Emerald', 16, 185, 129, activeCustomState, customNotifier, setDialogState),
+                      _buildPresetChip('Purple', 168, 85, 247, activeCustomState, customNotifier, setDialogState),
+                      _buildPresetChip('Crimson', 239, 68, 68, activeCustomState, customNotifier, setDialogState),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
 
                   // RGB Accent color sliders
                   Row(
@@ -411,6 +429,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
 
+        // 3.5 Group: AI Intelligence & Summary
+        const SizedBox(height: 12),
+        _buildSectionHeader('AI INTELLIGENCE & SUMMARY', customBranding.accentColor),
+        _buildSelectionTile(
+          'AI Song Summary Language',
+          _summaryLanguage == 'hi' ? 'Hindi (हिंदी)' : 'English',
+          () => _showSummaryLanguageDialog(),
+        ),
+        const Divider(indent: 24, endIndent: 24, height: 1),
+
         // 4. Group: Audio & Equalizer
         const SizedBox(height: 12),
         _buildSectionHeader('AUDIO EFFECTS', customBranding.accentColor),
@@ -535,7 +563,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('v2.3 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          trailing: Text('v3.1 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
@@ -615,7 +643,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
       subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
       value: value,
-      onChanged: onChanged,
+      onChanged: (val) {
+        triggerHaptic(HapticFeedbackType.light);
+        onChanged(val);
+      },
     );
   }
 
@@ -937,6 +968,72 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
         );
+      },
+    );
+  }
+
+  void _showSummaryLanguageDialog() {
+    final customBranding = ref.read(customizationProvider);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('AI Song Summary Language', style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: const Text('English'),
+                value: 'en',
+                groupValue: _summaryLanguage,
+                activeColor: customBranding.accentColor,
+                onChanged: (val) async {
+                  if (val == null) return;
+                  setState(() => _summaryLanguage = val);
+                  await StorageService.saveSetting('summary_language', val);
+                  if (mounted) Navigator.pop(context);
+                },
+              ),
+              RadioListTile<String>(
+                title: const Text('Hindi (हिंदी)'),
+                value: 'hi',
+                groupValue: _summaryLanguage,
+                activeColor: customBranding.accentColor,
+                onChanged: (val) async {
+                  if (val == null) return;
+                  setState(() => _summaryLanguage = val);
+                  await StorageService.saveSetting('summary_language', val);
+                  if (mounted) Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPresetChip(
+    String label,
+    int r,
+    int g,
+    int b,
+    CustomizationState state,
+    CustomizationNotifier notifier,
+    StateSetter setDialogState,
+  ) {
+    final chipColor = Color.fromARGB(255, r, g, b);
+    final isSelected = state.red == r && state.green == g && state.blue == b;
+
+    return ActionChip(
+      avatar: CircleAvatar(backgroundColor: chipColor, radius: 6),
+      label: Text(label, style: TextStyle(fontSize: 12, color: isSelected ? chipColor : Colors.grey, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+      backgroundColor: isSelected ? chipColor.withValues(alpha: 0.15) : Colors.transparent,
+      side: BorderSide(color: isSelected ? chipColor : Colors.grey.withValues(alpha: 0.3)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onPressed: () {
+        notifier.updateAccentColor(r, g, b);
+        setDialogState(() {});
       },
     );
   }

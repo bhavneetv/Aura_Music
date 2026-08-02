@@ -46,3 +46,6 @@ app.*.map.json
 # Environment secrets
 .env
 *.env
+pdr.md
+pdr.md
+pdrfix.md

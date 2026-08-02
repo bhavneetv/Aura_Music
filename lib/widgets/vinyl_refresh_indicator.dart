@@ -59,7 +59,7 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
   }
 
   void _startLoading() {
-    HapticFeedback.vibrate(); // 2nd Haptic vibration when refresh begins
+    HapticFeedback.lightImpact(); // Light haptic when refresh begins
     setState(() {
       _isRefreshing = true;
     });
@@ -85,7 +85,7 @@ class _VinylRefreshIndicatorState extends State<VinylRefreshIndicator> with Tick
 
   void _checkHapticThreshold(bool newCanRefresh) {
     if (newCanRefresh && !_canRefresh) {
-      HapticFeedback.mediumImpact(); // 1st Haptic vibration when pull threshold is reached
+      HapticFeedback.lightImpact(); // Light haptic when pull threshold is reached
     }
   }
 

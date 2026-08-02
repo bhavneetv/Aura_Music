@@ -233,7 +233,28 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   }
 
   Widget _buildSongsList(Color accentColor) {
-    final tracks = Track.mockTracks;
+    final tracks = StorageService.getFavoriteTracks();
+
+    if (tracks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.favorite_border_rounded, size: 56, color: accentColor.withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            const Text(
+              'No favorited songs yet',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Double-tap any playing song to add it here!',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Consumer(
       builder: (context, ref, child) {
@@ -254,10 +275,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   width: 48,
                   height: 48,
                   fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    width: 48,
+                    height: 48,
+                    color: Colors.grey.shade800,
+                    child: const Icon(Icons.music_note_rounded),
+                  ),
                 ),
               ),
               title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(track.artist),
+              subtitle: Text('${track.artist} • ${track.album}'),
               trailing: IconButton(
                 icon: Icon(
                   isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
@@ -265,7 +292,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   size: 20,
                 ),
                 onPressed: () async {
-                  await StorageService.toggleFavorite('trackIds', track.id);
+                  await StorageService.toggleFavoriteTrack(track);
                   setState(() {});
                 },
               ),
@@ -280,8 +307,24 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   }
 
   Widget _buildAlbumsGrid() {
-    final tracks = Track.mockTracks;
+    final tracks = StorageService.getFavoriteTracks();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (tracks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.album_rounded, size: 56, color: Colors.grey.withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            const Text(
+              'No albums saved',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
 
     return GridView.builder(
       padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 96),

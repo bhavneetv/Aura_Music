@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +21,31 @@ class UpdateService {
     BuildContext context, {
     bool silentIfLatest = false,
   }) async {
+    // I.2 Network connectivity check
+    try {
+      final result = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 3));
+      if (result.isEmpty || result[0].rawAddress.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Offline mode active: Cannot check for updates.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Offline mode active: Cannot check for updates.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
     try {
       final response = await Dio().get(
         _apiUrl,

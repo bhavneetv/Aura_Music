@@ -1,14 +1,12 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:dio/dio.dart';
 import '../models/track.dart';
 import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
+import '../services/audio/audio_url_resolver.dart';
 import '../services/recommendation/recommendation_engine.dart';
 import '../services/music_sources/jamendo_source.dart';
 import '../providers/music_provider.dart';
@@ -38,6 +36,9 @@ void triggerHaptic([HapticFeedbackType type = HapticFeedbackType.light]) {
 // Repeat modes
 enum RepeatMode { off, all, one }
 
+// Queue item origin tagging
+enum QueueSource { user, recommendation }
+
 class PlaybackState {
   final Track? currentTrack;
   final bool isPlaying;
@@ -47,6 +48,7 @@ class PlaybackState {
   
   // Smart Queue states
   final List<Track> queue;
+  final Map<String, QueueSource> queueSources;
   final int currentIndex;
   final bool isShuffle;
   final RepeatMode repeatMode;
@@ -66,6 +68,7 @@ class PlaybackState {
     this.currentPosition = Duration.zero,
     this.totalDuration = const Duration(minutes: 3, seconds: 45),
     this.queue = const [],
+    this.queueSources = const {},
     this.currentIndex = -1,
     this.isShuffle = false,
     this.repeatMode = RepeatMode.off,
@@ -102,6 +105,7 @@ class PlaybackState {
     Duration? currentPosition,
     Duration? totalDuration,
     List<Track>? queue,
+    Map<String, QueueSource>? queueSources,
     int? currentIndex,
     bool? isShuffle,
     RepeatMode? repeatMode,
@@ -119,6 +123,7 @@ class PlaybackState {
       currentPosition: currentPosition ?? this.currentPosition,
       totalDuration: totalDuration ?? this.totalDuration,
       queue: queue ?? this.queue,
+      queueSources: queueSources ?? this.queueSources,
       currentIndex: currentIndex ?? this.currentIndex,
       isShuffle: isShuffle ?? this.isShuffle,
       repeatMode: repeatMode ?? this.repeatMode,
@@ -301,48 +306,61 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     );
   }
 
+  void playCustomQueue(List<Track> tracks, {int initialIndex = 0}) async {
+    if (tracks.isEmpty) return;
+    final safeIndex = initialIndex.clamp(0, tracks.length - 1);
+    final targetTrack = tracks[safeIndex];
+
+    state = state.copyWith(
+      queue: List<Track>.from(tracks),
+      currentIndex: safeIndex,
+      currentTrack: targetTrack,
+    );
+    await _saveQueue();
+
+    _streamTrack(targetTrack);
+  }
+
+  void jumpToQueueIndex(int index) async {
+    if (index < 0 || index >= state.queue.length) return;
+    final targetTrack = state.queue[index];
+    state = state.copyWith(
+      currentIndex: index,
+      currentTrack: targetTrack,
+    );
+    await _saveQueue();
+    _streamTrack(targetTrack);
+  }
+
   // ── Smart Queue Controls ────────────────────────────────────
 
   void playTrack(Track track) async {
-    triggerHaptic(HapticFeedbackType.selection);
+    int idx = state.queue.indexWhere((t) => t.id == track.id || (t.title.trim().toLowerCase() == track.title.trim().toLowerCase() && t.artist.trim().toLowerCase() == track.artist.trim().toLowerCase()));
+
+    if (idx != -1) {
+      // Track is already part of active queue — just jump index without altering queue order
+      jumpToQueueIndex(idx);
+      return;
+    }
 
     // Check if session context changed (e.g. user selected a song from a different genre)
     final prevContext = StorageService.getSessionContext();
     final newGenre = track.genre.trim().toUpperCase();
-    final newArtist = track.artist.split(',').first.trim();
 
     bool contextPivoted = false;
     if (newGenre.isNotEmpty && prevContext['genre'] != null && prevContext['genre']!.isNotEmpty && prevContext['genre'] != newGenre) {
       contextPivoted = true;
     }
 
-    // Record real-time telemetry and update session context in Hive DB
-    RecommendationEngine.instance.recordTrackStarted(track);
-
     List<Track> currentQueue;
-    int idx;
 
     if (contextPivoted) {
-      // Rebuild clean queue starting with the new genre seed track
       currentQueue = [track];
       idx = 0;
     } else {
       currentQueue = List.from(state.queue);
-      final titleKey = track.title.trim().toLowerCase();
-      currentQueue.removeWhere((t) => t.id == track.id || t.title.trim().toLowerCase() == titleKey);
-
-      idx = currentQueue.indexWhere((t) => t.id == track.id);
-      if (idx == -1) {
-        currentQueue.add(track);
-        idx = currentQueue.length - 1;
-      }
-
-      // Re-rank upcoming tracks against the new current track context
-      if (idx + 1 < currentQueue.length) {
-        final upcoming = currentQueue.sublist(idx + 1);
-        final reranked = RecommendationEngine.instance.rerankUpcomingQueue(upcoming, track);
-        currentQueue = currentQueue.sublist(0, idx + 1)..addAll(reranked);
-      }
+      currentQueue.add(track);
+      idx = currentQueue.length - 1;
     }
     
     state = state.copyWith(
@@ -352,6 +370,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     );
     await _saveQueue();
 
+    _streamTrack(track);
+  }
+
+  int _playbackNonce = 0;
+
+  Future<void> _streamTrack(Track track) async {
+    final myNonce = ++_playbackNonce;
+    triggerHaptic(HapticFeedbackType.selection);
+    RecommendationEngine.instance.recordTrackStarted(track);
+
     String audioUrl = track.audioUrl;
 
     // Check if downloaded locally first
@@ -360,32 +388,73 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       audioUrl = downloadedPath;
     }
 
+    // If audioUrl is empty or invalid, attempt resolution via AudioUrlResolver
+    if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
+      print('[AURA-PLAY] Empty/unresolved audioUrl for "${track.title}", resolving via AudioUrlResolver...');
+      final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+      // Check if user changed song while we were resolving
+      if (_playbackNonce != myNonce) {
+        print('[AURA-PLAY] Stale resolution for "${track.title}" (user changed song), discarding');
+        return;
+      }
+      if (resolved != null && resolved.isNotEmpty) {
+        audioUrl = resolved;
+        track = track.copyWith(audioUrl: audioUrl);
+        final updatedQueue = List<Track>.from(state.queue);
+        if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
+          updatedQueue[state.currentIndex] = track;
+        }
+        state = state.copyWith(queue: updatedQueue, currentTrack: track);
+      }
+    }
+
     if (audioUrl.isNotEmpty) {
       try {
+        await StorageService.addSearchedAndPlayedTrack(track);
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
+        // Final nonce check before actually starting playback
+        if (_playbackNonce != myNonce) {
+          print('[AURA-PLAY] Stale playback for "${track.title}" (user changed song), discarding');
+          return;
+        }
         await _handler.playTrack(track.copyWith(audioUrl: audioUrl));
 
         _preloadNextTrack();
         ensureUpcomingRecommendations();
       } catch (e) {
-        print('ExoPlayer play failed for ${track.title}: $e');
-        // Try recovering fresh URL once if stream failed
+        print('[AURA-PLAY] Initial playback failed for "${track.title}": $e');
+        if (e.toString().contains('Loading interrupted')) return;
+        // Check nonce before retrying — user may have moved on
+        if (_playbackNonce != myNonce) return;
         try {
-          final source = ref.read(musicSourceProvider);
-          final freshResults = await source.searchTracks('${track.title} ${track.artist}');
-          if (freshResults.isNotEmpty) {
-            final freshTrack = freshResults.first;
-            if (freshTrack.audioUrl.isNotEmpty && freshTrack.audioUrl != audioUrl) {
-              await _handler.playTrack(freshTrack);
-              _preloadNextTrack();
-              ensureUpcomingRecommendations();
-              return;
+          final resolvedUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+          if (_playbackNonce != myNonce) return;
+          if (resolvedUrl != null && resolvedUrl != audioUrl && resolvedUrl.isNotEmpty) {
+            print('[AURA-PLAY] Retrying with resolved URL: $resolvedUrl');
+            final resolvedTrack = track.copyWith(audioUrl: resolvedUrl);
+            await _handler.playTrack(resolvedTrack);
+            final updatedQueue = List<Track>.from(state.queue);
+            if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
+              updatedQueue[state.currentIndex] = resolvedTrack;
             }
+            state = state.copyWith(queue: updatedQueue, currentTrack: resolvedTrack);
+            await _saveQueue();
+            _preloadNextTrack();
+            ensureUpcomingRecommendations();
+            return;
           }
-        } catch (_) {}
+        } catch (resolveErr) {
+          print('[AURA-PLAY] AudioUrlResolver fallback also failed: $resolveErr');
+        }
+        // If resolution and retries fail, advance to next track
+        if (_playbackNonce == myNonce) nextTrack();
       }
+    } else {
+      print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}", skipping to next track...');
+      if (_playbackNonce == myNonce) nextTrack();
     }
   }
+
 
   Future<void> ensureUpcomingRecommendations() async {
     if (state.currentTrack == null) return;
@@ -460,7 +529,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
-  void addToQueue(Track track) {
+  void addToQueue(Track track, {QueueSource source = QueueSource.user}) {
     List<Track> updated = List.from(state.queue);
     final titleKey = track.title.trim().toLowerCase();
     updated.removeWhere((t) => t.id == track.id || t.title.trim().toLowerCase() == titleKey);
@@ -468,7 +537,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         ? state.currentIndex + 1
         : updated.length;
     updated.insert(insertIdx, track);
-    state = state.copyWith(queue: updated);
+
+    final updatedSources = Map<String, QueueSource>.from(state.queueSources);
+    updatedSources[track.id] = source;
+
+    state = state.copyWith(queue: updated, queueSources: updatedSources);
     _saveQueue();
   }
 
@@ -737,9 +810,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   void seek(double progress) {
-    final totalMs = state.totalDuration.inMilliseconds;
-    final targetMs = (totalMs * progress).toInt();
+    final dur = state.totalDuration;
+    final targetMs = (progress.clamp(0.0, 1.0) * dur.inMilliseconds).round();
     _handler.seek(Duration(milliseconds: targetMs));
+  }
+
+  void seekToDuration(Duration position) {
+    _handler.seek(position);
+    final dur = state.totalDuration;
+    final double progress = dur.inMilliseconds > 0
+        ? (position.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    state = state.copyWith(currentPosition: position, progress: progress);
   }
 
   void setPlaybackSpeed(double speed) {

@@ -163,11 +163,17 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
-  Future<void> downloadPlaylist(List<Track> tracks) async {
+  Future<void> downloadPlaylist(List<Track> tracks, {Function(int completed, int total)? onProgress}) async {
+    int completed = 0;
+    final total = tracks.length;
+    onProgress?.call(completed, total);
+
     for (final track in tracks) {
       if (!isDownloaded(track.id)) {
         await startDownload(track);
       }
+      completed++;
+      onProgress?.call(completed, total);
     }
   }
 }

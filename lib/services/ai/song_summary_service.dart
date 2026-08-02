@@ -1,5 +1,6 @@
-import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../storage/storage_service.dart';
+import 'ai_service.dart';
 
 class LyricLineExplanation {
   final String line;
@@ -61,11 +62,7 @@ class SongSummaryService {
   static final SongSummaryService instance = SongSummaryService._internal();
   SongSummaryService._internal();
 
-  final Dio _dio = Dio();
-  static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
-  static const String _baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-  /// Get song summary — returns cached version if available, otherwise generates via AI or fallback
+  /// Get song summary — returns cached version if available, otherwise generates via AiService
   Future<SongSummary> getSummary({
     required String trackId,
     required String title,
@@ -74,9 +71,14 @@ class SongSummaryService {
     required String genre,
     bool forceRefresh = false,
   }) async {
+    // Read user's summary language preference ('en' -> English, 'hi' -> Hindi)
+    final langCode = (StorageService.getSetting('summary_language', defaultValue: 'en') as String).toLowerCase();
+    final summaryLangName = langCode == 'hi' ? 'Hindi' : 'English';
+    final cacheKey = '${trackId}_$langCode';
+
     // Check cache first
     if (!forceRefresh) {
-      final cached = StorageService.getSongSummary(trackId);
+      final cached = StorageService.getSongSummary(cacheKey);
       if (cached != null) {
         final parsed = SongSummary.fromJson(cached);
         if (parsed.theme.isNotEmpty) {
@@ -85,38 +87,36 @@ class SongSummaryService {
       }
     }
 
-    // Determine user's preferred language for the summary
-    final preferredLangs = StorageService.getPreferredLanguages();
-    final summaryLang = preferredLangs.isNotEmpty ? preferredLangs.first : 'English';
-
     try {
       final summary = await _generateAISummary(
         title: title,
         artist: artist,
         album: album,
         genre: genre,
-        outputLanguage: summaryLang,
+        outputLanguage: summaryLangName,
       );
 
       if (summary != null && summary.theme.isNotEmpty) {
-        await StorageService.saveSongSummary(trackId, summary.toJson());
+        await StorageService.saveSongSummary(cacheKey, summary.toJson());
         return summary;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[SongSummaryService] AI generation failed: $e');
+    }
 
-    // Rich metadata-based fallback (guaranteed to succeed offline or on API key fallback)
+    // Metadata-based fallback
     final fallback = _generateMetadataFallback(
       title: title,
       artist: artist,
       album: album,
       genre: genre,
-      language: summaryLang,
+      language: summaryLangName,
     );
-    await StorageService.saveSongSummary(trackId, fallback.toJson());
+    await StorageService.saveSongSummary(cacheKey, fallback.toJson());
     return fallback;
   }
 
-  /// Generate AI summary with line-by-line lyric explanations using Gemini 2.0 Flash
+  /// Generate AI summary using unified AiService (Groq -> Gemini 2.5 Flash fallback)
   Future<SongSummary?> _generateAISummary({
     required String title,
     required String artist,
@@ -124,108 +124,59 @@ class SongSummaryService {
     required String genre,
     required String outputLanguage,
   }) async {
-    final prompt = '''You are a music storyteller. For the song "$title" by $artist (Album: $album, Language/Genre: $genre), create a narrative summary and a line-by-line storytelling breakdown.
+    final prompt = '''You are a master music critic and cultural storyteller.
+Analyze the song "$title" by $artist (Album: "$album", Genre/Language: "$genre").
+Provide a concise, high-quality narrative summary of the song's theme and story in $outputLanguage.
 
-For each lyric line, write a narrative explanation in $outputLanguage that tells the listener what the author is about to express — like a narrator guiding someone through the song's journey. Use phrases like "Here the artist tells us...", "In this line, the author reveals...", "The singer expresses...", "Now the poet conveys..." etc.
+CRITICAL INSTRUCTIONS:
+- Write a short 3-4 sentence summary of the song's theme and story.
+- Do NOT include or reproduce any actual lyric lines. Do NOT go line-by-line. This must read as a summary, not a transcription.
+- Do NOT just restate the title and artist in different words.
 
 Provide:
-1. **Theme**: What story is this song telling? (1-2 sentences, narrative tone)
-2. **Emotions**: What feelings does the listener experience? (comma-separated list)
-3. **Message**: What is the author trying to tell the listener? (1-2 sentences)
-4. **Cultural Notes**: Any cultural references the listener should know? (1 sentence or None)
-5. **Line-by-Line Story**: Pick 5-7 key lyric lines and narrate what the author is telling the listener in each line.
+1. **Theme**: Concise 3-4 sentence narrative summary of the theme and story.
+2. **Emotions**: 3-4 specific emotional tones (e.g., Nostalgic, Bittersweet, Triumphant).
+3. **Message**: Core philosophy or underlying message (2 sentences).
+4. **Cultural Notes**: Cinematic context, album, or style notes (1-2 sentences).
 
-Format your response EXACTLY like this:
-THEME: [your theme text]
-EMOTIONS: [your emotions list]
+Format your response EXACTLY as:
+THEME: [your 3-4 sentence summary]
+EMOTIONS: [comma-separated emotions list]
 MESSAGE: [your message text]
-CULTURAL: [your cultural notes or None]
-LINE: [Lyric Line 1]
-MEANING: [Narrative of what the author tells us in this line]
-LINE: [Lyric Line 2]
-MEANING: [Narrative of what the author tells us in this line]
-LINE: [Lyric Line 3]
-MEANING: [Narrative of what the author tells us in this line]
-LINE: [Lyric Line 4]
-MEANING: [Narrative of what the author tells us in this line]
-LINE: [Lyric Line 5]
-MEANING: [Narrative of what the author tells us in this line]''';
+CULTURAL: [cultural/cinematic context]''';
 
-    try {
-      final response = await _dio.post(
-        '$_baseUrl?key=$_apiKey',
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          receiveTimeout: const Duration(seconds: 15),
-        ),
-        data: {
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'temperature': 0.75,
-            'maxOutputTokens': 800,
-          }
-        },
-      );
-
-      final candidates = response.data['candidates'] as List?;
-      if (candidates != null && candidates.isNotEmpty) {
-        final content = candidates[0]['content'];
-        final parts = content['parts'] as List?;
-        if (parts != null && parts.isNotEmpty) {
-          final text = parts[0]['text']?.toString() ?? '';
-          return _parseAIResponse(text, outputLanguage);
-        }
-      }
-    } catch (_) {}
-    return null;
+    final (text, _) = await AiService.instance.generate(prompt);
+    return _parseAIResponse(text, outputLanguage);
   }
 
   /// Parse structured AI response into SongSummary
   SongSummary? _parseAIResponse(String text, String language) {
-    if (text.isEmpty) return null;
+    if (text.trim().isEmpty) return null;
 
+    final cleanText = text.replaceAll('**', '').replaceAll('##', '');
     String theme = '';
     String emotions = '';
     String message = '';
     String cultural = '';
-    final List<LyricLineExplanation> lines = [];
 
-    String currentLine = '';
+    final themeMatch = RegExp(r'THEME:\s*([\s\S]*?)(?=EMOTIONS:|MESSAGE:|CULTURAL:|$)', caseSensitive: false).firstMatch(cleanText);
+    final emotionsMatch = RegExp(r'EMOTIONS:\s*([\s\S]*?)(?=MESSAGE:|CULTURAL:|THEME:|$)', caseSensitive: false).firstMatch(cleanText);
+    final messageMatch = RegExp(r'MESSAGE:\s*([\s\S]*?)(?=CULTURAL:|THEME:|EMOTIONS:|$)', caseSensitive: false).firstMatch(cleanText);
+    final culturalMatch = RegExp(r'CULTURAL:\s*([\s\S]*?)(?=$)', caseSensitive: false).firstMatch(cleanText);
 
-    for (final rawLine in text.split('\n')) {
-      final trimmed = rawLine.trim();
-      final upper = trimmed.toUpperCase();
+    if (themeMatch != null) theme = themeMatch.group(1)?.trim() ?? '';
+    if (emotionsMatch != null) emotions = emotionsMatch.group(1)?.trim() ?? '';
+    if (messageMatch != null) message = messageMatch.group(1)?.trim() ?? '';
+    if (culturalMatch != null) cultural = culturalMatch.group(1)?.trim() ?? '';
 
-      if (upper.contains('THEME:')) {
-        theme = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-      } else if (upper.contains('EMOTIONS:')) {
-        emotions = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-      } else if (upper.contains('MESSAGE:')) {
-        message = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-      } else if (upper.contains('CULTURAL:')) {
-        cultural = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-        if (cultural.toLowerCase() == 'none') cultural = '';
-      } else if (upper.contains('LINE:') || upper.startsWith('LINE ')) {
-        currentLine = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-        currentLine = currentLine.replaceAll(RegExp(r'^[\s\x22\x27]+|[\s\x22\x27]+$'), '');
-      } else if (upper.contains('MEANING:') || upper.contains('EXPLANATION:')) {
-        final meaning = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-        if (currentLine.isNotEmpty && meaning.isNotEmpty) {
-          lines.add(LyricLineExplanation(line: currentLine, explanation: meaning));
-          currentLine = '';
-        }
-      }
+    if (cultural.toLowerCase() == 'none') cultural = '';
+
+    if (theme.isEmpty) {
+      theme = cleanText.length > 250 ? '${cleanText.substring(0, 250)}...' : cleanText;
     }
 
-    if (theme.isEmpty && emotions.isEmpty && message.isEmpty) {
-      theme = text.length > 200 ? '${text.substring(0, 200)}...' : text;
-    }
+    if (emotions.isEmpty) emotions = 'Melody, Passion, Rhythm, Storytelling';
+    if (message.isEmpty) message = 'Reflects the core musical theme and emotional narrative of the track.';
 
     return SongSummary(
       theme: theme,
@@ -233,11 +184,9 @@ MEANING: [Narrative of what the author tells us in this line]''';
       message: message,
       culturalNotes: cultural,
       language: language,
-      lineByLineExplanations: lines,
     );
   }
 
-  /// Generate a rich summary with line-by-line lyric breakdowns from metadata
   SongSummary _generateMetadataFallback({
     required String title,
     required String artist,
@@ -268,14 +217,6 @@ MEANING: [Narrative of what the author tells us in this line]''';
       emotions = 'Love, Nostalgia, Emotional Depth, Romance';
       message = 'Reflects on deep personal relationships and poignant romantic storytelling in "$title".';
       cultural = 'Employs classic Indian cinematic arrangements with modern orchestral production.';
-    } else if (genreUpper.contains('SAD') || genreUpper.contains('HEARTBREAK')) {
-      theme = '"$title" is a tender ballad by $artistClean exploring themes of heartbreak and emotional healing.';
-      emotions = 'Heartbreak, Longing, Melancholy, Solitude';
-      message = 'Finding solace and healing through heartfelt vulnerability in "$title".';
-    } else if (genreUpper.contains('LOFI') || genreUpper.contains('LO-FI') || genreUpper.contains('CHILL')) {
-      theme = '"$title" offers relaxing lo-fi atmospheric textures and ambient beats by $artistClean.';
-      emotions = 'Calm, Tranquility, Focus, Relaxation';
-      message = 'Unwind, focus, and let peace take over your surroundings with "$title".';
     }
 
     final List<LyricLineExplanation> lines = [
@@ -291,10 +232,6 @@ MEANING: [Narrative of what the author tells us in this line]''';
         line: 'Chorus / Core Refrain',
         explanation: 'Now the author expresses the main message of the track, telling us how love, life, and personal passion intertwine.',
       ),
-      LyricLineExplanation(
-        line: 'Concluding movement of "$title"',
-        explanation: 'The artist resolves the musical journey, leaving the listener with a resonant message of emotional connection.',
-      ),
     ];
 
     return SongSummary(
@@ -307,8 +244,9 @@ MEANING: [Narrative of what the author tells us in this line]''';
     );
   }
 
-  /// Clear cached summary for a track (for refresh)
   Future<void> clearCache(String trackId) async {
+    final langCode = (StorageService.getSetting('summary_language', defaultValue: 'en') as String).toLowerCase();
+    await StorageService.clearSongSummary('${trackId}_$langCode');
     await StorageService.clearSongSummary(trackId);
   }
 }

@@ -68,6 +68,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: FlutterIpaExport.ipa
-          tag: v2.3
+          tag: v3.1
           overwrite: true
-          body: "This is first release"
+          body: "v3.1 released"

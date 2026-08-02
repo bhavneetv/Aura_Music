@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
@@ -241,6 +242,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    String timeGreeting = 'Good morning';
+    if (hour < 12) {
+      timeGreeting = 'Good morning';
+    } else if (hour < 17) {
+      timeGreeting = 'Good afternoon';
+    } else if (hour < 21) {
+      timeGreeting = 'Good evening';
+    } else {
+      timeGreeting = 'Good night';
+    }
+    final userName = StorageService.getSetting('user_name', defaultValue: '') as String;
+    if (userName.trim().isNotEmpty) {
+      return '$timeGreeting, ${userName.trim()}';
+    }
+    return '$timeGreeting, Listener';
+  }
+
   // Home Header widget (greeting, title, and search bar)
   Widget _buildHomeHeader(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -256,7 +276,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               Icon(customBranding.brandingIcon, color: customBranding.accentColor, size: 20),
               const SizedBox(width: 8),
               Text(
-                'Good Afternoon, Listener',
+                _greeting(),
                 style: TextStyle(
                   color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.5),
                   fontSize: 13,
@@ -544,53 +564,91 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Bottom Navigation Bar Widget
+  // Bottom Navigation Bar Widget - G.2 Sleek Curved Floating Design
   Widget _buildBottomNavigationBar(BuildContext context, Color accentColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return NavigationBarTheme(
-      data: NavigationBarThemeData(
-        indicatorColor: accentColor.withOpacity(0.12),
-        labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.2),
-        ),
-      ),
-      child: NavigationBar(
-        selectedIndex: _currentTab,
-        height: 72,
-        backgroundColor: isDark ? const Color(0xFF0F0F0F) : const Color(0xFFF3EFE9),
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.home_rounded),
-            selectedIcon: Icon(Icons.home_rounded, color: accentColor),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.search_rounded),
-            selectedIcon: Icon(Icons.search_rounded, color: accentColor),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.library_music_rounded),
-            selectedIcon: Icon(Icons.library_music_rounded, color: accentColor),
-            label: 'Library',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.queue_music_rounded),
-            selectedIcon: Icon(Icons.queue_music_rounded, color: accentColor),
-            label: 'Queue',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.settings_rounded),
-            selectedIcon: Icon(Icons.settings_rounded, color: accentColor),
-            label: 'Settings',
+    return Container(
+      margin: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+      decoration: BoxDecoration(
+        color: (isDark ? const Color(0xFF141416) : Colors.white).withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
-        onDestinationSelected: (index) {
-          setState(() {
-            _currentTab = index;
-          });
-        },
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home', accentColor),
+                _buildNavItem(1, Icons.search_rounded, Icons.search_rounded, 'Search', accentColor),
+                _buildNavItem(2, Icons.library_music_rounded, Icons.library_music_outlined, 'Library', accentColor),
+                _buildNavItem(3, Icons.queue_music_rounded, Icons.queue_music_outlined, 'Queue', accentColor),
+                _buildNavItem(4, Icons.settings_rounded, Icons.settings_outlined, 'Settings', accentColor),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(int index, IconData selectedIcon, IconData unselectedIcon, String label, Color accentColor) {
+    final isSelected = _currentTab == index;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return GestureDetector(
+      onTap: () {
+        triggerHaptic(HapticFeedbackType.light);
+        setState(() {
+          _currentTab = index;
+        });
+      },
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? accentColor.withValues(alpha: 0.16) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? selectedIcon : unselectedIcon,
+              size: 22,
+              color: isSelected ? accentColor : (isDark ? Colors.white54 : Colors.black54),
+            ),
+            if (isSelected) ...[
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: accentColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  fontFamily: 'Outfit',
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

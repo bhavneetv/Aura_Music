@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'providers/settings_provider.dart';
 import 'providers/customization_provider.dart';
 import 'routes/app_routes.dart';
@@ -12,6 +13,11 @@ final audioHandlerProvider = Provider<AudioHandler>((ref) => throw Unimplemented
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('Could not load .env file: $e');
+  }
   await StorageService.init();
   final audioHandler = await initAudioHandler();
   

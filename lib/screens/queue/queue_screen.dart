@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
+import '../../services/storage/storage_service.dart';
 import '../../themes/app_theme.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
@@ -50,12 +50,22 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                       fontWeight: FontWeight.w900,
                     ),
               ),
-              IconButton(
-                icon: const Icon(Icons.clear_all_rounded, size: 24),
-                tooltip: 'Clear Queue',
-                onPressed: () {
-                  notifier.clearQueue();
-                },
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.playlist_add_check_rounded, color: customBranding.accentColor, size: 24),
+                    tooltip: 'Save Queue as Playlist',
+                    onPressed: () => _showSaveQueueAsPlaylistSheet(context),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.clear_all_rounded, size: 24),
+                    tooltip: 'Clear Queue',
+                    onPressed: () {
+                      notifier.clearQueue();
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -254,5 +264,170 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
   String _formatQueueDuration(Duration duration) {
     final m = duration.inMinutes;
     return '$m Min';
+  }
+
+  void _showSaveQueueAsPlaylistSheet(BuildContext context) {
+    final state = ref.read(playbackProvider);
+    final customBranding = ref.read(customizationProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final nameController = TextEditingController(
+      text: 'Queue Playlist (${DateTime.now().day}/${DateTime.now().month})',
+    );
+    String selectedFilter = 'all'; // 'all', 'user', 'recommendation'
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final userTracks = state.queue.where((t) => state.queueSources[t.id] == QueueSource.user || state.queueSources[t.id] == null).toList();
+            final recTracks = state.queue.where((t) => state.queueSources[t.id] == QueueSource.recommendation).toList();
+
+            return Container(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF161618) : const Color(0xFFFAF8F5),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Save Queue as Playlist',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Playlist Name Input
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Playlist Name',
+                      filled: true,
+                      fillColor: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.04),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  const Text('Select Songs Source', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+
+                  // Source Filters
+                  RadioListTile<String>(
+                    title: Text('All Queue Songs (${state.queue.length} tracks)'),
+                    value: 'all',
+                    groupValue: selectedFilter,
+                    activeColor: customBranding.accentColor,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setSheetState(() => selectedFilter = val!),
+                  ),
+                  RadioListTile<String>(
+                    title: Text('User-Queued Only (${userTracks.length} tracks)'),
+                    value: 'user',
+                    groupValue: selectedFilter,
+                    activeColor: customBranding.accentColor,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setSheetState(() => selectedFilter = val!),
+                  ),
+                  RadioListTile<String>(
+                    title: Text('Recommended Only (${recTracks.length} tracks)'),
+                    value: 'recommendation',
+                    groupValue: selectedFilter,
+                    activeColor: customBranding.accentColor,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) => setSheetState(() => selectedFilter = val!),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Save Button
+                  ElevatedButton(
+                    onPressed: () async {
+                      final name = nameController.text.trim();
+                      if (name.isEmpty) return;
+
+                      List targetTracks = [];
+                      if (selectedFilter == 'user') {
+                        targetTracks = userTracks;
+                      } else if (selectedFilter == 'recommendation') {
+                        targetTracks = recTracks;
+                      } else {
+                        targetTracks = state.queue;
+                      }
+
+                      if (targetTracks.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No tracks match selected filter.')),
+                        );
+                        return;
+                      }
+
+                      final playlists = StorageService.getPlaylists();
+                      final newPl = {
+                        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                        'name': name,
+                        'description': 'Created from active queue (${targetTracks.length} tracks)',
+                        'trackIds': targetTracks.map((t) => t.id).toList(),
+                        'tracks': targetTracks.map((t) => {
+                          'id': t.id,
+                          'title': t.title,
+                          'artist': t.artist,
+                          'album': t.album,
+                          'duration': t.duration,
+                          'artworkUrl': t.artworkUrl,
+                          'audioUrl': t.audioUrl,
+                          'genre': t.genre,
+                        }).toList(),
+                      };
+                      playlists.add(newPl);
+                      await StorageService.savePlaylists(playlists);
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Saved "${name}" with ${targetTracks.length} tracks! 🎵'),
+                            backgroundColor: customBranding.accentColor,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: customBranding.accentColor,
+                      foregroundColor: isDark ? Colors.black : Colors.white,
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text('Save Playlist', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }

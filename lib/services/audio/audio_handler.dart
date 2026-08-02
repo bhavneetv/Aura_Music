@@ -169,6 +169,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         url = url.replaceFirst('http:/', 'http://');
       }
 
+      print('[AURA-HANDLER] playTrack: "${track.title}" url=${url.substring(0, url.length > 80 ? 80 : url.length)}...');
+
       if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('http')) {
         await _activePlayer.setUrl(url);
       } else {
@@ -176,8 +178,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       }
       await _activePlayer.setVolume(1.0);
       _activePlayer.play();
+      print('[AURA-HANDLER] playTrack SUCCESS: "${track.title}"');
     } catch (e) {
-      print('Error playing audio source: $e');
+      print('[AURA-HANDLER] playTrack FAILED: "${track.title}" error=$e');
       rethrow;
     }
   }

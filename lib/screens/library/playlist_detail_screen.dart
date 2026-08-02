@@ -5,7 +5,6 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
-import '../../themes/app_theme.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -34,24 +33,43 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
       _playlist = playlists[widget.playlistIndex];
-      final List rawIds = _playlist['trackIds'] ?? [];
+      final List rawTracks = _playlist['tracks'] ?? [];
       
-      // Resolve IDs to track metadata
       _playlistTracks = [];
-      for (final id in rawIds) {
-        final track = Track.mockTracks.firstWhere((t) => t.id == id.toString(), 
-          orElse: () => Track(
-            id: id.toString(),
-            title: 'Track $id',
-            artist: 'Unknown Artist',
-            album: 'Unknown Album',
-            duration: '3:00',
-            artworkUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150',
-            audioUrl: '',
-            genre: '',
-          )
-        );
-        _playlistTracks.add(track);
+      if (rawTracks.isNotEmpty) {
+        for (final item in rawTracks) {
+          if (item is Map) {
+            _playlistTracks.add(Track(
+              id: item['id']?.toString() ?? '',
+              title: item['title']?.toString() ?? 'Unknown Track',
+              artist: item['artist']?.toString() ?? 'Unknown Artist',
+              album: item['album']?.toString() ?? 'Single',
+              duration: item['duration']?.toString() ?? '3:30',
+              artworkUrl: item['artworkUrl']?.toString() ?? item['coverUrl']?.toString() ?? '',
+              audioUrl: item['audioUrl']?.toString() ?? item['streamUrl']?.toString() ?? '',
+              genre: item['genre']?.toString() ?? '',
+            ));
+          }
+        }
+      } else {
+        // Fallback for old playlists using trackIds
+        final List rawIds = _playlist['trackIds'] ?? [];
+        for (final id in rawIds) {
+          final track = Track.mockTracks.firstWhere(
+            (t) => t.id == id.toString(),
+            orElse: () => Track(
+              id: id.toString(),
+              title: 'Track $id',
+              artist: 'Unknown Artist',
+              album: 'Unknown Album',
+              duration: '3:00',
+              artworkUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150',
+              audioUrl: '',
+              genre: '',
+            ),
+          );
+          _playlistTracks.add(track);
+        }
       }
     }
   }
@@ -59,10 +77,22 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   void _addSongToPlaylist(Track track) async {
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawIds = List.from(playlists[widget.playlistIndex]['trackIds'] ?? []);
-      if (!rawIds.contains(track.id)) {
-        rawIds.add(track.id);
-        playlists[widget.playlistIndex]['trackIds'] = rawIds;
+      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
+      final trackMap = {
+        'id': track.id,
+        'title': track.title,
+        'artist': track.artist,
+        'album': track.album,
+        'duration': track.duration,
+        'artworkUrl': track.artworkUrl,
+        'audioUrl': track.audioUrl,
+        'genre': track.genre,
+      };
+      
+      // Prevent duplicates by track ID
+      if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
+        rawTracks.add(trackMap);
+        playlists[widget.playlistIndex]['tracks'] = rawTracks;
         await StorageService.savePlaylists(playlists);
         setState(() {
           _loadPlaylistData();
@@ -74,13 +104,15 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   void _removeSongFromPlaylist(int index) async {
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawIds = List.from(playlists[widget.playlistIndex]['trackIds'] ?? []);
-      rawIds.removeAt(index);
-      playlists[widget.playlistIndex]['trackIds'] = rawIds;
-      await StorageService.savePlaylists(playlists);
-      setState(() {
-        _loadPlaylistData();
-      });
+      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
+      if (index >= 0 && index < rawTracks.length) {
+        rawTracks.removeAt(index);
+        playlists[widget.playlistIndex]['tracks'] = rawTracks;
+        await StorageService.savePlaylists(playlists);
+        setState(() {
+          _loadPlaylistData();
+        });
+      }
     }
   }
 
@@ -88,14 +120,16 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     if (newIndex > oldIndex) newIndex -= 1;
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawIds = List.from(playlists[widget.playlistIndex]['trackIds'] ?? []);
-      final item = rawIds.removeAt(oldIndex);
-      rawIds.insert(newIndex, item);
-      playlists[widget.playlistIndex]['trackIds'] = rawIds;
-      await StorageService.savePlaylists(playlists);
-      setState(() {
-        _loadPlaylistData();
-      });
+      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
+      if (oldIndex >= 0 && oldIndex < rawTracks.length) {
+        final item = rawTracks.removeAt(oldIndex);
+        rawTracks.insert(newIndex, item);
+        playlists[widget.playlistIndex]['tracks'] = rawTracks;
+        await StorageService.savePlaylists(playlists);
+        setState(() {
+          _loadPlaylistData();
+        });
+      }
     }
   }
 
@@ -157,13 +191,59 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             icon: const Icon(Icons.download_for_offline_rounded),
             tooltip: 'Download Playlist',
             onPressed: () {
-              DownloadService.instance.downloadPlaylist(_playlistTracks);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Downloading ${_playlistTracks.length} tracks for offline listening...'),
-                  duration: const Duration(seconds: 2),
-                  behavior: SnackBarBehavior.floating,
-                ),
+              if (_playlistTracks.isEmpty) return;
+              int total = _playlistTracks.length;
+              int completed = 0;
+
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (dialogContext) {
+                  return StatefulBuilder(
+                    builder: (context, setProgressState) {
+                      DownloadService.instance.downloadPlaylist(
+                        _playlistTracks,
+                        onProgress: (c, t) {
+                          if (dialogContext.mounted) {
+                            setProgressState(() {
+                              completed = c;
+                              total = t;
+                            });
+                          }
+                        },
+                      ).then((_) {
+                        if (dialogContext.mounted && Navigator.canPop(dialogContext)) {
+                          Navigator.pop(dialogContext);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Downloaded $completed of $total songs for offline listening! ⚡'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      });
+
+                      return AlertDialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        title: const Text('Downloading Playlist', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LinearProgressIndicator(
+                              value: total > 0 ? (completed / total).clamp(0.0, 1.0) : 0.0,
+                              color: customBranding.accentColor,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              '$completed of $total songs downloaded',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
               );
             },
           ),
@@ -250,11 +330,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       if (_playlistTracks.isNotEmpty) {
-                        playbackNotifier.clearQueue();
-                        for (final t in _playlistTracks) {
-                          playbackNotifier.addToQueue(t);
-                        }
-                        playbackNotifier.playTrack(_playlistTracks.first);
+                        playbackNotifier.playCustomQueue(_playlistTracks, initialIndex: 0);
                       }
                     },
                     icon: const Icon(Icons.play_arrow_rounded),
@@ -274,11 +350,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     onPressed: () {
                       if (_playlistTracks.isNotEmpty) {
                         final shuffled = List<Track>.from(_playlistTracks)..shuffle();
-                        playbackNotifier.clearQueue();
-                        for (final t in shuffled) {
-                          playbackNotifier.addToQueue(t);
-                        }
-                        playbackNotifier.playTrack(shuffled.first);
+                        playbackNotifier.playCustomQueue(shuffled, initialIndex: 0);
                       }
                     },
                     icon: const Icon(Icons.shuffle_rounded),

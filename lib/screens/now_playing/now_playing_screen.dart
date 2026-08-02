@@ -1,17 +1,22 @@
+
 import 'dart:math' as math;
-import 'package:flutter/material.dart' hide RepeatMode;
+import 'dart:ui';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:palette_generator/palette_generator.dart';
+import 'package:shimmer/shimmer.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../services/ai/song_summary_service.dart';
+import '../../services/lyrics/lyrics_service.dart';
 import '../../widgets/custom_slider_track_shapes.dart';
 import '../../themes/app_theme.dart';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
-import 'package:shimmer/shimmer.dart';
+import 'lyrics_screen.dart';
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
@@ -35,10 +40,68 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   bool _isSummaryExpanded = true;
   String? _lastSummaryTrackId;
 
+  // Synced lyrics state
+  LyricsResult? _lyricsResult;
+  String? _lastLyricsTrackId;
+
+  // Dynamic theming state
+  Color? _dynamicAccentColor;
+  String? _lastPaletteTrackId;
+
   // Karaoke lyrics state
   final ScrollController _lyricsScrollController = ScrollController();
   int _activeLyricIndex = -1;
   int? _tappedLyricIndex;
+
+  void _fetchLyrics(Track track) {
+    if (_lastLyricsTrackId == track.id) return;
+    _lastLyricsTrackId = track.id;
+
+    LyricsService.instance.fetchLyrics(
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      durationStr: track.duration,
+    ).then((res) {
+      if (mounted && _lastLyricsTrackId == track.id) {
+        setState(() {
+          _lyricsResult = res;
+        });
+      }
+    }).catchError((_) {});
+  }
+
+  void _extractPaletteColor(Track track) {
+    if (_lastPaletteTrackId == track.id || track.artworkUrl.isEmpty) return;
+    _lastPaletteTrackId = track.id;
+
+    PaletteGenerator.fromImageProvider(
+      NetworkImage(track.artworkUrl),
+      size: const Size(100, 100),
+    ).then((palette) {
+      if (mounted && _lastPaletteTrackId == track.id) {
+        final extracted = palette.vibrantColor?.color ??
+            palette.dominantColor?.color ??
+            palette.lightVibrantColor?.color ??
+            palette.darkVibrantColor?.color;
+        if (extracted != null) {
+          setState(() {
+            _dynamicAccentColor = extracted;
+          });
+        }
+      }
+    }).catchError((_) {});
+  }
+
+  // Heart pop animation state
+  late AnimationController _heartController;
+
+  // Stacked queue preview & drag shuffle state
+  bool _showQueuePreview = false;
+  int _queueDragIndex = -1;
+  double _accumulatedDragY = 0.0;
+  bool _hasDraggedQueue = false;
 
   @override
   void initState() {
@@ -50,6 +113,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     _decelController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
+    );
+    _heartController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -66,6 +133,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   void dispose() {
     _spinController.dispose();
     _decelController.dispose();
+    _heartController.dispose();
     _lyricsScrollController.dispose();
     super.dispose();
   }
@@ -108,6 +176,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final track = state.currentTrack!;
 
+    _fetchLyrics(track);
+    _extractPaletteColor(track);
+
+    final targetAccent = _dynamicAccentColor ?? customBranding.accentColor;
+
     final List<Color> bgColors = isDark
         ? [const Color(0xFF1B1B1D), const Color(0xFF0C0C0E)]
         : [const Color(0xFFFAF7F2), const Color(0xFFE8E2D7)];
@@ -125,20 +198,52 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Container(
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: bgColors,
-          ),
-          borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            physics: const ClampingScrollPhysics(),
+      body: TweenAnimationBuilder<Color?>(
+        duration: const Duration(milliseconds: 400),
+        tween: ColorTween(begin: targetAccent, end: targetAccent),
+        builder: (context, currentAccentColor, child) {
+          final activeAccent = currentAccentColor ?? targetAccent;
+
+          return Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: bgColors,
+              ),
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
+            ),
+            child: Stack(
+              children: [
+                // Dynamic cover art blur glow layer
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: const Alignment(0, -0.4),
+                          radius: 0.85,
+                          colors: [
+                            activeAccent.withValues(alpha: isDark ? 0.28 : 0.20),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+                        child: Container(color: Colors.transparent),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Main player content
+                SafeArea(
+                  bottom: false,
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
             child: Column(
               children: [
                 const SizedBox(height: 12),
@@ -181,10 +286,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               final isDownloading = task?.status == 'downloading';
 
                               if (isDownloading) {
-                                return const SizedBox(
+                                return SizedBox(
                                   width: 24,
                                   height: 24,
-                                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Theme.of(context).colorScheme.primary),
                                 );
                               }
                               if (isDownloaded) {
@@ -209,6 +314,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             },
                           ),
                           IconButton(
+                            icon: const Icon(Icons.playlist_add_rounded, color: Colors.grey, size: 24),
+                            tooltip: 'Add to Playlist',
+                            onPressed: () {
+                              triggerHaptic(HapticFeedbackType.selection);
+                              _showAddToPlaylistBottomSheet(track);
+                            },
+                          ),
+                          IconButton(
                             icon: Icon(
                               isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                               color: isFav ? Colors.redAccent : Colors.grey,
@@ -216,8 +329,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             ),
                             onPressed: () async {
                               triggerHaptic(HapticFeedbackType.selection);
-                              await StorageService.toggleFavorite('trackIds', track.id);
-                              // Notify recommendation engine about the like
+                              await StorageService.toggleFavoriteTrack(track);
                               if (StorageService.isFavorite('trackIds', track.id)) {
                                 ref.read(playbackProvider.notifier).onTrackLiked(track);
                               }
@@ -232,14 +344,89 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
                 const SizedBox(height: 12),
 
-                // Dynamic Skin Stages with Physics Swipe Gestures
+                // Dynamic Skin Stages with Physics Swipe Gestures & H.2 Press-and-Drag Queue Interaction
                 GestureDetector(
-                  onPanUpdate: (details) {
+                  onDoubleTap: () async {
+                    triggerHaptic(HapticFeedbackType.medium);
+                    await StorageService.toggleFavoriteTrack(track);
+                    if (StorageService.isFavorite('trackIds', track.id)) {
+                      ref.read(playbackProvider.notifier).onTrackLiked(track);
+                    }
+                    _heartController.forward(from: 0.0);
+                    setState(() {});
+                  },
+                  onLongPressStart: (details) {
+                    triggerHaptic(HapticFeedbackType.medium);
                     setState(() {
-                      _albumDragOffset += details.delta;
+                      _showQueuePreview = true;
+                      _queueDragIndex = state.currentIndex >= 0 ? state.currentIndex : 0;
+                      _accumulatedDragY = 0.0;
+                      _hasDraggedQueue = false;
                     });
                   },
+                  onLongPressMoveUpdate: (details) {
+                    final dy = details.offsetFromOrigin.dy;
+                    final deltaY = dy - _accumulatedDragY;
+                    const stepThreshold = 45.0;
+
+                    if (deltaY.abs() > stepThreshold) {
+                      _accumulatedDragY = dy;
+                      _hasDraggedQueue = true;
+
+                      final queue = state.queue;
+                      if (queue.isNotEmpty) {
+                        if (deltaY < 0) {
+                          // Drag UP -> Shuffle to next card in queue
+                          if (_queueDragIndex + 1 < queue.length) {
+                            setState(() {
+                              _queueDragIndex++;
+                            });
+                            triggerHaptic(HapticFeedbackType.light);
+                          } else {
+                            // Boundary signal (Double light haptic)
+                            triggerHaptic(HapticFeedbackType.light);
+                            Future.delayed(const Duration(milliseconds: 60), () => triggerHaptic(HapticFeedbackType.light));
+                          }
+                        } else {
+                          // Drag DOWN -> Shuffle to previous card in queue
+                          if (_queueDragIndex - 1 >= 0) {
+                            setState(() {
+                              _queueDragIndex--;
+                            });
+                            triggerHaptic(HapticFeedbackType.light);
+                          } else {
+                            // Boundary signal (Double light haptic)
+                            triggerHaptic(HapticFeedbackType.light);
+                            Future.delayed(const Duration(milliseconds: 60), () => triggerHaptic(HapticFeedbackType.light));
+                          }
+                        }
+                      }
+                    }
+                  },
+                  onLongPressEnd: (details) {
+                    final queue = state.queue;
+                    if (_hasDraggedQueue && _queueDragIndex >= 0 && _queueDragIndex < queue.length && _queueDragIndex != state.currentIndex) {
+                      // Release after drag plays selected track without changing queue order
+                      triggerHaptic(HapticFeedbackType.medium);
+                      notifier.jumpToQueueIndex(_queueDragIndex);
+                    }
+                    // Clean reset on release
+                    setState(() {
+                      _showQueuePreview = false;
+                      _hasDraggedQueue = false;
+                      _queueDragIndex = -1;
+                      _accumulatedDragY = 0.0;
+                    });
+                  },
+                  onPanUpdate: (details) {
+                    if (!_showQueuePreview) {
+                      setState(() {
+                        _albumDragOffset += details.delta;
+                      });
+                    }
+                  },
                   onPanEnd: (details) async {
+                    if (_showQueuePreview) return;
                     final dx = _albumDragOffset.dx;
                     final dy = _albumDragOffset.dy;
 
@@ -257,7 +444,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       if (dy < -80) {
                         // Swipe Up -> Toggle Favorite
                         triggerHaptic(HapticFeedbackType.medium);
-                        await StorageService.toggleFavorite('trackIds', track.id);
+                        await StorageService.toggleFavoriteTrack(track);
+                        if (StorageService.isFavorite('trackIds', track.id)) {
+                          ref.read(playbackProvider.notifier).onTrackLiked(track);
+                        }
+                        _heartController.forward(from: 0.0);
                         setState(() {});
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -286,7 +477,130 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     transform: Matrix4.translationValues(_albumDragOffset.dx, _albumDragOffset.dy, 0),
                     width: MediaQuery.of(context).size.width,
                     height: MediaQuery.of(context).size.width * 0.82,
-                    child: _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Stacked Queue Preview Cards (rendered when _showQueuePreview is active)
+                        if (_showQueuePreview) ...[
+                          Builder(
+                            builder: (context) {
+                              final upcomingStart = (state.currentIndex >= 0 && state.currentIndex < state.queue.length)
+                                  ? state.currentIndex + 1
+                                  : 0;
+                              final upcoming = state.queue.skip(upcomingStart).take(3).toList();
+                              if (upcoming.isEmpty) {
+                                return Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black87,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: const Text('No upcoming songs in queue', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                  ),
+                                );
+                              }
+                              return Stack(
+                                alignment: Alignment.center,
+                                children: List.generate(upcoming.length, (idx) {
+                                  final upcomingTrack = upcoming[idx];
+                                  final offset = (idx + 1) * 16.0;
+                                  final scale = 1.0 - ((idx + 1) * 0.07);
+
+                                  return Positioned(
+                                    top: offset,
+                                    child: Transform.scale(
+                                      scale: scale,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          notifier.playTrack(upcomingTrack);
+                                          setState(() => _showQueuePreview = false);
+                                        },
+                                        child: Container(
+                                          width: MediaQuery.of(context).size.width * 0.72,
+                                          height: 64,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? const Color(0xFF222226) : const Color(0xFFFFFFFF),
+                                            borderRadius: BorderRadius.circular(16),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(alpha: 0.25),
+                                                blurRadius: 10,
+                                                offset: const Offset(0, 4),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              ClipRRect(
+                                                borderRadius: BorderRadius.circular(8),
+                                                child: Image.network(
+                                                  upcomingTrack.artworkUrl,
+                                                  width: 48,
+                                                  height: 48,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, __, ___) => Container(width: 48, height: 48, color: Colors.grey),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Text(
+                                                      'Up Next #${idx + 1}',
+                                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: customBranding.accentColor),
+                                                    ),
+                                                    Text(
+                                                      upcomingTrack.title,
+                                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const Icon(Icons.play_circle_fill_rounded, size: 24, color: Colors.grey),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              );
+                            },
+                          ),
+                        ],
+
+                        // Main Skin Stage (Vinyl / CD / Cassette / Minimal)
+                        if (!_showQueuePreview)
+                          _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
+
+                        // Double-tap Animated Heart Pop Overlay
+                        AnimatedBuilder(
+                          animation: _heartController,
+                          builder: (context, child) {
+                            if (!_heartController.isAnimating) return const SizedBox.shrink();
+                            final scale = 0.5 + (_heartController.value * 0.9);
+                            final opacity = 1.0 - _heartController.value;
+                            return Opacity(
+                              opacity: opacity.clamp(0.0, 1.0),
+                              child: Transform.scale(
+                                scale: scale,
+                                child: Icon(
+                                  Icons.favorite_rounded,
+                                  color: customBranding.accentColor,
+                                  size: 110,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
@@ -448,47 +762,73 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
                 const SizedBox(height: 20),
 
-                // Bottom row: Sleep timer, Equalizer, Speed adjust, Queue drawer
+                // Bottom row: Sleep timer, Lyrics, Equalizer, Speed, Queue (G.3 Redesigned)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       // Sleep Timer Option
-                      IconButton(
-                        icon: Icon(
-                          Icons.timer_rounded, 
-                          color: state.sleepTimerMinutes != null ? customBranding.accentColor : Colors.grey,
-                          size: 20,
-                        ),
-                        onPressed: () => _showSleepTimerDialog(notifier),
+                      _buildActionButton(
+                        icon: Icons.timer_rounded,
+                        label: 'Timer',
+                        isActive: state.sleepTimerMinutes != null,
+                        accentColor: customBranding.accentColor,
+                        onTap: () => _showSleepTimerDialog(notifier),
                       ),
-                      
+
+                      // Synced Lyrics Option
+                      _buildActionButton(
+                        icon: Icons.lyrics_rounded,
+                        label: 'Lyrics',
+                        isActive: _lyricsResult != null && _lyricsResult!.hasLyrics,
+                        accentColor: customBranding.accentColor,
+                        onTap: (_lyricsResult != null && _lyricsResult!.hasLyrics)
+                            ? () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => LyricsScreen(
+                                      track: track,
+                                      lyricsResult: _lyricsResult!,
+                                    ),
+                                  ),
+                                );
+                              }
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Fetching lyrics for this track...'), duration: Duration(seconds: 1)),
+                                );
+                              },
+                      ),
+
                       // Equalizer Option
-                      IconButton(
-                        icon: const Icon(Icons.graphic_eq_rounded, color: Colors.grey, size: 20),
-                        onPressed: () {
+                      _buildActionButton(
+                        icon: Icons.graphic_eq_rounded,
+                        label: 'EQ',
+                        isActive: false,
+                        accentColor: customBranding.accentColor,
+                        onTap: () {
                           Navigator.push(context, MaterialPageRoute(builder: (context) => const EqualizerScreen()));
                         },
                       ),
-                      
-                      // Playback Speed
-                      IconButton(
-                        icon: const Icon(Icons.speed_rounded, color: Colors.grey, size: 20),
-                        onPressed: () => _showPlaybackSpeedDialog(notifier),
+
+                      // Playback Speed Option
+                      _buildActionButton(
+                        icon: Icons.speed_rounded,
+                        label: '${state.playbackSpeed}x',
+                        isActive: state.playbackSpeed != 1.0,
+                        accentColor: customBranding.accentColor,
+                        onTap: () => _showPlaybackSpeedDialog(notifier),
                       ),
 
-                      // Add to Playlist Option
-                      IconButton(
-                        icon: const Icon(Icons.playlist_add_rounded, color: Colors.grey, size: 22),
-                        tooltip: 'Add to Playlist',
-                        onPressed: () => _showAddToPlaylistBottomSheet(track),
-                      ),
-                      
-                      // Active Queue Info list
-                      IconButton(
-                        icon: const Icon(Icons.queue_music_rounded, color: Colors.grey, size: 20),
-                        onPressed: () => _showQueueBottomSheet(state, notifier),
+                      // Active Queue Option
+                      _buildActionButton(
+                        icon: Icons.queue_music_rounded,
+                        label: 'Queue',
+                        isActive: false,
+                        accentColor: customBranding.accentColor,
+                        onTap: () => _showQueueBottomSheet(state, notifier),
                       ),
                     ],
                   ),
@@ -504,21 +844,68 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             ),
           ),
         ),
+      ],
+    ),
+  );
+},
+),
+);
+}
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required Color accentColor,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      onTap: () {
+        triggerHaptic(HapticFeedbackType.selection);
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: isActive ? accentColor : (isDark ? Colors.white60 : Colors.black54),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                color: isActive ? accentColor : (isDark ? Colors.white54 : Colors.black54),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Song Summary Logic ────────────────────────────────────────
+  // ── Skin Stage Switcher ────────────────────────────────────────
 
   void _fetchSongSummary(Track track, {bool forceRefresh = false}) {
-    if (_isSummaryLoading && !forceRefresh) return;
-    if (_lastSummaryTrackId == track.id && _songSummary != null && !forceRefresh) return;
+    final activeTrackId = track.id;
 
-    setState(() {
-      _isSummaryLoading = true;
-      _lastSummaryTrackId = track.id;
-      if (forceRefresh) _songSummary = null;
-    });
+    if (forceRefresh || _lastSummaryTrackId != activeTrackId) {
+      setState(() {
+        _songSummary = null;
+        _isSummaryLoading = true;
+        _lastSummaryTrackId = activeTrackId;
+      });
+    } else if (_isSummaryLoading && !forceRefresh) {
+      return;
+    }
 
     SongSummaryService.instance.getSummary(
       trackId: track.id,
@@ -528,23 +915,24 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       genre: track.genre,
       forceRefresh: forceRefresh,
     ).then((summary) {
-      if (mounted && _lastSummaryTrackId == track.id) {
+      final currentTrackId = ref.read(playbackProvider).currentTrack?.id;
+      if (mounted && _lastSummaryTrackId == activeTrackId && currentTrackId == activeTrackId) {
         setState(() {
           _songSummary = summary;
           _isSummaryLoading = false;
         });
       }
     }).catchError((_) {
-      if (mounted) {
+      final currentTrackId = ref.read(playbackProvider).currentTrack?.id;
+      if (mounted && _lastSummaryTrackId == activeTrackId && currentTrackId == activeTrackId) {
         setState(() => _isSummaryLoading = false);
       }
     });
   }
 
   Widget _buildSongSummarySection(Track track, bool isDark, Color accentColor) {
-    // Auto-fetch summary when track changes or if summary is missing
-    if (_lastSummaryTrackId != track.id || (_songSummary == null && !_isSummaryLoading)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongSummary(track));
+    if (_lastSummaryTrackId != track.id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongSummary(track, forceRefresh: true));
     }
 
     return Padding(
@@ -1272,8 +1660,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         itemCount: playlists.length,
                         itemBuilder: (context, index) {
                           final pl = playlists[index];
+                          final tracksList = List.from(pl['tracks'] ?? []);
                           final trackIds = List<String>.from(pl['trackIds'] ?? []);
-                          final alreadyContains = trackIds.contains(track.id);
+                          final alreadyContains = tracksList.any((t) => t is Map && t['id'] == track.id) || trackIds.contains(track.id);
+                          final songCount = tracksList.isNotEmpty ? tracksList.length : trackIds.length;
 
                           return ListTile(
                             leading: Container(
@@ -1289,14 +1679,25 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               pl['name'] ?? 'Playlist',
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
-                            subtitle: Text('${trackIds.length} songs'),
+                            subtitle: Text('$songCount songs'),
                             trailing: alreadyContains
                                 ? Icon(Icons.check_circle_rounded, color: customBranding.accentColor)
                                 : const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
                             onTap: () async {
                               if (!alreadyContains) {
                                 trackIds.add(track.id);
+                                tracksList.add({
+                                  'id': track.id,
+                                  'title': track.title,
+                                  'artist': track.artist,
+                                  'album': track.album,
+                                  'duration': track.duration,
+                                  'artworkUrl': track.artworkUrl,
+                                  'audioUrl': track.audioUrl,
+                                  'genre': track.genre,
+                                });
                                 playlists[index]['trackIds'] = trackIds;
+                                playlists[index]['tracks'] = tracksList;
                                 await StorageService.savePlaylists(playlists);
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1370,6 +1771,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     'name': name,
                     'description': 'A premium custom playlist',
                     'trackIds': <String>[track.id],
+                    'tracks': <Map<String, dynamic>>[
+                      {
+                        'id': track.id,
+                        'title': track.title,
+                        'artist': track.artist,
+                        'album': track.album,
+                        'duration': track.duration,
+                        'artworkUrl': track.artworkUrl,
+                        'audioUrl': track.audioUrl,
+                        'genre': track.genre,
+                      }
+                    ],
                   };
                   playlists.add(newPl);
                   await StorageService.savePlaylists(playlists);

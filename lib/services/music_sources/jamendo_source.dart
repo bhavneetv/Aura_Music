@@ -4,45 +4,47 @@ import 'package:dio/dio.dart';
 import 'music_source.dart';
 import '../../models/track.dart';
 import '../storage/storage_service.dart';
-
 import '../recommendation/recommendation_engine.dart';
+import '../audio/audio_url_resolver.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
 
-  // Search mirrors (accurate search results)
+  // Search mirrors (saavn-api.vercel.app returns valid 200 OK CDN URLs)
   static const List<String> _baseUrls = [
-    'https://jiosaavn-api-unofficial.vercel.app',
+    'https://saavn-api.vercel.app',
     'https://jiosaavn-api-beta.vercel.app',
+    'https://jiosaavn-api-unofficial.vercel.app',
   ];
-
-  // Audio resolution mirror (returns working CDN stream URLs)
-  static const String _audioResolverUrl = 'https://saavn-api.vercel.app';
 
   Future<dynamic> _fetchFromApi(String endpointPath) async {
     for (final baseUrl in _baseUrls) {
       try {
         final url = '$baseUrl$endpointPath';
+        print('[AURA-DEBUG] _fetchFromApi trying: $url');
         final response = await _dio.get(
           url,
           options: Options(
-            receiveTimeout: const Duration(seconds: 8),
+            receiveTimeout: const Duration(seconds: 10),
             sendTimeout: const Duration(seconds: 5),
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
           ),
         );
+        print('[AURA-DEBUG] _fetchFromApi response status: ${response.statusCode}');
         if (response.statusCode == 200 && response.data != null) {
           final tracks = _parseTracks(response.data);
+          print('[AURA-DEBUG] _fetchFromApi parsed ${tracks.length} tracks from $baseUrl');
           if (tracks.isNotEmpty) {
             return response.data;
           }
         }
       } catch (e) {
-        print('API mirror failed ($baseUrl$endpointPath): $e');
+        print('[AURA-DEBUG] _fetchFromApi mirror failed ($baseUrl): $e');
       }
     }
+    print('[AURA-DEBUG] _fetchFromApi ALL mirrors failed for: $endpointPath');
     return null;
   }
 
@@ -58,9 +60,12 @@ class JamendoSource implements MusicSource {
       final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
       if (data != null) {
         final tracks = _parseTracks(data);
-        final resolved = await _resolveAudioUrls(tracks);
-        final filtered = _filterByPreferredLanguages(resolved, preferredLangs);
-        return RecommendationEngine.instance.rankRecommendations(filtered.isNotEmpty ? filtered : resolved);
+        if (tracks.isNotEmpty) {
+          final resolved = await _resolveAudioUrls(tracks);
+          final filtered = _filterByPreferredLanguages(resolved, preferredLangs);
+          final finalTracks = filtered.isNotEmpty ? filtered : resolved;
+          return RecommendationEngine.instance.rankRecommendations(finalTracks);
+        }
       }
     } catch (e) {
       print('Error fetching trending tracks: $e');
@@ -71,7 +76,7 @@ class JamendoSource implements MusicSource {
   List<Track> _filterByPreferredLanguages(List<Track> tracks, List<String> preferredLangs) {
     if (preferredLangs.isEmpty) return tracks;
     final upperLangs = preferredLangs.map((l) => l.toUpperCase()).toList();
-    return tracks.where((t) {
+    final filtered = tracks.where((t) {
       final g = t.genre.toUpperCase();
       return upperLangs.any((lang) {
         if (lang == 'HINDI' || lang == 'BOLLYWOOD') {
@@ -80,33 +85,32 @@ class JamendoSource implements MusicSource {
         return g.contains(lang) || lang.contains(g);
       });
     }).toList();
+    return filtered.isNotEmpty ? filtered : tracks;
   }
 
   @override
   Future<List<Track>> searchTracks(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
+    print('[AURA-DEBUG] searchTracks called with: "$cleanQuery"');
 
     try {
       final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(cleanQuery)}');
+      print('[AURA-DEBUG] searchTracks _fetchFromApi returned: ${data != null ? "data" : "null"}');
       if (data != null) {
         final tracks = _parseTracks(data);
+        print('[AURA-DEBUG] searchTracks parsed ${tracks.length} tracks');
         if (tracks.isNotEmpty) {
-          final terms = cleanQuery.toLowerCase().split(' ').where((t) => t.isNotEmpty).toList();
-          final matching = tracks.where((t) {
-            final title = t.title.toLowerCase();
-            final artist = t.artist.toLowerCase();
-            final album = t.album.toLowerCase();
-            return terms.any((term) => title.contains(term) || artist.contains(term) || album.contains(term));
-          }).toList();
-
-          final candidates = matching.isNotEmpty ? matching : tracks;
-          return await _resolveAudioUrls(candidates);
+          // Use AudioUrlResolver for batch resolution
+          final resolved = await AudioUrlResolver.instance.resolveAll(tracks);
+          print('[AURA-DEBUG] searchTracks resolved ${resolved.length} tracks');
+          return resolved;
         }
       }
     } catch (e) {
-      print('Error searching tracks for "$cleanQuery": $e');
+      print('[AURA-DEBUG] searchTracks ERROR: $e');
     }
+    print('[AURA-DEBUG] searchTracks falling back to mock');
     return _filterMockTracks(cleanQuery);
   }
 
@@ -117,8 +121,10 @@ class JamendoSource implements MusicSource {
       final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
       if (data != null) {
         final tracks = _parseTracks(data);
-        final resolved = await _resolveAudioUrls(tracks);
-        return RecommendationEngine.instance.rankRecommendations(resolved);
+        if (tracks.isNotEmpty) {
+          final resolved = await AudioUrlResolver.instance.resolveAll(tracks);
+          return RecommendationEngine.instance.rankRecommendations(resolved);
+        }
       }
     } catch (e) {
       print('Error fetching tracks by genre "$genre": $e');
@@ -181,7 +187,7 @@ class JamendoSource implements MusicSource {
     try {
       final futures = selectedQueries.map((query) async {
         try {
-          final page = math.Random().nextInt(4) + 1;
+          final page = math.Random().nextInt(3) + 1;
           final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
           if (data != null) return _parseTracks(data);
         } catch (_) {}
@@ -203,7 +209,7 @@ class JamendoSource implements MusicSource {
       if (merged.isNotEmpty) {
         final filtered = _filterByPreferredLanguages(merged.values.toList(), preferredLangs);
         final candidates = filtered.isNotEmpty ? filtered : merged.values.toList();
-        final resolved = await _resolveAudioUrls(candidates);
+        final resolved = await AudioUrlResolver.instance.resolveAll(candidates);
         return RecommendationEngine.instance.rankRecommendations(resolved);
       }
     } catch (e) {
@@ -234,7 +240,7 @@ class JamendoSource implements MusicSource {
     try {
       final futures = queries.take(3).map((query) async {
         try {
-          final page = math.Random().nextInt(5) + 1;
+          final page = math.Random().nextInt(4) + 1;
           final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(query)}&page=$page');
           if (data != null) return _parseTracks(data);
         } catch (_) {}
@@ -252,9 +258,8 @@ class JamendoSource implements MusicSource {
         }
       }
 
-
       if (merged.isNotEmpty) {
-        final resolved = await _resolveAudioUrls(merged.values.toList());
+        final resolved = await AudioUrlResolver.instance.resolveAll(merged.values.toList());
         return RecommendationEngine.instance.rankRecommendations(
           resolved,
           currentTrack: currentTrack,
@@ -267,53 +272,9 @@ class JamendoSource implements MusicSource {
 
   // ── Audio URL Resolution ─────────────────────────────────────
 
-  /// Resolves working audio URLs for tracks by fetching from the audio resolver mirror.
-  /// The search APIs return accurate metadata but broken downloadUrl tokens.
-  /// saavn-api.vercel.app/song/[id] returns working CDN stream URLs.
   Future<List<Track>> _resolveAudioUrls(List<Track> tracks) async {
-    final List<Track> resolved = [];
-    // Process in parallel batches of 5 for speed
-    final batches = <List<Track>>[];
-    for (var i = 0; i < tracks.length; i += 5) {
-      batches.add(tracks.sublist(i, i + 5 > tracks.length ? tracks.length : i + 5));
-    }
-
-    for (final batch in batches) {
-      final futures = batch.map((track) async {
-        try {
-          final response = await _dio.get(
-            '$_audioResolverUrl/song/${track.id}',
-            options: Options(
-              receiveTimeout: const Duration(seconds: 6),
-              sendTimeout: const Duration(seconds: 4),
-            ),
-          );
-          if (response.statusCode == 200 && response.data != null) {
-            final data = response.data;
-            if (data is Map && data['url'] != null) {
-              final workingUrl = data['url'].toString();
-              if (workingUrl.startsWith('http') && !workingUrl.contains('jiosaavn.com')) {
-                return Track(
-                  id: track.id,
-                  title: track.title,
-                  artist: track.artist,
-                  album: track.album,
-                  duration: track.duration,
-                  artworkUrl: track.artworkUrl,
-                  audioUrl: workingUrl,
-                  genre: track.genre,
-                );
-              }
-            }
-          }
-        } catch (_) {}
-        return track; // fallback to original
-      }).toList();
-
-      resolved.addAll(await Future.wait(futures));
-    }
-
-    return resolved;
+    if (tracks.isEmpty) return [];
+    return AudioUrlResolver.instance.resolveAll(tracks);
   }
 
   // ── Parsers & Helpers ────────────────────────────────────────
@@ -360,6 +321,8 @@ class JamendoSource implements MusicSource {
       if (item is! Map) continue;
       try {
         final id = item['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+
         final title = item['name']?.toString() ?? item['title']?.toString() ?? 'Unknown Track';
         
         String artist = 'Unknown Artist';
@@ -404,27 +367,30 @@ class JamendoSource implements MusicSource {
         }
 
         String audioUrl = '';
-        if (item['url'] != null && item['url'].toString().startsWith('http') && !item['url'].toString().contains('jiosaavn.com')) {
-          audioUrl = item['url'].toString();
-        } else if (item['downloadUrl'] != null) {
-          if (item['downloadUrl'] is List) {
-            final downloads = item['downloadUrl'] as List;
-            for (final d in downloads.reversed) {
+        final possibleUrlKeys = [item['url'], item['downloadUrl'], item['download_url'], item['media_url'], item['link']];
+        for (final val in possibleUrlKeys) {
+          if (val == null) continue;
+          if (val is String && val.startsWith('http') && !val.contains('jiosaavn.com')) {
+            audioUrl = val;
+            break;
+          } else if (val is List) {
+            for (final d in val.reversed) {
               if (d is Map) {
                 final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-                if (link.isNotEmpty) {
+                if (link.isNotEmpty && link.startsWith('http') && !link.contains('jiosaavn.com')) {
                   audioUrl = link;
                   break;
                 }
-              } else if (d is String && d.isNotEmpty) {
+              } else if (d is String && d.startsWith('http') && !d.contains('jiosaavn.com')) {
                 audioUrl = d;
                 break;
               }
             }
-          } else if (item['downloadUrl'] is String) {
-            audioUrl = item['downloadUrl'].toString();
+            if (audioUrl.isNotEmpty) break;
           }
         }
+
+
 
         if (audioUrl.startsWith('https:/') && !audioUrl.startsWith('https://')) {
           audioUrl = audioUrl.replaceFirst('https:/', 'https://');
@@ -437,20 +403,18 @@ class JamendoSource implements MusicSource {
           artworkUrl = artworkUrl.replaceFirst('http:/', 'http://');
         }
 
-        if (id.isNotEmpty && audioUrl.isNotEmpty) {
-          tracks.add(
-            Track(
-              id: id,
-              title: title,
-              artist: artist,
-              album: album,
-              duration: duration,
-              artworkUrl: artworkUrl,
-              audioUrl: audioUrl,
-              genre: item['language']?.toString().toUpperCase() ?? 'BOLLYWOOD',
-            ),
-          );
-        }
+        tracks.add(
+          Track(
+            id: id,
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            artworkUrl: artworkUrl,
+            audioUrl: audioUrl,
+            genre: item['language']?.toString().toUpperCase() ?? 'BOLLYWOOD',
+          ),
+        );
       } catch (e) {
         print('Error parsing track item: $e');
       }
