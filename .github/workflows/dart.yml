@@ -19,10 +19,16 @@ jobs:
       - run: pod repo update
         working-directory: ios
 
+      - name: Create .env File from Secrets
+        run: |
+          echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
+          echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
+          echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
+
       # Prepares Generated.xcconfig, runs pod install, WITHOUT
       # attempting Flutter's own final assembly/signing-gated step
       - name: Prepare iOS project (config only, no build)
-        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
       - name: Archive via xcodebuild directly (bypasses Flutter's team check)
         run: |

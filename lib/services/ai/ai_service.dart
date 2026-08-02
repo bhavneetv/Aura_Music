@@ -9,9 +9,23 @@ class AiService {
 
   final Dio _dio = Dio();
 
-  String get groqKey1 => dotenv.env['GROQ_KEY'] ?? '';
-  String get groqKey2 => dotenv.env['GROQ_KEY_2'] ?? groqKey1;
-  String get geminiKey => dotenv.env['GEMINI_KEY'] ?? '';
+  String get groqKey1 {
+    const envKey = String.fromEnvironment('GROQ_KEY');
+    if (envKey.isNotEmpty) return envKey;
+    return dotenv.env['GROQ_KEY'] ?? '';
+  }
+
+  String get groqKey2 {
+    const envKey = String.fromEnvironment('GROQ_KEY_2');
+    if (envKey.isNotEmpty) return envKey;
+    return dotenv.env['GROQ_KEY_2'] ?? groqKey1;
+  }
+
+  String get geminiKey {
+    const envKey = String.fromEnvironment('GEMINI_KEY');
+    if (envKey.isNotEmpty) return envKey;
+    return dotenv.env['GEMINI_KEY'] ?? '';
+  }
 
   /// Generates AI text, trying Groq Key 1 first, Groq Key 2 second,
   /// and falling back to Gemini on any failure.
