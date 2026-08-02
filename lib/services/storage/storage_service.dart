@@ -41,6 +41,22 @@ class StorageService {
     await box.put(key, value);
   }
 
+  static String getUserName() {
+    return getSetting('user_name', defaultValue: '') as String;
+  }
+
+  static Future<void> setUserName(String name) async {
+    await saveSetting('user_name', name.trim());
+  }
+
+  static bool hasCompletedOnboarding() {
+    return getSetting('completed_onboarding', defaultValue: false) as bool;
+  }
+
+  static Future<void> setCompletedOnboarding(bool completed) async {
+    await saveSetting('completed_onboarding', completed);
+  }
+
   static bool isCrossfadeEnabled() {
     return getSetting('crossfade_enabled', defaultValue: false) as bool;
   }

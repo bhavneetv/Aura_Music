@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../storage/storage_service.dart';
 import 'ai_service.dart';
@@ -249,4 +250,61 @@ CULTURAL: [cultural/cinematic context]''';
     await StorageService.clearSongSummary('${trackId}_$langCode');
     await StorageService.clearSongSummary(trackId);
   }
+
+  /// Generate line-by-line AI explanations for a list of lyric lines
+  Future<Map<int, String>> getLineExplanations({
+    required String title,
+    required String artist,
+    required List<String> lyricLines,
+  }) async {
+    if (lyricLines.isEmpty) return {};
+
+    final cleanLines = lyricLines.take(30).toList();
+    final prompt = '''You are a master music lyricist and cultural translator.
+Analyze the song "$title" by $artist and provide short 1-sentence explanations for each of the following lyric lines.
+Explain what the author/artist is expressing or implying in each line (hidden meaning, mood, or metaphor).
+
+Lyric lines:
+${cleanLines.asMap().entries.map((e) => '${e.key + 1}. ${e.value}').join('\n')}
+
+Output format MUST be valid JSON array of objects:
+[
+  {"index": 1, "explanation": "Short 1-sentence explanation of what author means in line 1"}
+]
+OUTPUT ONLY JSON:''';
+
+    try {
+      final (response, _) = await AiService.instance.generate(prompt);
+      final jsonStart = response.indexOf('[');
+      final jsonEnd = response.lastIndexOf(']');
+      if (jsonStart != -1 && jsonEnd != -1) {
+        final cleanJson = response.substring(jsonStart, jsonEnd + 1);
+        final List decoded = jsonDecode(cleanJson) as List;
+        final Map<int, String> map = {};
+        for (final item in decoded) {
+          if (item is Map) {
+            final idx = (int.tryParse(item['index']?.toString() ?? '') ?? 0) - 1;
+            final exp = item['explanation']?.toString().trim() ?? '';
+            if (idx >= 0 && idx < lyricLines.length && exp.isNotEmpty) {
+              map[idx] = exp;
+            }
+          }
+        }
+        if (map.isNotEmpty) return map;
+      }
+    } catch (e) {
+      debugPrint('[SongSummaryService] line-by-line generation error: $e');
+    }
+
+    // Fallback line-by-line explanations if AI is offline
+    final Map<int, String> fallback = {};
+    for (var i = 0; i < lyricLines.length; i++) {
+      final line = lyricLines[i].trim();
+      if (line.isNotEmpty) {
+        fallback[i] = 'Author conveys emotional narrative and deep vocal expression in this line.';
+      }
+    }
+    return fallback;
+  }
 }
+

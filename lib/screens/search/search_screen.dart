@@ -673,7 +673,7 @@ Output ONLY valid JSON:
       );
     }
 
-    final showBackButton = _searchController.text.isNotEmpty || _filteredTracks.isNotEmpty || _searchFocusNode.hasFocus;
+    final showBackButton = _searchController.text.isNotEmpty || _filteredTracks.isNotEmpty || _searchFocusNode.hasFocus || _isSearching;
 
     return Column(
       children: [
@@ -682,12 +682,15 @@ Output ONLY valid JSON:
           padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 4),
           child: Row(
             children: [
-              // Search Back Button to easily return to recent searches (first page view)
+              // Search Back Button to return to recent searches & played music home page
               if (showBackButton) ...[
                 IconButton(
                   icon: const Icon(Icons.arrow_back_rounded, size: 22),
-                  tooltip: 'Back to Recent Searches',
-                  onPressed: _resetSearch,
+                  tooltip: 'Back to Recent Searches & Played Music',
+                  onPressed: () {
+                    FocusScope.of(context).unfocus();
+                    _resetSearch();
+                  },
                 ),
                 const SizedBox(width: 4),
               ],

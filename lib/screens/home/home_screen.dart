@@ -33,6 +33,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       UpdateService.checkForUpdates(context);
+      if (!StorageService.hasCompletedOnboarding()) {
+        _showFirstLaunchOnboardingModal(context);
+      }
     });
   }
 
@@ -245,20 +248,187 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String _greeting() {
     final hour = DateTime.now().hour;
     String timeGreeting = 'Good morning';
+    String emoji = '🌅';
     if (hour < 12) {
       timeGreeting = 'Good morning';
+      emoji = '🌅';
     } else if (hour < 17) {
       timeGreeting = 'Good afternoon';
-    } else if (hour < 21) {
+      emoji = '☀️';
+    } else if (hour < 22) {
       timeGreeting = 'Good evening';
+      emoji = '🌙';
     } else {
       timeGreeting = 'Good night';
+      emoji = '✨';
     }
-    final userName = StorageService.getSetting('user_name', defaultValue: '') as String;
+    final userName = StorageService.getUserName();
     if (userName.trim().isNotEmpty) {
-      return '$timeGreeting, ${userName.trim()}';
+      return '$timeGreeting, ${userName.trim()} $emoji';
     }
-    return '$timeGreeting, Listener';
+    return '$timeGreeting, Listener $emoji';
+  }
+
+  void _showFirstLaunchOnboardingModal(BuildContext context) {
+    final nameController = TextEditingController(text: StorageService.getUserName());
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    int selectedR = 255, selectedG = 199, selectedB = 44; // Gold default
+
+    final colorPresets = [
+      {'name': 'Gold', 'r': 255, 'g': 199, 'b': 44, 'color': const Color(0xFFFFC72C)},
+      {'name': 'Cyan', 'r': 6, 'g': 182, 'b': 212, 'color': const Color(0xFF06B6D4)},
+      {'name': 'Emerald', 'r': 16, 'g': 185, 'b': 129, 'color': const Color(0xFF10B981)},
+      {'name': 'Purple', 'r': 168, 'g': 85, 'b': 247, 'color': const Color(0xFFA855F7)},
+      {'name': 'Sunset', 'r': 249, 'g': 115, 'b': 22, 'color': const Color(0xFFF97316)},
+      {'name': 'Crimson', 'r': 239, 'g': 68, 'b': 68, 'color': const Color(0xFFEF4444)},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final activeColor = Color.fromARGB(255, selectedR, selectedG, selectedB);
+
+            return Container(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 24,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 20)],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Icon(Icons.waving_hand_rounded, color: activeColor, size: 28),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Welcome to Aura Music 🎵',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Let\'s personalize your music player! Tell us your name and pick a favorite theme accent color.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 1. Name Input
+                  const Text('What is your name?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      hintText: 'Enter your name (e.g. Bhavneet)...',
+                      filled: true,
+                      fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                      prefixIcon: Icon(Icons.person_rounded, color: activeColor),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 2. Theme Color Selection
+                  const Text('Pick Theme Accent Color', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: colorPresets.map((preset) {
+                      final pColor = preset['color'] as Color;
+                      final isSelected = selectedR == preset['r'] && selectedG == preset['g'] && selectedB == preset['b'];
+
+                      return GestureDetector(
+                        onTap: () {
+                          setModalState(() {
+                            selectedR = preset['r'] as int;
+                            selectedG = preset['g'] as int;
+                            selectedB = preset['b'] as int;
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: pColor,
+                            border: Border.all(
+                              color: isSelected ? (isDark ? Colors.white : Colors.black) : Colors.transparent,
+                              width: 3,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: pColor.withValues(alpha: 0.4),
+                                blurRadius: isSelected ? 10 : 4,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: isSelected ? const Icon(Icons.check_rounded, color: Colors.white, size: 22) : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Save & Continue Button
+                  ElevatedButton(
+                    onPressed: () async {
+                      final name = nameController.text.trim();
+                      if (name.isNotEmpty) {
+                        await StorageService.setUserName(name);
+                      }
+                      await ref.read(customizationProvider.notifier).updateAccentColor(selectedR, selectedG, selectedB);
+                      await StorageService.setCompletedOnboarding(true);
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        setState(() {});
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: activeColor,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 2,
+                    ),
+                    child: const Text('Save & Get Started ✨', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // Home Header widget (greeting, title, and search bar)

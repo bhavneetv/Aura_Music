@@ -72,7 +72,7 @@ class PlaybackState {
     this.currentIndex = -1,
     this.isShuffle = false,
     this.repeatMode = RepeatMode.off,
-    this.playerSkin = 'vinyl',
+    this.playerSkin = 'minimal',
     this.volumeNormalization = false,
     this.gaplessPlayback = true,
     this.playbackSpeed = 1.0,
@@ -153,8 +153,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _handler.onNextRequested = () => nextTrack();
     _handler.onPreviousRequested = () => previousTrack();
 
-    // Load saved settings from Hive
-    final savedSkin = StorageService.getSetting('player_skin', defaultValue: 'vinyl') as String;
+    // Load saved settings from Hive (default to minimal cover art skin)
+    final savedSkin = StorageService.getSetting('player_skin', defaultValue: 'minimal') as String;
     final savedNorm = StorageService.getSetting('volume_normalization', defaultValue: false) as bool;
     final savedGapless = StorageService.getSetting('gapless_playback', defaultValue: true) as bool;
     final savedSpeed = StorageService.getSetting('playback_speed', defaultValue: 1.0) as double;

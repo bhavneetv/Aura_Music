@@ -303,6 +303,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  void _showEditUserNameDialog(BuildContext context) {
+    final controller = TextEditingController(text: StorageService.getUserName());
+    final customBranding = ref.read(customizationProvider);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Your Display Name'),
+          content: TextField(
+            controller: controller,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              hintText: 'Enter your name (e.g. Bhavneet)...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final name = controller.text.trim();
+                await StorageService.setUserName(name);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  setState(() {});
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: customBranding.accentColor,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
@@ -342,6 +385,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           subtitle: Text('Change app name: "${customBranding.appName}" and RGB colors'),
           trailing: const Icon(Icons.palette_outlined, color: Colors.grey),
           onTap: () => _showCustomizerBottomSheet(context),
+        ),
+        const Divider(indent: 24, endIndent: 24, height: 1),
+
+        // User Profile Section
+        const SizedBox(height: 12),
+        _buildSectionHeader('USER PROFILE', customBranding.accentColor),
+        _buildSelectionTile(
+          'Your Display Name',
+          StorageService.getUserName().isNotEmpty ? StorageService.getUserName() : 'Not Set',
+          () => _showEditUserNameDialog(context),
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
 

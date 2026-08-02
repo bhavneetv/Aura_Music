@@ -5,6 +5,7 @@ import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/lyrics/lyrics_service.dart';
+import '../../services/ai/song_summary_service.dart';
 
 class LyricsScreen extends ConsumerStatefulWidget {
   final Track track;
@@ -32,6 +33,14 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
   bool _userIsScrolling = false;
   Timer? _userScrollTimer;
 
+  // Sync / Center lock state
+  bool _isSyncLocked = true;
+
+  // AI Line Explanations state
+  Map<int, String> _lineExplanations = {};
+  bool _isLoadingExplanations = false;
+  bool _showExplanations = false;
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +58,8 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
     setState(() {
       _selectedCandidate = candidate;
       _activeLanguage = 'Original';
+      _lineExplanations = {};
+      _showExplanations = false;
       if (candidate.syncedLyrics != null && candidate.syncedLyrics!.isNotEmpty) {
         _currentSyncedLines = parseLrc(candidate.syncedLyrics!);
         _originalSyncedLines = _currentSyncedLines;
@@ -112,6 +123,60 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
     }
   }
 
+  List<String> _extractRawLines() {
+    if (_currentSyncedLines != null && _currentSyncedLines!.isNotEmpty) {
+      return _currentSyncedLines!.map((l) => l.text).toList();
+    }
+    if (_currentPlainLyrics != null && _currentPlainLyrics!.isNotEmpty) {
+      return _currentPlainLyrics!.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    }
+    return [];
+  }
+
+  Future<void> _toggleLineExplanations() async {
+    if (_showExplanations) {
+      setState(() {
+        _showExplanations = false;
+      });
+      return;
+    }
+
+    if (_lineExplanations.isNotEmpty) {
+      setState(() {
+        _showExplanations = true;
+      });
+      return;
+    }
+
+    final rawLines = _extractRawLines();
+    if (rawLines.isEmpty) return;
+
+    setState(() {
+      _isLoadingExplanations = true;
+      _showExplanations = true;
+    });
+
+    try {
+      final map = await SongSummaryService.instance.getLineExplanations(
+        title: widget.track.title,
+        artist: widget.track.artist,
+        lyricLines: rawLines,
+      );
+      if (mounted) {
+        setState(() {
+          _lineExplanations = map;
+          _isLoadingExplanations = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingExplanations = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _userScrollTimer?.cancel();
@@ -121,12 +186,17 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
 
   void _scrollToActiveLine(int index, int totalLines) {
     if (_userIsScrolling || !_scrollController.hasClients || index < 0 || totalLines <= 0) return;
-    const itemHeight = 60.0;
+    const itemHeight = 75.0;
     final viewportHeight = MediaQuery.of(context).size.height;
-    final targetOffset = mathMax(0.0, (index * itemHeight) - (viewportHeight * 0.4));
+
+    // When sync locked, center active line exactly in middle of screen
+    final targetOffset = _isSyncLocked
+        ? mathMax(0.0, (index * itemHeight) - (viewportHeight * 0.5 - itemHeight * 0.5))
+        : mathMax(0.0, (index * itemHeight) - (viewportHeight * 0.35));
+
     _scrollController.animateTo(
       targetOffset,
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
     );
   }
@@ -181,6 +251,15 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: Icon(
+              _showExplanations ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+              color: Colors.amber,
+              size: 22,
+            ),
+            tooltip: 'AI Line-by-Line Meaning',
+            onPressed: _toggleLineExplanations,
+          ),
           PopupMenuButton<String>(
             icon: _isTranslating
                 ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: accentColor))
@@ -251,57 +330,133 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Header Controls Bar wrapped in SingleChildScrollView to prevent edge overflow
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          synced != null && synced.isNotEmpty ? Icons.sync_rounded : Icons.notes_rounded,
-                          size: 12,
-                          color: accentColor,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          synced != null && synced.isNotEmpty ? 'Karaoke Synced' : 'Plain Text Lyrics',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: accentColor,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    // Center Sync Lock Button
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _isSyncLocked = !_isSyncLocked;
+                          _userIsScrolling = false;
+                        });
+                        if (_isSyncLocked && synced != null && synced.isNotEmpty) {
+                          _scrollToActiveLine(_activeLineIndex, synced.length);
+                        }
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _isSyncLocked ? accentColor.withValues(alpha: 0.22) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _isSyncLocked ? accentColor : Colors.grey.withValues(alpha: 0.3),
+                            width: 1.0,
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                  if (_activeLanguage != 'Original') ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.amber, width: 0.8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isSyncLocked ? Icons.gps_fixed_rounded : Icons.gps_not_fixed_rounded,
+                              size: 12,
+                              color: _isSyncLocked ? accentColor : Colors.grey,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _isSyncLocked ? 'Sync Locked (Center) 🎯' : 'Sync 🎯',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: _isSyncLocked ? accentColor : Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: Text(
-                        'AI Translated ($_activeLanguage)',
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber),
+                    ),
+                    const SizedBox(width: 8),
+
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            synced != null && synced.isNotEmpty ? Icons.sync_rounded : Icons.notes_rounded,
+                            size: 12,
+                            color: accentColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            synced != null && synced.isNotEmpty ? 'Karaoke Synced' : 'Plain Text',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: accentColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_activeLanguage != 'Original') ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.amber, width: 0.8),
+                        ),
+                        child: Text(
+                          'AI Translated ($_activeLanguage)',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: _toggleLineExplanations,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _showExplanations ? Colors.amber.withValues(alpha: 0.25) : accentColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _showExplanations ? Colors.amber : accentColor.withValues(alpha: 0.3), width: 0.8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_isLoadingExplanations) ...[
+                              const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.amber)),
+                              const SizedBox(width: 4),
+                            ] else ...[
+                              Icon(Icons.auto_awesome_rounded, size: 12, color: _showExplanations ? Colors.amber : accentColor),
+                              const SizedBox(width: 4),
+                            ],
+                            Text(
+                              _showExplanations ? 'Line Explanations ✨' : 'Summarize Lines ✨',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: _showExplanations ? Colors.amber : accentColor,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
-                  const Spacer(),
-                  const Text(
-                    'Tap line to seek 🎵',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ],
+                ),
               ),
             ),
             const Divider(height: 1),
@@ -344,11 +499,12 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
                           },
                           child: ListView.builder(
                             controller: _scrollController,
-                            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                             itemCount: synced.length,
                             itemBuilder: (context, index) {
                               final line = synced[index];
                               final isActive = index == _activeLineIndex;
+                              final explanation = _lineExplanations[index];
 
                               return GestureDetector(
                                 onTap: () {
@@ -359,36 +515,138 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
                                 },
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  child: AnimatedDefaultTextStyle(
-                                    duration: const Duration(milliseconds: 200),
-                                    style: TextStyle(
-                                      fontSize: isActive ? 22 : 16,
-                                      fontWeight: isActive ? FontWeight.w900 : FontWeight.w500,
-                                      color: isActive
-                                          ? accentColor
-                                          : (isDark ? Colors.white : Colors.black).withValues(alpha: 0.4),
-                                      height: 1.4,
-                                      fontFamily: 'Outfit',
-                                    ),
-                                    child: Text(line.text.isEmpty ? '♪' : line.text),
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      AnimatedDefaultTextStyle(
+                                        duration: const Duration(milliseconds: 200),
+                                        style: TextStyle(
+                                          fontSize: isActive ? 22 : 16,
+                                          fontWeight: isActive ? FontWeight.w900 : FontWeight.w500,
+                                          color: isActive
+                                              ? accentColor
+                                              : (isDark ? Colors.white : Colors.black).withValues(alpha: 0.4),
+                                          height: 1.4,
+                                          fontFamily: 'Outfit',
+                                        ),
+                                        child: Text(line.text.isEmpty ? '♪' : line.text),
+                                      ),
+
+                                      // Premium UI for Summarized Lyric Line Explanations
+                                      if (_showExplanations) ...[
+                                        const SizedBox(height: 4),
+                                        if (_isLoadingExplanations && explanation == null)
+                                          Text(
+                                            ' (✨ Analyzing line meaning...)',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontStyle: FontStyle.italic,
+                                              color: Colors.amber.withValues(alpha: 0.7),
+                                            ),
+                                          )
+                                        else if (explanation != null && explanation.isNotEmpty)
+                                          Container(
+                                            margin: const EdgeInsets.only(top: 4, bottom: 2),
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: (isDark ? const Color(0xFF2B2215) : const Color(0xFFFFF9EE)),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: Colors.amber.withValues(alpha: 0.45), width: 0.8),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.amber.withValues(alpha: 0.08),
+                                                  blurRadius: 6,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text('💡 ', style: TextStyle(fontSize: 12)),
+                                                Expanded(
+                                                  child: Text(
+                                                    '($explanation)',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontStyle: FontStyle.italic,
+                                                      fontWeight: FontWeight.w600,
+                                                      color: isDark ? Colors.amber.shade200 : Colors.brown.shade900,
+                                                      height: 1.35,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ],
                                   ),
                                 ),
                               );
                             },
                           ),
                         )
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(28),
-                          child: Text(
-                            _currentPlainLyrics ?? 'No lyrics available.',
-                            style: TextStyle(
-                              fontSize: 16,
-                              height: 1.6,
-                              color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6),
-                              fontFamily: 'Outfit',
-                            ),
-                          ),
+                      : ListView(
+                          padding: const EdgeInsets.all(24),
+                          children: [
+                            if (_currentPlainLyrics != null && _currentPlainLyrics!.isNotEmpty)
+                              ..._currentPlainLyrics!.split('\n').asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final lineStr = entry.value;
+                                final explanation = _lineExplanations[idx];
+
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        lineStr.isEmpty ? '♪' : lineStr,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          height: 1.5,
+                                          color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.8),
+                                          fontFamily: 'Outfit',
+                                        ),
+                                      ),
+                                      if (_showExplanations && explanation != null && explanation.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: (isDark ? const Color(0xFF2B2215) : const Color(0xFFFFF9EE)),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.amber.withValues(alpha: 0.45), width: 0.8),
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text('💡 ', style: TextStyle(fontSize: 12)),
+                                              Expanded(
+                                                child: Text(
+                                                  '($explanation)',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontStyle: FontStyle.italic,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark ? Colors.amber.shade200 : Colors.brown.shade900,
+                                                    height: 1.35,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              })
+                            else
+                              const Text('No lyrics available.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+                          ],
                         ),
             ),
           ],
