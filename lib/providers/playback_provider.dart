@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
@@ -60,6 +61,7 @@ class PlaybackState {
   final double playbackSpeed;
   final int? sleepTimerMinutes;
   final Duration? sleepTimerTimeRemaining;
+  final bool isSleepTimerEndOfTrack;
 
   PlaybackState({
     this.currentTrack,
@@ -78,6 +80,7 @@ class PlaybackState {
     this.playbackSpeed = 1.0,
     this.sleepTimerMinutes,
     this.sleepTimerTimeRemaining,
+    this.isSleepTimerEndOfTrack = false,
   });
 
   Duration get queueDuration {
@@ -115,6 +118,7 @@ class PlaybackState {
     double? playbackSpeed,
     int? sleepTimerMinutes,
     Duration? sleepTimerTimeRemaining,
+    bool? isSleepTimerEndOfTrack,
   }) {
     return PlaybackState(
       currentTrack: currentTrack ?? this.currentTrack,
@@ -133,6 +137,7 @@ class PlaybackState {
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
       sleepTimerTimeRemaining: sleepTimerTimeRemaining ?? this.sleepTimerTimeRemaining,
+      isSleepTimerEndOfTrack: isSleepTimerEndOfTrack ?? this.isSleepTimerEndOfTrack,
     );
   }
 }
@@ -200,9 +205,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _stateSub = _handler.activePlayerStateStream.listen((playerState) {
       state = state.copyWith(isPlaying: playerState.playing);
       
-      // Auto-play next track on completion
-      if (playerState.processingState == ProcessingState.completed) {
-        nextTrack();
+      // Auto-play next track on completion (debounce to prevent double-fire)
+      if (playerState.processingState == ProcessingState.completed && !_isSwitchingTrack) {
+        // Use microtask to let the player fully settle before advancing
+        Future.microtask(() => nextTrack());
       }
     });
 
@@ -410,7 +416,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     if (audioUrl.isNotEmpty) {
       try {
-        await StorageService.addSearchedAndPlayedTrack(track);
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
         // Final nonce check before actually starting playback
         if (_playbackNonce != myNonce) {
@@ -419,7 +424,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         }
         await _handler.playTrack(track.copyWith(audioUrl: audioUrl));
 
-        _preloadNextTrack();
+        _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
       } catch (e) {
         print('[AURA-PLAY] Initial playback failed for "${track.title}": $e');
@@ -439,7 +444,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             }
             state = state.copyWith(queue: updatedQueue, currentTrack: resolvedTrack);
             await _saveQueue();
-            _preloadNextTrack();
+            _preloadUpcomingTracks();
             ensureUpcomingRecommendations();
             return;
           }
@@ -506,22 +511,25 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
-  Future<void> _preloadNextTrack() async {
-    final nextIdx = state.currentIndex + 1;
-    if (nextIdx < state.queue.length) {
+  Future<void> _preloadUpcomingTracks() async {
+    final curIdx = state.currentIndex;
+    if (curIdx < 0) return;
+    final endIdx = math.min(state.queue.length, curIdx + 4);
+
+    for (int nextIdx = curIdx + 1; nextIdx < endIdx; nextIdx++) {
       final nextTrackItem = state.queue[nextIdx];
       final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id);
       if (localPath == null || !File(localPath).existsSync()) {
         try {
           if (nextTrackItem.audioUrl.isEmpty) {
-            final source = ref.read(musicSourceProvider);
-            final results = await source.searchTracks('${nextTrackItem.title} ${nextTrackItem.artist}');
-            if (results.isNotEmpty && results.first.audioUrl.isNotEmpty) {
-              final freshUrl = results.first.audioUrl;
+            final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(nextTrackItem);
+            if (freshUrl != null && freshUrl.isNotEmpty) {
               final List<Track> updatedQueue = List.from(state.queue);
-              updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
-              state = state.copyWith(queue: updatedQueue);
-              _saveQueue();
+              if (nextIdx < updatedQueue.length) {
+                updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
+                state = state.copyWith(queue: updatedQueue);
+                _saveQueue();
+              }
             }
           }
         } catch (_) {}
@@ -699,6 +707,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   void nextTrack({bool isCrossfade = false}) async {
     if (state.queue.isEmpty || _isSwitchingTrack) return;
     _isSwitchingTrack = true;
+
+    if (state.isSleepTimerEndOfTrack) {
+      triggerHaptic(HapticFeedbackType.medium);
+      await _handler.pause();
+      cancelSleepTimer();
+      _isSwitchingTrack = false;
+      return;
+    }
     
     try {
       // Log previous track telemetry and handle skip realignments
@@ -770,13 +786,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         await _saveQueue();
         final crossfadeSec = StorageService.getCrossfadeDuration();
         await _handler.crossfadeToTrack(nextTrackItem, crossfadeSec);
-        _preloadNextTrack();
+        _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
       } else {
-        playTrack(nextTrackItem);
+        jumpToQueueIndex(nextIdx);
       }
     } finally {
-      Future.delayed(const Duration(milliseconds: 350), () {
+      Future.delayed(const Duration(milliseconds: 100), () {
         _isSwitchingTrack = false;
       });
     }
@@ -795,9 +811,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           prevIdx = 0;
         }
       }
-      playTrack(state.queue[prevIdx]);
+      jumpToQueueIndex(prevIdx);
     } finally {
-      Future.delayed(const Duration(milliseconds: 350), () {
+      Future.delayed(const Duration(milliseconds: 100), () {
         _isSwitchingTrack = false;
       });
     }
@@ -854,9 +870,19 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   // ── Sleep Timer ─────────────────────────────────────────────
 
+  void startSleepTimerTillEndOfTrack() {
+    _sleepTimer?.cancel();
+    state = state.copyWith(
+      isSleepTimerEndOfTrack: true,
+      sleepTimerMinutes: -1,
+      sleepTimerTimeRemaining: null,
+    );
+  }
+
   void startSleepTimer(int minutes) {
     _sleepTimer?.cancel();
     state = state.copyWith(
+      isSleepTimerEndOfTrack: false,
       sleepTimerMinutes: minutes,
       sleepTimerTimeRemaining: Duration(minutes: minutes),
     );
@@ -878,6 +904,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   void cancelSleepTimer() {
     _sleepTimer?.cancel();
     state = state.copyWith(
+      isSleepTimerEndOfTrack: false,
       sleepTimerMinutes: null,
       sleepTimerTimeRemaining: null,
     );

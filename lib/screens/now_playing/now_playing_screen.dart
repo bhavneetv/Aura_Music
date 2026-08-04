@@ -144,11 +144,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   void _syncAnimations(bool isPlaying) {
     if (isPlaying) {
-      if (_decelController.isAnimating) _decelController.stop();
-      _spinController.repeat();
+      if (_decelController.isAnimating) {
+        _lastAngle = _decelAngleAnimation.value % (2 * math.pi);
+        _decelController.stop();
+      }
+      if (!_spinController.isAnimating) {
+        _spinController.repeat();
+      }
     } else {
       if (_spinController.isAnimating) {
-        _lastAngle = _spinController.value * 2 * math.pi;
+        _lastAngle = (_spinController.value * 2 * math.pi) % (2 * math.pi);
         _spinController.stop();
         _decelAngleAnimation = Tween<double>(begin: _lastAngle, end: _lastAngle + (math.pi / 8)).animate(
           CurvedAnimation(parent: _decelController, curve: Curves.decelerate)
@@ -484,15 +489,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
-                        // Stacked Queue Preview Cards (rendered when _showQueuePreview is active)
+                        // Interactive 3D Deck of Cards Stack Queue Preview
                         if (_showQueuePreview) ...[
                           Builder(
                             builder: (context) {
-                              final upcomingStart = (state.currentIndex >= 0 && state.currentIndex < state.queue.length)
-                                  ? state.currentIndex + 1
-                                  : 0;
-                              final upcoming = state.queue.skip(upcomingStart).take(3).toList();
-                              if (upcoming.isEmpty) {
+                              final queue = state.queue;
+                              if (queue.isEmpty) {
                                 return Center(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -500,80 +502,170 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                       color: Colors.black87,
                                       borderRadius: BorderRadius.circular(16),
                                     ),
-                                    child: const Text('No upcoming songs in queue', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                    child: const Text('Queue is empty', style: TextStyle(color: Colors.white, fontSize: 12)),
                                   ),
                                 );
                               }
+
+                              final focusedIdx = (_queueDragIndex >= 0 && _queueDragIndex < queue.length)
+                                  ? _queueDragIndex
+                                  : (state.currentIndex >= 0 ? state.currentIndex : 0);
+
+                              // Pre-cache nearby artwork for smooth 60 FPS transitions
+                              for (int i = math.max(0, focusedIdx - 2); i <= math.min(queue.length - 1, focusedIdx + 2); i++) {
+                                if (queue[i].artworkUrl.isNotEmpty) {
+                                  precacheImage(NetworkImage(queue[i].artworkUrl), context);
+                                }
+                              }
+
+                              final visibleIndices = <int>[];
+                              for (int offset = -2; offset <= 2; offset++) {
+                                final idx = focusedIdx + offset;
+                                if (idx >= 0 && idx < queue.length) {
+                                  visibleIndices.add(idx);
+                                }
+                              }
+
                               return Stack(
                                 alignment: Alignment.center,
-                                children: List.generate(upcoming.length, (idx) {
-                                  final upcomingTrack = upcoming[idx];
-                                  final offset = (idx + 1) * 16.0;
-                                  final scale = 1.0 - ((idx + 1) * 0.07);
+                                children: [
+                                  // Instructions Legend Banner
+                                  Positioned(
+                                    top: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.85),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: customBranding.accentColor.withOpacity(0.6), width: 1.0),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.touch_app_rounded, size: 14, color: customBranding.accentColor),
+                                          const SizedBox(width: 6),
+                                          const Text(
+                                            'Drag up/down to shuffle • Release to play track',
+                                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  ...visibleIndices.map((idx) {
+                                  final itemTrack = queue[idx];
+                                  final dist = idx - focusedIdx;
+                                  final isFocused = (idx == focusedIdx);
 
-                                  return Positioned(
-                                    top: offset,
+                                  final double offsetY = dist * 52.0;
+                                  final double scale = (1.0 - (dist.abs() * 0.10)).clamp(0.72, 1.05);
+                                  final double opacity = (1.0 - (dist.abs() * 0.25)).clamp(0.35, 1.0);
+                                  final double tiltAngle = dist * 0.07;
+
+                                  final Matrix4 transform = Matrix4.identity()
+                                    ..setEntry(3, 2, 0.001)
+                                    ..rotateX(tiltAngle)
+                                    ..translate(0.0, offsetY, 0.0);
+
+                                  return Transform(
+                                    transform: transform,
+                                    alignment: Alignment.center,
                                     child: Transform.scale(
                                       scale: scale,
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          notifier.playTrack(upcomingTrack);
-                                          setState(() => _showQueuePreview = false);
-                                        },
-                                        child: Container(
-                                          width: MediaQuery.of(context).size.width * 0.72,
-                                          height: 64,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          decoration: BoxDecoration(
-                                            color: isDark ? const Color(0xFF222226) : const Color(0xFFFFFFFF),
-                                            borderRadius: BorderRadius.circular(16),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withValues(alpha: 0.25),
-                                                blurRadius: 10,
-                                                offset: const Offset(0, 4),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              ClipRRect(
-                                                borderRadius: BorderRadius.circular(8),
-                                                child: Image.network(
-                                                  upcomingTrack.artworkUrl,
-                                                  width: 48,
-                                                  height: 48,
-                                                  fit: BoxFit.cover,
-                                                  errorBuilder: (_, __, ___) => Container(width: 48, height: 48, color: Colors.grey),
+                                      child: Opacity(
+                                        opacity: opacity,
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            triggerHaptic(HapticFeedbackType.medium);
+                                            notifier.jumpToQueueIndex(idx);
+                                            setState(() => _showQueuePreview = false);
+                                          },
+                                          child: AnimatedContainer(
+                                            duration: const Duration(milliseconds: 180),
+                                            curve: Curves.easeOutCubic,
+                                            width: MediaQuery.of(context).size.width * 0.78,
+                                            height: 78,
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: isFocused
+                                                  ? (isDark ? const Color(0xFF28282E) : Colors.white)
+                                                  : (isDark ? const Color(0xFF1E1E22) : const Color(0xFFF0EAE1)),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: isFocused
+                                                  ? Border.all(color: customBranding.accentColor, width: 2.0)
+                                                  : Border.all(color: Colors.grey.withOpacity(0.2), width: 1.0),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: isFocused
+                                                      ? customBranding.accentColor.withOpacity(0.35)
+                                                      : Colors.black.withOpacity(0.20),
+                                                  blurRadius: isFocused ? 18 : 8,
+                                                  offset: Offset(0, isFocused ? 6 : 3),
                                                 ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                  children: [
-                                                    Text(
-                                                      'Up Next #${idx + 1}',
-                                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: customBranding.accentColor),
-                                                    ),
-                                                    Text(
-                                                      upcomingTrack.title,
-                                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                  ],
+                                              ],
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                ClipRRect(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  child: Image.network(
+                                                    itemTrack.artworkUrl,
+                                                    width: 52,
+                                                    height: 52,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) => Container(width: 52, height: 52, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
+                                                  ),
                                                 ),
-                                              ),
-                                              const Icon(Icons.play_circle_fill_rounded, size: 24, color: Colors.grey),
-                                            ],
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    mainAxisAlignment: MainAxisAlignment.center,
+                                                    children: [
+                                                      Text(
+                                                        isFocused
+                                                            ? (idx == state.currentIndex ? 'NOW PLAYING 🎵' : 'RELEASE TO PLAY ⚡')
+                                                            : 'UP NEXT #${idx + 1}',
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: isFocused ? customBranding.accentColor : Colors.grey,
+                                                          letterSpacing: 0.8,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 2),
+                                                      Text(
+                                                        itemTrack.title,
+                                                        style: TextStyle(
+                                                          fontWeight: FontWeight.bold,
+                                                          fontSize: isFocused ? 14 : 13,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                      Text(
+                                                        itemTrack.artist,
+                                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                Icon(
+                                                  isFocused ? Icons.play_circle_fill_rounded : Icons.music_note_rounded,
+                                                  size: isFocused ? 30 : 22,
+                                                  color: isFocused ? customBranding.accentColor : Colors.grey,
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   );
                                 }),
+                                ],
                               );
                             },
                           ),
@@ -802,7 +894,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       _buildActionButton(
                         icon: Icons.timer_rounded,
                         label: 'Timer',
-                        isActive: state.sleepTimerMinutes != null,
+                        isActive: state.sleepTimerMinutes != null || state.isSleepTimerEndOfTrack,
                         accentColor: customBranding.accentColor,
                         onTap: () => _showSleepTimerDialog(notifier),
                       ),
@@ -1525,51 +1617,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   // ── Dialog Selectors & Queue Sheet ───────────────────────────
 
-  void _showSleepTimerDialog(PlaybackNotifier notifier) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Sleep Timer Settings', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('5 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(5);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('15 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(15);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('30 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(30);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Turn Timer Off', style: TextStyle(color: Colors.redAccent)),
-                onTap: () {
-                  notifier.cancelSleepTimer();
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   void _showPlaybackSpeedDialog(PlaybackNotifier notifier) {
     showDialog(
       context: context,
@@ -1757,7 +1804,135 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 ],
               ),
             );
-          }
+          },
+        );
+      },
+    );
+  }
+
+  void _showSleepTimerDialog(PlaybackNotifier notifier) {
+    final customBranding = ref.watch(customizationProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final state = ref.read(playbackProvider);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1B1B1F) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(Icons.timer_rounded, color: customBranding.accentColor, size: 22),
+                  const SizedBox(width: 10),
+                  const Text('Sleep Timer', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Option: Till this song ends
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: state.isSleepTimerEndOfTrack ? customBranding.accentColor : Colors.grey.withOpacity(0.12),
+                  child: Icon(Icons.music_off_rounded, size: 18, color: state.isSleepTimerEndOfTrack ? Colors.white : customBranding.accentColor),
+                ),
+                title: const Text('Till this song ends ⌛', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: const Text('Stop playback automatically when current track finishes', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                trailing: state.isSleepTimerEndOfTrack
+                    ? Icon(Icons.check_circle_rounded, color: customBranding.accentColor)
+                    : null,
+                onTap: () {
+                  triggerHaptic(HapticFeedbackType.medium);
+                  notifier.startSleepTimerTillEndOfTrack();
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Sleep timer set: Playback will stop when this song ends ⌛'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 16),
+
+              // Preset minute options: 5, 15, 30, 45, 60
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [5, 15, 30, 45, 60].map((mins) {
+                  final isSelected = !state.isSleepTimerEndOfTrack && state.sleepTimerMinutes == mins;
+                  return ChoiceChip(
+                    label: Text('$mins mins'),
+                    selected: isSelected,
+                    onSelected: (val) {
+                      triggerHaptic(HapticFeedbackType.medium);
+                      if (val) {
+                        notifier.startSleepTimer(mins);
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Sleep timer set for $mins minutes ⏳'),
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    selectedColor: customBranding.accentColor.withOpacity(0.15),
+                    checkmarkColor: customBranding.accentColor,
+                    labelStyle: TextStyle(
+                      color: isSelected ? customBranding.accentColor : (isDark ? Colors.white70 : Colors.black87),
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  );
+                }).toList(),
+              ),
+
+              if (state.sleepTimerMinutes != null || state.isSleepTimerEndOfTrack) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () {
+                      triggerHaptic(HapticFeedbackType.medium);
+                      notifier.cancelSleepTimer();
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Sleep timer cancelled ⏹️'),
+                          behavior: SnackBarBehavior.floating,
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.stop_circle_rounded, color: Colors.redAccent, size: 20),
+                    label: const Text('Turn Off Sleep Timer', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ],
+          ),
         );
       },
     );

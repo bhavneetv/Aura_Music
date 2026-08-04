@@ -9,9 +9,9 @@ class AudioUrlResolver {
   AudioUrlResolver._();
 
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 5),
-    receiveTimeout: const Duration(seconds: 5),
-    sendTimeout: const Duration(seconds: 3),
+    connectTimeout: const Duration(seconds: 3),
+    receiveTimeout: const Duration(seconds: 3),
+    sendTimeout: const Duration(seconds: 2),
     headers: {
       'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -87,8 +87,8 @@ class AudioUrlResolver {
 
   Future<String?> _tryGetSongById(String trackId) async {
     final endpoints = [
-      'https://saavn-api.vercel.app/song/$trackId',
       'https://jiosaavn-api-beta.vercel.app/songs?id=$trackId',
+      'https://jiosaavn-api-unofficial.vercel.app/songs?id=$trackId',
     ];
 
     for (final url in endpoints) {
@@ -98,10 +98,8 @@ class AudioUrlResolver {
         if (response.statusCode == 200 && response.data != null) {
           final cdnUrl = _extractCdnUrlFromData(response.data);
           if (cdnUrl != null && _isDirectCdnLink(cdnUrl)) {
-            // Verify HEAD accessibility
-            if (await _isUrlPlayable(cdnUrl)) {
-              return cdnUrl;
-            }
+            // Trust CDN URLs from API — skip HEAD validation for speed
+            return cdnUrl;
           }
         }
       } catch (_) {}
@@ -306,15 +304,15 @@ class AudioUrlResolver {
 
   bool _isDirectCdnLink(String url) {
     if (url.isEmpty) return false;
-    if (url.contains('saavn-api.vercel.app') ||
-        url.contains('jiosaavn-api') ||
-        url.contains('jiosaavn.com') ||
-        url.contains('vercel.app')) {
+    if (url.contains('saavn-api.vercel.app/song') ||
+        url.contains('jiosaavn-api-beta.vercel.app/search')) {
       return false;
     }
-    return url.contains('aac.saavncdn.com') ||
+    return url.contains('saavncdn.com') ||
         url.contains('sndsaavn.com') ||
+        url.contains('jamendo.com') ||
         url.contains('soundhelix.com') ||
-        (url.startsWith('http') && (url.endsWith('.mp3') || url.endsWith('.mp4') || url.endsWith('.m4a')));
+        url.contains('googlevideo.com') ||
+        (url.startsWith('http') && (url.contains('.mp3') || url.contains('.mp4') || url.contains('.m4a') || url.contains('cdn')));
   }
 }

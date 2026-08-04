@@ -163,6 +163,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _fadePlayer.stop();
       await _fadePlayer.setVolume(0.0);
 
+      // Stop and reset active player state before setting new audio source
+      await _activePlayer.stop();
+      await _activePlayer.seek(Duration.zero);
+
       String url = track.audioUrl.trim();
       if (url.startsWith('https:/') && !url.startsWith('https://')) {
         url = url.replaceFirst('https:/', 'https://');
@@ -178,7 +182,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         await _activePlayer.setFilePath(url);
       }
       await _activePlayer.setVolume(1.0);
-      _activePlayer.play();
+      await _activePlayer.play();
       print('[AURA-HANDLER] playTrack SUCCESS: "${track.title}"');
     } catch (e) {
       print('[AURA-HANDLER] playTrack FAILED: "${track.title}" error=$e');

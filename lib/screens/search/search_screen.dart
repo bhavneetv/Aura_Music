@@ -121,6 +121,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     _searchFocusNode.unfocus();
     setState(() {
       _isSearching = false;
+      _isAiLoading = false;
       _filteredTracks = [];
       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
     });
@@ -287,39 +288,33 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     if (query.trim().isEmpty) return;
     setState(() {
       _isAiLoading = true;
-      _aiLoadingText = 'Analyzing request & querying LLM...';
+      _aiLoadingText = 'Finding best match for you...';
     });
 
     try {
       final prompt = '''
 You are an expert music curator. The user entered the request: "$query".
 Analyze their intent and generate a JSON object with:
-1. "intent": "playlist" ONLY if the request contains EXPLICIT playlist-creation words ("create playlist", "make a playlist", "playlist of", "generate playlist"). For general queries ("old punjabi songs", "karan aujla hits"), return "intent": "search".
-2. "queries": JSON array of 2-4 exact search terms. IMPORTANT: Correct any user typos or shorthand artist names into full canonical catalog names (for example: "shidhu" or "sidhu" -> "Sidhu Moose Wala", "karan" -> "Karan Aujla", "diljit" -> "Diljit Dosanjh", "arjit" -> "Arijit Singh").
+1. "intent": "playlist" if the request asks for a playlist, collection, or multi-artist/genre list (e.g. "make playlist", "punjabi and haryanvi songs", "workout songs", "create playlist"). For single specific track titles, return "intent": "search".
+2. "queries": JSON array of 2-4 exact search terms. IMPORTANT: Correct any user typos or shorthand names (for example: "makr" -> "make", "shidhu" or "sidhu" -> "Sidhu Moose Wala", "karan" -> "Karan Aujla", "diljit" -> "Diljit Dosanjh", "haryanavi" -> "Haryanvi").
 3. "playlist_name_suggestion": A short creative title.
-4. "requested_language": Optional language requested (e.g. "punjabi", "hindi", "english") or null.
-5. "requested_artists": Optional array of explicit artist names mentioned (corrected for typos) or null.
-6. "count": Optional explicit requested song count (e.g. 10) or null.
 
 Examples:
-- "create playlist of shidhu" -> {"intent": "playlist", "queries": ["Sidhu Moose Wala", "Sidhu Moose Wala hits"], "playlist_name_suggestion": "Sidhu Moose Wala Hits", "requested_artists": ["Sidhu Moose Wala"]}
-- "create playlist of Karan Aujla" -> {"intent": "playlist", "queries": ["Karan Aujla"], "playlist_name_suggestion": "Karan Aujla Vibes", "requested_artists": ["Karan Aujla"]}
-- "old punjabi songs" -> {"intent": "search", "queries": ["old punjabi songs", "classic punjabi"], "requested_language": "punjabi"}
+- "makr playlist of punjabi and haryanavi songs" -> {"intent": "playlist", "queries": ["Top Punjabi Songs", "Top Haryanvi Songs", "Punjabi Haryanvi Hits"], "playlist_name_suggestion": "Punjabi & Haryanvi Mix"}
+- "create playlist of shidhu" -> {"intent": "playlist", "queries": ["Sidhu Moose Wala", "Sidhu Moose Wala hits"], "playlist_name_suggestion": "Sidhu Moose Wala Hits"}
+- "old romantic hindi songs" -> {"intent": "playlist", "queries": ["old hindi romantic songs", "classic hindi romantic"], "playlist_name_suggestion": "Retro Hindi Romance"}
 
 Output ONLY valid JSON:
 {
-  "intent": "search",
+  "intent": "playlist",
   "queries": ["query 1", "query 2"],
-  "playlist_name_suggestion": "Suggested Title",
-  "requested_language": null,
-  "requested_artists": null,
-  "count": null
+  "playlist_name_suggestion": "Suggested Title"
 }
 ''';
 
-      final (rawResponse, provider) = await AiService.instance.generate(prompt);
+      final (rawResponse, _) = await AiService.instance.generate(prompt);
       setState(() {
-        _aiLoadingText = 'Fetching matching tracks from catalog ($provider)...';
+        _aiLoadingText = 'Curating your personalized tracks...';
       });
 
       Map<String, dynamic>? parsedJson;
@@ -329,46 +324,27 @@ Output ONLY valid JSON:
       } catch (_) {}
 
       List<String> searchQueries = [query];
-      String intent = 'search';
+      String intent = 'playlist';
       String playlistName = '$query Playlist';
-      String? requestedLang;
-      List<String>? requestedArtists;
-      int? requestedCount;
-
-      final countMatch = RegExp(r'\b(\d+)\s*(songs|tracks)?\b', caseSensitive: false).firstMatch(query);
-      if (countMatch != null) {
-        requestedCount = int.tryParse(countMatch.group(1) ?? '');
-      }
 
       if (parsedJson != null) {
-        intent = parsedJson['intent']?.toString() ?? 'search';
+        intent = parsedJson['intent']?.toString() ?? 'playlist';
         playlistName = parsedJson['playlist_name_suggestion']?.toString() ?? playlistName;
-        if (parsedJson['queries'] is List) {
+        if (parsedJson['queries'] is List && (parsedJson['queries'] as List).isNotEmpty) {
           searchQueries = (parsedJson['queries'] as List).map((q) => q.toString()).toList();
         }
-        if (parsedJson['requested_language'] != null) {
-          requestedLang = parsedJson['requested_language'].toString().toLowerCase();
-        }
-        if (parsedJson['requested_artists'] is List) {
-          requestedArtists = (parsedJson['requested_artists'] as List).map((a) => a.toString().toLowerCase()).toList();
-        }
-        if (parsedJson['count'] != null) {
-          requestedCount = int.tryParse(parsedJson['count'].toString()) ?? requestedCount;
-        }
       }
 
-      // Hardcode common artist typo fixes into queries & requestedArtists fallback
+      // Handle multi-genre/language prompt fallback if AI queries missed any part
       final lowerQuery = query.toLowerCase();
-      if (lowerQuery.contains('shidhu') || lowerQuery.contains('sidhu')) {
-        if (!searchQueries.any((q) => q.toLowerCase().contains('sidhu moose wala'))) {
-          searchQueries.insert(0, 'Sidhu Moose Wala');
+      if (lowerQuery.contains('punjabi') && (lowerQuery.contains('haryanvi') || lowerQuery.contains('haryanavi'))) {
+        intent = 'playlist';
+        if (!searchQueries.any((q) => q.toLowerCase().contains('haryanv') || q.toLowerCase().contains('haryanav'))) {
+          searchQueries.add('Top Haryanvi Songs');
         }
-        requestedArtists ??= ['sidhu moose wala'];
-      }
-
-      final hasExplicitPlaylistKeyword = lowerQuery.contains('playlist') || lowerQuery.contains('create') || lowerQuery.contains('make a');
-      if (!hasExplicitPlaylistKeyword) {
-        intent = 'search';
+        if (!searchQueries.any((q) => q.toLowerCase().contains('punjabi'))) {
+          searchQueries.add('Top Punjabi Songs');
+        }
       }
 
       final musicSource = ref.read(musicSourceProvider);
@@ -383,34 +359,28 @@ Output ONLY valid JSON:
             final normKey = '${normTitle}_$normArtist';
 
             if (!trackMap.containsKey(normKey)) {
-              bool matchesLang = true;
-              if (requestedLang != null && requestedLang.isNotEmpty) {
-                final trackGenre = t.genre.toLowerCase();
-                matchesLang = trackGenre.contains(requestedLang) || t.artist.toLowerCase().contains(requestedLang) || t.title.toLowerCase().contains(requestedLang);
-              }
-
-              bool matchesArtist = true;
-              if (requestedArtists != null && requestedArtists.isNotEmpty) {
-                final trackArtistLower = t.artist.toLowerCase();
-                matchesArtist = requestedArtists.any((reqA) => trackArtistLower.contains(reqA) || reqA.contains(trackArtistLower));
-              }
-
-              if (matchesLang && matchesArtist) {
-                trackMap[normKey] = t;
-              }
+              trackMap[normKey] = t;
             }
           }
         } catch (_) {}
       }
 
       List<Track> resultsList = trackMap.values.toList();
+      if (resultsList.isEmpty) {
+        try {
+          resultsList = await musicSource.searchTracks(query);
+        } catch (_) {}
+      }
 
-      final targetLimit = (requestedCount != null && requestedCount > 0) ? requestedCount : 25;
-      if (resultsList.length > targetLimit) {
-        resultsList = resultsList.sublist(0, targetLimit);
+      if (resultsList.length > 30) {
+        resultsList = resultsList.sublist(0, 30);
       }
 
       await StorageService.addAiSearchQuery(query);
+      if (resultsList.isNotEmpty) {
+        await StorageService.saveGroupedAiSession(playlistName, resultsList);
+        await StorageService.saveGroupedAiSession(query, resultsList);
+      }
 
       if (mounted) {
         setState(() {
@@ -418,18 +388,6 @@ Output ONLY valid JSON:
           _filteredTracks = resultsList;
           _recentSearches = StorageService.getAiRecentSearches();
         });
-
-        if (intent == 'playlist' && resultsList.isNotEmpty) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AiPlaylistReviewScreen(
-                suggestedName: playlistName,
-                tracks: resultsList,
-              ),
-            ),
-          );
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -437,8 +395,8 @@ Output ONLY valid JSON:
           _isAiLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('AI Search error: $e. Make sure keys are set in .env'),
+          const SnackBar(
+            content: Text('AI Search completed with fallback search.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -757,20 +715,6 @@ Output ONLY valid JSON:
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () => _showFilterBottomSheet(context),
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: AppTheme.glassDecoration(
-                    context: context,
-                    opacity: isDark ? 0.06 : 0.05,
-                    radius: 24,
-                  ),
-                  child: const Icon(Icons.tune_rounded, size: 20),
-                ),
-              ),
             ],
           ),
         ),
@@ -808,16 +752,37 @@ Output ONLY valid JSON:
 
   Widget _buildSongsTab() {
     if (_searchController.text.isEmpty && _filteredTracks.isEmpty) {
+      final isFocused = _searchFocusNode.hasFocus;
+
+      if (isFocused) {
+        // FOCUSED STATE: Show ONLY Search History query chips
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 96, top: 16),
+          children: [
+            _buildChipSection(
+              _isAiMode ? 'AI Recent Searches' : 'Search History',
+              _recentSearches,
+              true,
+            ),
+          ],
+        );
+      }
+
+      // DEFAULT / UN-FOCUSED LANDING INDEX STATE: Show ONLY AI Playlists & Played Songs
+      final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
+      final historyTracks = _getHistoryTracksList();
+
       return ListView(
         padding: const EdgeInsets.only(bottom: 96, top: 16),
         children: [
-          _buildChipSection(
-            _isAiMode ? 'AI Recent Searches' : 'Recent Searches',
-            _recentSearches,
-            true,
-          ),
-          const SizedBox(height: 16),
-          _buildHistoryTracksList(),
+          // 1. AI Playlist Groups Section
+          if (aiSessionsMap.isNotEmpty) ...[
+            _buildAiPlaylistGroupsSection(aiSessionsMap),
+            const SizedBox(height: 20),
+          ],
+
+          // 2. Recently Played Songs Section
+          _buildRecentlyPlayedSongsSection(historyTracks),
         ],
       );
     }
@@ -872,7 +837,7 @@ Output ONLY valid JSON:
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
-                return false; // Keep item in search list
+                return false;
               },
               background: Container(
                 alignment: Alignment.centerLeft,
@@ -952,7 +917,7 @@ Output ONLY valid JSON:
                       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
                     });
                   },
-                  child: const Text('Clear', style: TextStyle(color: AppTheme.goldAccent, fontSize: 12)),
+                  child: const Text('Clear All', style: TextStyle(color: AppTheme.goldAccent, fontSize: 12)),
                 ),
             ],
           ),
@@ -961,51 +926,65 @@ Output ONLY valid JSON:
             spacing: 8,
             runSpacing: 8,
             children: items.map((tag) {
-              return GestureDetector(
-                onTap: () async {
-                  _searchController.text = tag;
-                  if (_isAiMode) {
-                    await _executeAiSearch(tag);
-                  } else {
-                    await StorageService.addSearchQuery(tag);
-                    setState(() {
-                      _recentSearches = StorageService.getRecentSearches();
-                    });
-                    _onSearchChanged();
-                  }
-                },
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 64),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: AppTheme.glassDecoration(
-                    context: context,
-                    opacity: 0.05,
-                    radius: 20,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isRecent) ...[
-                        Icon(_isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded, size: 14, color: _isAiMode ? goldColor : Colors.grey),
-                        const SizedBox(width: 6),
-                      ],
-                      Flexible(
-                        child: Text(
-                          tag,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                        ),
+              final double maxTextWidth = (MediaQuery.of(context).size.width - 120).clamp(80.0, 400.0);
+              return Container(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 48),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: AppTheme.glassDecoration(
+                  context: context,
+                  opacity: 0.06,
+                  radius: 20,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: () async {
+                        _searchController.text = tag;
+                        if (_isAiMode) {
+                          await _executeAiSearch(tag);
+                        } else {
+                          await StorageService.addSearchQuery(tag);
+                          setState(() {
+                            _recentSearches = StorageService.getRecentSearches();
+                          });
+                          _onSearchChanged();
+                        }
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded, size: 14, color: _isAiMode ? goldColor : Colors.grey),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: maxTextWidth),
+                            child: Text(
+                              tag,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
                       ),
-                      if (isRecent) ...[
-                        const SizedBox(width: 6),
-                        GestureDetector(
-                          onTap: () => _showGroupSongsSheet(tag),
-                          child: const Icon(Icons.star_rounded, size: 16, color: AppTheme.goldAccent),
-                        ),
-                      ],
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () async {
+                        if (_isAiMode) {
+                          final list = StorageService.getAiRecentSearches()..remove(tag);
+                          await StorageService.saveSetting('ai_searches', list);
+                        } else {
+                          final list = StorageService.getRecentSearches()..remove(tag);
+                          await StorageService.saveSetting('searches', list);
+                        }
+                        setState(() {
+                          _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
+                        });
+                      },
+                      child: const Icon(Icons.close_rounded, size: 14, color: Colors.grey),
+                    ),
+                  ],
                 ),
               );
             }).toList(),
@@ -1015,7 +994,107 @@ Output ONLY valid JSON:
     );
   }
 
-  Widget _buildHistoryTracksList() {
+  Widget _buildAiPlaylistGroupsSection(Map<String, dynamic> aiSessionsMap) {
+    const goldColor = Color(0xFFFFC72C);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.auto_awesome_rounded, size: 18, color: goldColor),
+              SizedBox(width: 8),
+              Text(
+                'AI Playlist Groups',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 155,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: aiSessionsMap.keys.length,
+              itemBuilder: (context, index) {
+                final key = aiSessionsMap.keys.elementAt(index);
+                final rawTracks = aiSessionsMap[key] as List?;
+                final count = rawTracks?.length ?? 0;
+                final firstTrackMap = (rawTracks != null && rawTracks.isNotEmpty) ? Map<String, dynamic>.from(rawTracks.first as Map) : null;
+                final artUrl = firstTrackMap?['artworkUrl']?.toString() ?? '';
+
+                final titleCapitalized = key.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+
+                return Container(
+                  width: 150,
+                  margin: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1F1F23) : Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: goldColor.withOpacity(0.3), width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: artUrl.isNotEmpty
+                            ? Image.network(
+                                artUrl,
+                                width: double.infinity,
+                                height: 70,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(width: double.infinity, height: 70, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
+                              )
+                            : Container(width: double.infinity, height: 70, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        titleCapitalized,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '$count tracks',
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                          GestureDetector(
+                            onTap: () => _showGroupSongsSheet(key),
+                            child: const CircleAvatar(
+                              radius: 12,
+                              backgroundColor: goldColor,
+                              child: Icon(Icons.play_arrow_rounded, size: 16, color: Colors.black),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Track> _getHistoryTracksList() {
     final rawHistory = StorageService.getSearchedAndPlayedTracks();
     final List<Track> historyTracks = [];
     for (final item in rawHistory) {
@@ -1034,19 +1113,24 @@ Output ONLY valid JSON:
         );
       }
     }
+    return historyTracks;
+  }
 
+  Widget _buildRecentlyPlayedSongsSection(List<Track> historyTracks) {
     if (historyTracks.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_rounded, size: 64, color: Colors.grey.withOpacity(0.4)),
-            const SizedBox(height: 16),
-            const Text(
-              'Search for your favorite songs & artists',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.grey),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            children: [
+              Icon(Icons.search_rounded, size: 48, color: Colors.grey.withOpacity(0.4)),
+              const SizedBox(height: 12),
+              const Text(
+                'Search for your favorite songs & artists',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -1054,16 +1138,16 @@ Output ONLY valid JSON:
     return Consumer(
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 96, top: 12),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
               child: Text(
-                'Played Songs',
+                'Recently Played Songs',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontFamily: 'Outfit',
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.w900,
                     ),
               ),
@@ -1072,7 +1156,7 @@ Output ONLY valid JSON:
               return ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
                 leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   child: Image.network(
                     track.artworkUrl,
                     width: 48,
@@ -1090,14 +1174,15 @@ Output ONLY valid JSON:
                   track.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 subtitle: Text(
                   '${track.artist} • ${track.genre}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-                trailing: const Icon(Icons.play_arrow_rounded, size: 20),
+                trailing: const Icon(Icons.play_circle_fill_rounded, size: 28, color: AppTheme.goldAccent),
                 onTap: () {
                   notifier.playTrack(track);
                 },

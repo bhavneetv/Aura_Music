@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/customization_provider.dart';
+import '../../providers/playback_provider.dart';
 
 class EqualizerScreen extends ConsumerStatefulWidget {
   const EqualizerScreen({super.key});
@@ -36,6 +37,18 @@ class _EqualizerScreenState extends ConsumerState<EqualizerScreen> {
     }
   }
 
+  void _resetEqualizer() {
+    triggerHaptic(HapticFeedbackType.medium);
+    _applyPreset('Flat');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Equalizer reset to default (Flat) 🎚️'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -56,6 +69,14 @@ class _EqualizerScreenState extends ConsumerState<EqualizerScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _resetEqualizer,
+            icon: const Icon(Icons.restart_alt_rounded, size: 18, color: AppTheme.goldAccent),
+            label: const Text('Reset', style: TextStyle(color: AppTheme.goldAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: Column(

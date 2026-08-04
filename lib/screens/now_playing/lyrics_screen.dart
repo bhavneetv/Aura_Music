@@ -184,21 +184,33 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
     super.dispose();
   }
 
+  final Map<int, GlobalKey> _lineKeys = {};
+
+  GlobalKey _getKeyForIndex(int index) {
+    return _lineKeys.putIfAbsent(index, () => GlobalKey());
+  }
+
   void _scrollToActiveLine(int index, int totalLines) {
     if (_userIsScrolling || !_scrollController.hasClients || index < 0 || totalLines <= 0) return;
-    const itemHeight = 75.0;
-    final viewportHeight = MediaQuery.of(context).size.height;
-
-    // When sync locked, center active line exactly in middle of screen
-    final targetOffset = _isSyncLocked
-        ? mathMax(0.0, (index * itemHeight) - (viewportHeight * 0.5 - itemHeight * 0.5))
-        : mathMax(0.0, (index * itemHeight) - (viewportHeight * 0.35));
-
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    
+    final key = _lineKeys[index];
+    if (key != null && key.currentContext != null) {
+      Scrollable.ensureVisible(
+        key.currentContext!,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic,
+      );
+    } else {
+      const estimatedHeight = 65.0;
+      final viewportHeight = MediaQuery.of(context).size.height;
+      final targetOffset = mathMax(0.0, (index * estimatedHeight));
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic,
+      );
+    }
   }
 
   double mathMax(double a, double b) => a > b ? a : b;
@@ -499,14 +511,21 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
                           },
                           child: ListView.builder(
                             controller: _scrollController,
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                            padding: EdgeInsets.only(
+                              left: 24,
+                              right: 24,
+                              top: MediaQuery.of(context).size.height * 0.35,
+                              bottom: MediaQuery.of(context).size.height * 0.40,
+                            ),
                             itemCount: synced.length,
                             itemBuilder: (context, index) {
                               final line = synced[index];
                               final isActive = index == _activeLineIndex;
                               final explanation = _lineExplanations[index];
 
-                              return GestureDetector(
+                              return Container(
+                                key: _getKeyForIndex(index),
+                                child: GestureDetector(
                                 onTap: () {
                                   _userScrollTimer?.cancel();
                                   _userIsScrolling = false;
@@ -584,7 +603,8 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
                                     ],
                                   ),
                                 ),
-                              );
+                              ),
+                            );
                             },
                           ),
                         )
