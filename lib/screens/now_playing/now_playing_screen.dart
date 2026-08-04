@@ -712,13 +712,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: const [
-                        Text('👈 Prev', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text('↔️ Swipe Track', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                         Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('Next 👉', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text('👆 Favorite', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                         Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('👆 Fav', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('Playlist 👇', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text('👇 Queue', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
@@ -1017,6 +1015,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // ── Skin Stage Switcher ────────────────────────────────────────
 
   void _fetchSongSummary(Track track, {bool forceRefresh = false}) {
+    if (WidgetsBinding.instance.lifecycleState != null && 
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+
     final activeTrackId = track.id;
 
     if (forceRefresh || _lastSummaryTrackId != activeTrackId) {
@@ -1054,7 +1057,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
   Widget _buildSongSummarySection(Track track, bool isDark, Color accentColor) {
     if (_lastSummaryTrackId != track.id) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongSummary(track, forceRefresh: true));
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongSummary(track, forceRefresh: false));
     }
 
     return Padding(
@@ -1463,6 +1466,17 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         return Center(
           child: _buildCassetteTape(track, angle, isDark),
         );
+      case 'neon':
+        return Center(
+          child: Transform.rotate(
+            angle: angle,
+            child: _buildNeonDisc(track, accentColor, isDark),
+          ),
+        );
+      case 'amber':
+        return Center(
+          child: _buildAmberGlowStage(track, accentColor, isDark),
+        );
       case 'minimal':
         return Center(
           child: Container(
@@ -1503,6 +1517,83 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           ],
         );
     }
+  }
+
+  Widget _buildNeonDisc(Track track, Color accentColor, bool isDark) {
+    final size = MediaQuery.of(context).size.width * 0.70;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isDark ? const Color(0xFF0D0D11) : const Color(0xFF1E1E24),
+        border: Border.all(color: accentColor, width: 3),
+        boxShadow: [
+          BoxShadow(color: accentColor.withOpacity(0.5), blurRadius: 25, spreadRadius: 2),
+        ],
+      ),
+      child: Center(
+        child: Container(
+          width: size * 0.55,
+          height: size * 0.55,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+          child: Center(
+            child: Container(
+              width: size * 0.12,
+              height: size * 0.12,
+              decoration: BoxDecoration(
+                color: accentColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: accentColor, blurRadius: 10),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAmberGlowStage(Track track, Color accentColor, bool isDark) {
+    final size = MediaQuery.of(context).size.width * 0.70;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [const Color(0xFF382A15), const Color(0xFF1B160E)]
+              : [const Color(0xFFFFECC8), const Color(0xFFF7E2B3)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFB300).withOpacity(0.35),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+        border: Border.all(color: const Color(0xFFFFC72C).withOpacity(0.6), width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Image.network(
+            track.artworkUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(color: Colors.amber),
+          ),
+        ),
+      ),
+    );
   }
 
   // ── Custom Skins Painters ────────────────────────────────────

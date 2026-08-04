@@ -9,7 +9,7 @@ class UpdateService {
   static const String githubRepo = 'Aura_Music';
 
   /// Current App Version (Matches pubspec.yaml version)
-  static const String currentVersion = '3.2';
+  static const String currentVersion = '3.2.1';
 
   /// GitHub Releases API URL for latest release
   static String get _apiUrl =>

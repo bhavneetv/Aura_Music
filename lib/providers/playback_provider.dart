@@ -317,10 +317,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final safeIndex = initialIndex.clamp(0, tracks.length - 1);
     final targetTrack = tracks[safeIndex];
 
+    final newSources = <String, QueueSource>{};
+    for (final track in tracks) {
+      newSources[track.id] = QueueSource.user;
+    }
+
     state = state.copyWith(
       queue: List<Track>.from(tracks),
       currentIndex: safeIndex,
       currentTrack: targetTrack,
+      queueSources: newSources,
     );
     await _saveQueue();
 
@@ -369,10 +375,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       idx = currentQueue.length - 1;
     }
     
+    final newSources = Map<String, QueueSource>.from(state.queueSources);
+    newSources[track.id] = QueueSource.user;
+    
     state = state.copyWith(
       queue: currentQueue,
       currentIndex: idx,
       currentTrack: track,
+      queueSources: newSources,
     );
     await _saveQueue();
 
@@ -432,12 +442,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       } catch (e) {
         print('[AURA-PLAY] Initial playback failed for "${track.title}": $e');
         if (e.toString().contains('Loading interrupted')) return;
-        // Check nonce before retrying — user may have moved on
         if (_playbackNonce != myNonce) return;
         try {
           final resolvedUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
           if (_playbackNonce != myNonce) return;
-          if (resolvedUrl != null && resolvedUrl != audioUrl && resolvedUrl.isNotEmpty) {
+          if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
             print('[AURA-PLAY] Retrying with resolved URL: $resolvedUrl');
             final resolvedTrack = track.copyWith(audioUrl: resolvedUrl);
             await _handler.playTrack(resolvedTrack);
@@ -454,12 +463,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         } catch (resolveErr) {
           print('[AURA-PLAY] AudioUrlResolver fallback also failed: $resolveErr');
         }
-        // If resolution and retries fail, advance to next track
-        if (_playbackNonce == myNonce) nextTrack();
+        // Do NOT auto-skip track on error — stay on current track to prevent random 1-in-10 skipping
+        state = state.copyWith(isPlaying: false);
       }
     } else {
-      print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}", skipping to next track...');
-      if (_playbackNonce == myNonce) nextTrack();
+      print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}"');
+      state = state.copyWith(isPlaying: false);
     }
   }
 
@@ -506,7 +515,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         final needed = 5 - remainingUpcoming;
         final toAdd = ranked.take(needed).toList();
         final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
-        state = state.copyWith(queue: updatedQueue);
+
+        final updatedSources = Map<String, QueueSource>.from(state.queueSources);
+        for (final track in toAdd) {
+          updatedSources[track.id] = QueueSource.recommendation;
+        }
+
+        state = state.copyWith(queue: updatedQueue, queueSources: updatedSources);
         await _saveQueue();
       }
     } catch (e) {
@@ -586,6 +601,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final item = updated.removeAt(oldIndex);
     updated.insert(newIndex, item);
     
+    // Haptic feedback: triple light haptic on start (0) or end (length-1), single light for intermediate
+    if (newIndex == 0 || newIndex == updated.length - 1) {
+      _triggerTripleLightHaptic();
+    } else {
+      triggerHaptic(HapticFeedbackType.light);
+    }
+
     // Adjust current index
     int newIdx = state.currentIndex;
     if (oldIndex == state.currentIndex) {
@@ -598,6 +620,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     state = state.copyWith(queue: updated, currentIndex: newIdx);
     _saveQueue();
+  }
+
+  void _triggerTripleLightHaptic() async {
+    for (int i = 0; i < 3; i++) {
+      triggerHaptic(HapticFeedbackType.light);
+      await Future.delayed(const Duration(milliseconds: 40));
+    }
   }
 
   void clearQueue() {
@@ -692,13 +721,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       if (nextTrackToPlay != null) {
         final updatedQueue = List<Track>.from(state.queue)..add(nextTrackToPlay);
         final nextIdx = updatedQueue.length - 1;
+
+        final updatedSources = Map<String, QueueSource>.from(state.queueSources);
+        updatedSources[nextTrackToPlay.id] = QueueSource.recommendation;
+
         state = state.copyWith(
           queue: updatedQueue,
           currentIndex: nextIdx,
           currentTrack: nextTrackToPlay,
+          queueSources: updatedSources,
         );
         await _saveQueue();
-        playTrack(nextTrackToPlay);
+        _streamTrack(nextTrackToPlay);
       }
     } catch (e) {
       print('Error auto-playing next recommended: $e');

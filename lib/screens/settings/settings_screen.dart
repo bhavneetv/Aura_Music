@@ -616,7 +616,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
           title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('v3.2 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          trailing: Text('v3.2.1 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
         ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
@@ -627,39 +627,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         Center(
           child: Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Made with ',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () async {
+                final Uri url = Uri.parse('https://www.linkedin.com/in/bhavneet-verma/');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Made with ',
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Text(
+                      '❤️',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    Text(
+                      ' by ',
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      'Bhavneet Verma',
+                      style: TextStyle(
+                        color: customBranding.accentColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.3,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
                 ),
-                const Text(
-                  '❤️',
-                  style: TextStyle(fontSize: 14),
-                ),
-                Text(
-                  ' by ',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  'Bhavneet Verma',
-                  style: TextStyle(
-                    color: customBranding.accentColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -764,6 +777,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: const Text('Classic Cassette Tape'),
                 onTap: () {
                   notifier.setPlayerSkin('cassette');
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('Neon Cyberpunk Disc'),
+                onTap: () {
+                  notifier.setPlayerSkin('neon');
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('Glassmorphic Amber Glow'),
+                onTap: () {
+                  notifier.setPlayerSkin('amber');
                   Navigator.pop(context);
                 },
               ),

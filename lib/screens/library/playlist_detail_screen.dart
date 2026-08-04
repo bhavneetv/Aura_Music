@@ -22,6 +22,42 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   late Map<String, dynamic> _playlist;
   List<Track> _playlistTracks = [];
   String _searchQuery = '';
+  bool _isDownloadingPlaylist = false;
+  double _downloadProgress = 0.0;
+  bool _isPlaylistDownloaded = false;
+
+  void _downloadPlaylist(Color accentColor) async {
+    if (_playlistTracks.isEmpty || _isDownloadingPlaylist) return;
+    setState(() {
+      _isDownloadingPlaylist = true;
+      _downloadProgress = 0.0;
+    });
+
+    await DownloadService.instance.downloadPlaylist(
+      _playlistTracks,
+      onProgress: (completed, total) {
+        if (mounted) {
+          setState(() {
+            _downloadProgress = total > 0 ? (completed / total).clamp(0.0, 1.0) : 0.0;
+          });
+        }
+      },
+    );
+
+    if (mounted) {
+      setState(() {
+        _isDownloadingPlaylist = false;
+        _isPlaylistDownloaded = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloaded all ${_playlistTracks.length} songs for offline listening! ⚡'),
+          backgroundColor: accentColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -187,66 +223,32 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         ),
         title: Text(_playlist['name'] ?? 'Playlist Detail', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.download_for_offline_rounded),
-            tooltip: 'Download Playlist',
-            onPressed: () {
-              if (_playlistTracks.isEmpty) return;
-              int total = _playlistTracks.length;
-              int completed = 0;
-
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (dialogContext) {
-                  return StatefulBuilder(
-                    builder: (context, setProgressState) {
-                      DownloadService.instance.downloadPlaylist(
-                        _playlistTracks,
-                        onProgress: (c, t) {
-                          if (dialogContext.mounted) {
-                            setProgressState(() {
-                              completed = c;
-                              total = t;
-                            });
-                          }
-                        },
-                      ).then((_) {
-                        if (dialogContext.mounted && Navigator.canPop(dialogContext)) {
-                          Navigator.pop(dialogContext);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Downloaded $completed of $total songs for offline listening! ⚡'),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      });
-
-                      return AlertDialog(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        title: const Text('Downloading Playlist', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            LinearProgressIndicator(
-                              value: total > 0 ? (completed / total).clamp(0.0, 1.0) : 0.0,
-                              color: customBranding.accentColor,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              '$completed of $total songs downloaded',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              );
-            },
-          ),
+          if (_isPlaylistDownloaded)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 24),
+            )
+          else if (_isDownloadingPlaylist)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    value: _downloadProgress > 0 ? _downloadProgress : null,
+                    strokeWidth: 2.5,
+                    color: customBranding.accentColor,
+                  ),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.download_for_offline_rounded),
+              tooltip: 'Download Playlist',
+              onPressed: () => _downloadPlaylist(customBranding.accentColor),
+            ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',

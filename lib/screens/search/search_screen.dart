@@ -30,6 +30,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   bool _isAiMode = false;
   bool _isAiLoading = false;
   String _aiLoadingText = 'AI is curating your personalized music experience...';
+  String _currentAiPlaylistName = '';
 
   // Typewriter placeholder animation state
   int _typewriterPromptIndex = 0;
@@ -123,6 +124,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
       _isSearching = false;
       _isAiLoading = false;
       _filteredTracks = [];
+      _currentAiPlaylistName = '';
       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
     });
   }
@@ -386,8 +388,21 @@ Output ONLY valid JSON:
         setState(() {
           _isAiLoading = false;
           _filteredTracks = resultsList;
+          _currentAiPlaylistName = playlistName;
           _recentSearches = StorageService.getAiRecentSearches();
         });
+
+        if (resultsList.isNotEmpty) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AiPlaylistReviewScreen(
+                suggestedName: playlistName,
+                tracks: List.from(resultsList),
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -463,18 +478,67 @@ Output ONLY valid JSON:
               if (sessionTracks.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: 0);
-                    },
-                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
-                    label: const Text('Play All Songs', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: goldColor,
-                      minimumSize: const Size(double.infinity, 44),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: 0);
+                          },
+                          icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
+                          label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: goldColor,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final name = tag.replaceAll(RegExp(r'✨|\(\d+\s*songs\)'), '').trim();
+                            final playlists = StorageService.getPlaylists();
+                            final newPl = {
+                              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                              'name': name,
+                              'description': 'AI generated playlist',
+                              'trackIds': sessionTracks.map((t) => t.id).toList(),
+                              'tracks': sessionTracks.map((t) => {
+                                'id': t.id,
+                                'title': t.title,
+                                'artist': t.artist,
+                                'album': t.album,
+                                'duration': t.duration,
+                                'artworkUrl': t.artworkUrl,
+                                'audioUrl': t.audioUrl,
+                                'genre': t.genre,
+                              }).toList(),
+                            };
+                            playlists.add(newPl);
+                            await StorageService.savePlaylists(playlists);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Saved "$name" to Playlists Library! ⚡'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.bookmark_add_rounded, size: 18),
+                          label: const Text('Save Playlist'),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: goldColor),
+                            foregroundColor: goldColor,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               Expanded(
@@ -816,16 +880,22 @@ Output ONLY valid JSON:
       );
     }
 
+    final showAiBanner = _isAiMode && _filteredTracks.isNotEmpty;
+
     return Consumer(
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 96, top: 8),
-          itemCount: _filteredTracks.length,
+          itemCount: _filteredTracks.length + (showAiBanner ? 1 : 0),
           itemBuilder: (context, index) {
-            final track = _filteredTracks[index];
+            if (showAiBanner && index == 0) {
+              return _buildAiPlaylistBannerCard(context, notifier);
+            }
+            final trackIndex = showAiBanner ? index - 1 : index;
+            final track = _filteredTracks[trackIndex];
             return Dismissible(
-              key: Key('search_${track.id}_$index'),
+              key: Key('search_${track.id}_$trackIndex'),
               direction: DismissDirection.startToEnd,
               confirmDismiss: (direction) async {
                 notifier.addToQueue(track);
@@ -889,6 +959,108 @@ Output ONLY valid JSON:
           },
         );
       },
+    );
+  }
+
+  Widget _buildAiPlaylistBannerCard(BuildContext context, PlaybackNotifier notifier) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const goldColor = Color(0xFFFFC72C);
+    final playlistTitle = _currentAiPlaylistName.isEmpty
+        ? '${_searchController.text.trim()} Playlist'
+        : _currentAiPlaylistName;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF282417), const Color(0xFF19181B)]
+              : [const Color(0xFFFFF9E6), const Color(0xFFF3EFE7)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: goldColor.withOpacity(0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: goldColor, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  playlistTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, fontFamily: 'Outfit'),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: goldColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_filteredTracks.length} Tracks',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: goldColor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    notifier.playCustomQueue(_filteredTracks, initialIndex: 0);
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
+                  label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: goldColor,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AiPlaylistReviewScreen(
+                          suggestedName: playlistTitle,
+                          tracks: List.from(_filteredTracks),
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.bookmark_add_rounded, size: 18),
+                  label: const Text('Save / Edit'),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: goldColor),
+                    foregroundColor: goldColor,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1153,39 +1325,67 @@ Output ONLY valid JSON:
               ),
             ),
             ...historyTracks.map((track) {
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    track.artworkUrl,
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      width: 48,
-                      height: 48,
-                      color: Colors.grey.shade800,
-                      child: const Icon(Icons.music_note_rounded),
+              return Dismissible(
+                key: Key('recent_swipe_${track.id}'),
+                direction: DismissDirection.startToEnd,
+                confirmDismiss: (direction) async {
+                  notifier.addToQueue(track);
+                  triggerHaptic(HapticFeedbackType.medium);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Added "${track.title}" to Queue 🎵'),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
                     ),
+                  );
+                  return false;
+                },
+                background: Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.only(left: 24),
+                  color: AppTheme.goldAccent.withOpacity(0.85),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.queue_music_rounded, color: Colors.black),
+                      SizedBox(width: 8),
+                      Text('Add to Queue', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    ],
                   ),
                 ),
-                title: Text(
-                  track.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      track.artworkUrl,
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        width: 48,
+                        height: 48,
+                        color: Colors.grey.shade800,
+                        child: const Icon(Icons.music_note_rounded),
+                      ),
+                    ),
+                  ),
+                  title: Text(
+                    track.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    '${track.artist} • ${track.genre}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  trailing: const Icon(Icons.play_circle_fill_rounded, size: 28, color: AppTheme.goldAccent),
+                  onTap: () {
+                    notifier.playTrack(track);
+                  },
                 ),
-                subtitle: Text(
-                  '${track.artist} • ${track.genre}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                trailing: const Icon(Icons.play_circle_fill_rounded, size: 28, color: AppTheme.goldAccent),
-                onTap: () {
-                  notifier.playTrack(track);
-                },
               );
             }),
           ],

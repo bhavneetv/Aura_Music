@@ -224,19 +224,29 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                   ),
                                 ),
                               ),
-                              if (isUpcoming5)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  margin: const EdgeInsets.only(left: 6),
-                                  decoration: BoxDecoration(
-                                    color: customBranding.accentColor.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    '#${index + 1}',
-                                    style: TextStyle(fontSize: 9, color: customBranding.accentColor, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
+                              Builder(
+                                builder: (context) {
+                                  final isRec = state.queueSources[track.id] == QueueSource.recommendation;
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    margin: const EdgeInsets.only(left: 6),
+                                    decoration: BoxDecoration(
+                                      color: isRec 
+                                          ? customBranding.accentColor.withOpacity(0.18) 
+                                          : Colors.blueAccent.withOpacity(0.18),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      isRec ? 'AI Rec' : 'User',
+                                      style: TextStyle(
+                                        fontSize: 9, 
+                                        color: isRec ? customBranding.accentColor : Colors.blueAccent, 
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                           subtitle: Text(track.artist, style: const TextStyle(fontSize: 11)),

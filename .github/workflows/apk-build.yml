@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      RELEASE_TAG: v3.2
-      RELEASE_NAME: Aura Music v3.2
+      RELEASE_TAG: v3.2.1
+      RELEASE_NAME: Aura Music v3.2.1
 
     steps:
       - name: Checkout source
