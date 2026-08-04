@@ -20,6 +20,7 @@ class AudioUrlResolver {
 
   // Search API mirrors for re-search fallback (excludes saavn-api search which returns static Hindi songs)
   static const List<String> _searchMirrors = [
+    'https://saavn.sumit.co/api',
     'https://jiosaavn-api-beta.vercel.app',
     'https://jiosaavn-api-unofficial.vercel.app',
   ];
@@ -28,14 +29,17 @@ class AudioUrlResolver {
   Future<String?> resolveAudioUrl(Track track, {bool forceFresh = false}) async {
     print('[AURA-RESOLVER] resolveAudioUrl for: "${track.title}" (id: ${track.id}) forceFresh=$forceFresh');
 
-    // Strategy 1: Original URL if it's already a direct CDN link and valid
+    // Strategy 1: Original URL if it's already a direct CDN link
     if (!forceFresh && _isDirectCdnLink(track.audioUrl)) {
       print('[AURA-RESOLVER] Strategy 1: Using existing CDN link');
-      return track.audioUrl;
+      String url = track.audioUrl;
+      if (url.contains('saavncdn.com') && url.contains('_320.')) {
+        url = url.replaceAll('_320.', '_160.');
+      }
+      return url;
     }
 
-    // Strategy 2: Direct Song ID lookup on saavn-api.vercel.app/song/[id]
-    // This is the most reliable endpoint for obtaining 200 OK CDN URLs
+    // Strategy 2: Direct Song ID lookup on working JioSaavn API mirrors
     if (track.id.isNotEmpty) {
       final songByIdUrl = await _tryGetSongById(track.id);
       if (songByIdUrl != null) {
@@ -57,7 +61,11 @@ class AudioUrlResolver {
     // Strategy 4: Return original URL as last resort if not forceFresh
     if (!forceFresh && track.audioUrl.startsWith('http')) {
       print('[AURA-RESOLVER] Returning original URL as last resort');
-      return track.audioUrl;
+      String url = track.audioUrl;
+      if (url.contains('saavncdn.com') && url.contains('_320.')) {
+        url = url.replaceAll('_320.', '_160.');
+      }
+      return url;
     }
 
     print('[AURA-RESOLVER] ALL strategies FAILED for: "${track.title}"');
@@ -87,6 +95,7 @@ class AudioUrlResolver {
 
   Future<String?> _tryGetSongById(String trackId) async {
     final endpoints = [
+      'https://saavn.sumit.co/api/songs?ids=$trackId',
       'https://jiosaavn-api-beta.vercel.app/songs?id=$trackId',
       'https://jiosaavn-api-unofficial.vercel.app/songs?id=$trackId',
     ];
@@ -98,7 +107,6 @@ class AudioUrlResolver {
         if (response.statusCode == 200 && response.data != null) {
           final cdnUrl = _extractCdnUrlFromData(response.data);
           if (cdnUrl != null && _isDirectCdnLink(cdnUrl)) {
-            // Trust CDN URLs from API — skip HEAD validation for speed
             return cdnUrl;
           }
         }
@@ -153,6 +161,11 @@ class AudioUrlResolver {
     return null;
   }
 
+  static const Map<String, String> _cdnHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Referer': 'https://www.jiosaavn.com/',
+  };
+
   Future<bool> _isUrlPlayable(String url) async {
     try {
       final response = await _dio.head(
@@ -160,6 +173,7 @@ class AudioUrlResolver {
         options: Options(
           receiveTimeout: const Duration(seconds: 3),
           followRedirects: true,
+          headers: _cdnHeaders,
           validateStatus: (status) => status != null && status < 400,
         ),
       );
@@ -170,7 +184,7 @@ class AudioUrlResolver {
           url,
           options: Options(
             receiveTimeout: const Duration(seconds: 3),
-            headers: {'Range': 'bytes=0-512'},
+            headers: {..._cdnHeaders, 'Range': 'bytes=0-512'},
             responseType: ResponseType.bytes,
             followRedirects: true,
             validateStatus: (status) => status != null && status < 400,
@@ -234,25 +248,42 @@ class AudioUrlResolver {
   }
 
   String? _extractCdnUrlFromItem(Map item) {
-    if (item['url'] != null) {
-      final url = item['url'].toString();
-      if (_isDirectCdnLink(url)) return url;
-    }
-
     for (final key in ['downloadUrl', 'download_url']) {
       final val = item[key];
-      if (val is List) {
-        for (final d in val.reversed) {
+      if (val is List && val.isNotEmpty) {
+        // 1. Prefer 160kbps link for 100% CDN reliability (prevents 404 errors)
+        for (final d in val) {
+          String link = '';
+          String quality = '';
           if (d is Map) {
-            final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-            if (link.isNotEmpty && _isDirectCdnLink(link)) return link;
-          } else if (d is String && _isDirectCdnLink(d)) {
-            return d;
+            link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+            quality = (d['quality'] ?? '').toString();
+          } else if (d is String) {
+            link = d;
+          }
+          if (link.isNotEmpty && _isDirectCdnLink(link) && (quality.contains('160') || link.contains('_160.'))) {
+            return link;
+          }
+        }
+        // 2. Fallback to any valid direct audio link
+        for (final d in val) {
+          String link = '';
+          if (d is Map) {
+            link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+          } else if (d is String) {
+            link = d;
+          }
+          if (link.isNotEmpty && _isDirectCdnLink(link)) {
+            return link;
           }
         }
       } else if (val is String && _isDirectCdnLink(val)) {
         return val;
       }
+    }
+    if (item['url'] != null) {
+      final url = item['url'].toString();
+      if (_isDirectCdnLink(url)) return url;
     }
     return null;
   }

@@ -207,7 +207,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       
       // Auto-play next track on completion (debounce to prevent double-fire)
       if (playerState.processingState == ProcessingState.completed && !_isSwitchingTrack) {
-        // Use microtask to let the player fully settle before advancing
+        _isSwitchingTrack = true;
         Future.microtask(() => nextTrack());
       }
     });
@@ -327,7 +327,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _streamTrack(targetTrack);
   }
 
-  void jumpToQueueIndex(int index) async {
+  Future<void> jumpToQueueIndex(int index) async {
     if (index < 0 || index >= state.queue.length) return;
     final targetTrack = state.queue[index];
     state = state.copyWith(
@@ -335,7 +335,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       currentTrack: targetTrack,
     );
     await _saveQueue();
-    _streamTrack(targetTrack);
+    await _streamTrack(targetTrack);
   }
 
   // ── Smart Queue Controls ────────────────────────────────────
@@ -387,6 +387,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     RecommendationEngine.instance.recordTrackStarted(track);
 
     String audioUrl = track.audioUrl;
+    if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
+      audioUrl = audioUrl.replaceAll('_320.', '_160.');
+    }
 
     // Check if downloaded locally first
     final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
@@ -704,8 +707,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   bool _isSwitchingTrack = false;
 
-  void nextTrack({bool isCrossfade = false}) async {
-    if (state.queue.isEmpty || _isSwitchingTrack) return;
+  Future<void> nextTrack({bool isCrossfade = false}) async {
+    if (state.queue.isEmpty) return;
     _isSwitchingTrack = true;
 
     if (state.isSleepTimerEndOfTrack) {
@@ -789,10 +792,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
       } else {
-        jumpToQueueIndex(nextIdx);
+        await jumpToQueueIndex(nextIdx);
       }
     } finally {
-      Future.delayed(const Duration(milliseconds: 100), () {
+      Future.delayed(const Duration(milliseconds: 500), () {
         _isSwitchingTrack = false;
       });
     }

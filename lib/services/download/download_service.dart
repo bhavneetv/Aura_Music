@@ -84,7 +84,7 @@ class DownloadService extends ChangeNotifier {
       // Download audio URL
       String url = track.audioUrl;
       if (url.isEmpty || url.startsWith('file://')) {
-        for (final baseUrl in ['https://jiosaavn-api-beta.vercel.app', 'https://saavn.sumit.co/api']) {
+        for (final baseUrl in ['https://saavn.sumit.co/api', 'https://jiosaavn-api-beta.vercel.app']) {
           try {
             final res = await _dio.get('$baseUrl/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
             final data = res.data;

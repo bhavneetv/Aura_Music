@@ -19,8 +19,11 @@ Future<AudioHandler> initAudioHandler() async {
 }
 
 class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final AudioPlayer _playerA = AudioPlayer();
-  final AudioPlayer _playerB = AudioPlayer();
+  static const String _browserUserAgent =
+      'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+  final AudioPlayer _playerA = AudioPlayer(userAgent: _browserUserAgent);
+  final AudioPlayer _playerB = AudioPlayer(userAgent: _browserUserAgent);
   late AudioPlayer _activePlayer;
   late AudioPlayer _fadePlayer;
 
@@ -140,7 +143,13 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     seek(current - const Duration(seconds: 10));
   }
 
-  // ── Track Handling ──────────────────────────────────────────
+  // Standard browser headers required by JioSaavn CDN to return 200 OK
+  static const Map<String, String> _cdnHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Encoding': 'identity;q=1, *;q=0',
+    'Referer': 'https://www.jiosaavn.com/',
+  };
 
   Future<void> playTrack(Track track) async {
     final mediaItem = MediaItem(
@@ -176,8 +185,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
       print('[AURA-HANDLER] playTrack: "${track.title}" url=${url.substring(0, url.length > 80 ? 80 : url.length)}...');
 
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('http')) {
-        await _activePlayer.setUrl(url);
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
       } else {
         await _activePlayer.setFilePath(url);
       }
@@ -216,8 +225,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         url = url.replaceFirst('http:/', 'http://');
       }
 
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('http')) {
-        await incomingPlayer.setUrl(url);
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
       } else {
         await incomingPlayer.setFilePath(url);
       }

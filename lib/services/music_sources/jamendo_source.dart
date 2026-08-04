@@ -12,8 +12,9 @@ class JamendoSource implements MusicSource {
 
   // Search mirrors (jiosaavn-api-beta returns accurate search results for any artist/query)
   static const List<String> _baseUrls = [
-    'https://jiosaavn-api-beta.vercel.app',
+    'https://saavn.sumit.co/api',
     'https://jiosaavn-api-unofficial.vercel.app',
+    'https://jiosaavn-api-beta.vercel.app',
   ];
 
   Future<dynamic> _fetchFromApi(String endpointPath) async {
@@ -366,26 +367,44 @@ class JamendoSource implements MusicSource {
         }
 
         String audioUrl = '';
-        final possibleUrlKeys = [item['url'], item['downloadUrl'], item['download_url'], item['media_url'], item['link']];
+        final possibleUrlKeys = [item['downloadUrl'], item['download_url'], item['url'], item['media_url'], item['link']];
         for (final val in possibleUrlKeys) {
           if (val == null) continue;
-          if (val is String && val.startsWith('http') && !val.contains('jiosaavn.com')) {
-            audioUrl = val;
-            break;
-          } else if (val is List) {
-            for (final d in val.reversed) {
+          if (val is List && val.isNotEmpty) {
+            // 1. Prefer 160kbps link for guaranteed CDN 200 OK playback
+            for (final d in val) {
+              String link = '';
+              String quality = '';
               if (d is Map) {
-                final link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-                if (link.isNotEmpty && link.startsWith('http') && !link.contains('jiosaavn.com')) {
-                  audioUrl = link;
-                  break;
-                }
-              } else if (d is String && d.startsWith('http') && !d.contains('jiosaavn.com')) {
-                audioUrl = d;
+                link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+                quality = (d['quality'] ?? '').toString();
+              } else if (d is String) {
+                link = d;
+              }
+              if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/') && (quality.contains('160') || link.contains('_160.'))) {
+                audioUrl = link;
                 break;
               }
             }
+            // 2. Fallback to any valid direct audio URL
+            if (audioUrl.isEmpty) {
+              for (final d in val) {
+                String link = '';
+                if (d is Map) {
+                  link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+                } else if (d is String) {
+                  link = d;
+                }
+                if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/')) {
+                  audioUrl = link;
+                  break;
+                }
+              }
+            }
             if (audioUrl.isNotEmpty) break;
+          } else if (val is String && val.startsWith('http') && !val.contains('/song/')) {
+            audioUrl = val;
+            break;
           }
         }
 
