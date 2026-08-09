@@ -442,6 +442,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
         state = PlaybackState(
           currentTrack: curr,
+          totalDuration: curr != null ? _parseDuration(curr.duration) : const Duration(minutes: 3),
           queue: tracks,
           currentIndex: idx,
           isShuffle: shuffle,
@@ -466,6 +467,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             final seedTrack = recs.first;
             state = PlaybackState(
               currentTrack: seedTrack,
+              totalDuration: _parseDuration(seedTrack.duration),
               queue: recs,
               currentIndex: 0,
               playerSkin: skin,
@@ -508,6 +510,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       queue: List<Track>.from(tracks),
       currentIndex: safeIndex,
       currentTrack: targetTrack,
+      totalDuration: _parseDuration(targetTrack.duration),
       queueSources: newSources,
       playRequested: true,
       status: PlaybackStatus.loading,
@@ -538,6 +541,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     state = state.copyWith(
       currentIndex: index,
       currentTrack: targetTrack,
+      totalDuration: _parseDuration(targetTrack.duration),
       playRequested: true,
       status: PlaybackStatus.loading,
     );
@@ -593,6 +597,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       queue: currentQueue,
       currentIndex: idx,
       currentTrack: track,
+      totalDuration: _parseDuration(track.duration),
       queueSources: newSources,
       playRequested: true,
       status: PlaybackStatus.loading,
@@ -914,6 +919,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _saveQueue();
   }
 
+  Duration _parseDuration(String durationStr) {
+    try {
+      final parts = durationStr.split(':');
+      if (parts.length == 2) {
+        return Duration(minutes: int.parse(parts[0]), seconds: int.parse(parts[1]));
+      } else if (parts.length == 3) {
+        return Duration(hours: int.parse(parts[0]), minutes: int.parse(parts[1]), seconds: int.parse(parts[2]));
+      }
+    } catch (_) {}
+    return const Duration(minutes: 3);
+  }
+
   void _triggerTripleLightHaptic() async {
     for (int i = 0; i < 3; i++) {
       triggerHaptic(HapticFeedbackType.light);
@@ -1137,20 +1154,55 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final nextTrackItem = state.queue[nextIdx];
 
       if (isCrossfade && StorageService.isCrossfadeEnabled()) {
-        state = state.copyWith(
-          currentIndex: nextIdx,
-          currentTrack: nextTrackItem,
-          currentPosition: Duration.zero,
-          progress: 0.0,
-          isPlaying: true,
-          status: PlaybackStatus.playing,
-          playRequested: true,
-        );
-        await _saveQueue();
-        final crossfadeSec = StorageService.getCrossfadeDuration();
-        await _handler.crossfadeToTrack(nextTrackItem, crossfadeSec);
-        _preloadUpcomingTracks();
-        ensureUpcomingRecommendations();
+        var targetTrack = nextTrackItem;
+        String audioUrl = targetTrack.audioUrl;
+        if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
+          audioUrl = audioUrl.replaceAll('_320.', '_160.');
+        }
+        final downloadedPath = StorageService.getDownloadedTrackPath(targetTrack.id);
+        if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
+          audioUrl = downloadedPath;
+        }
+
+        if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
+          _handler.logPlaybackEvent(
+            eventName: 'CROSSFADE_RESOLVING_URL',
+            currentTrackId: targetTrack.id,
+          );
+          final resolved = await AudioUrlResolver.instance.resolveAudioUrl(targetTrack, forceFresh: true);
+          if (myNonce != _playbackNonce) return; // aborted by a newer transition request
+          if (resolved != null && resolved.isNotEmpty) {
+            audioUrl = resolved;
+            targetTrack = targetTrack.copyWith(audioUrl: audioUrl);
+            final updatedQueue = List<Track>.from(state.queue);
+            if (nextIdx >= 0 && nextIdx < updatedQueue.length) {
+              updatedQueue[nextIdx] = targetTrack;
+            }
+            state = state.copyWith(queue: updatedQueue, currentTrack: targetTrack);
+            await _saveQueue();
+          }
+        }
+
+        if (audioUrl.isNotEmpty) {
+          state = state.copyWith(
+            currentIndex: nextIdx,
+            currentTrack: targetTrack,
+            totalDuration: _parseDuration(targetTrack.duration),
+            currentPosition: Duration.zero,
+            progress: 0.0,
+            isPlaying: true,
+            status: PlaybackStatus.playing,
+            playRequested: true,
+          );
+          await _saveQueue();
+          final crossfadeSec = StorageService.getCrossfadeDuration();
+          await _handler.crossfadeToTrack(targetTrack.copyWith(audioUrl: audioUrl), crossfadeSec);
+          _preloadUpcomingTracks();
+          ensureUpcomingRecommendations();
+        } else {
+          // Fallback to normal jump on URL resolution failure
+          await jumpToQueueIndex(nextIdx, nonce: myNonce);
+        }
       } else {
         await jumpToQueueIndex(nextIdx, nonce: myNonce);
       }

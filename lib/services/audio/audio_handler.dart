@@ -240,6 +240,18 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     final outgoingPlayer = _activePlayer;
     final incomingPlayer = _fadePlayer;
 
+    // Swap active players IMMEDIATELY at the start of crossfade,
+    // so that all duration and position events emitted during load/preparation
+    // are successfully captured by the active streams.
+    _activePlayer = incomingPlayer;
+    _fadePlayer = outgoingPlayer;
+
+    // Broadcast new state so media session / notifications are synced
+    _positionController.add(_activePlayer.position);
+    _durationController.add(_activePlayer.duration);
+    _playerStateController.add(_activePlayer.playerState);
+    _broadcastState();
+
     try {
       String url = nextTrack.audioUrl.trim();
       if (url.startsWith('https:/') && !url.startsWith('https://')) {
@@ -254,29 +266,18 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         overrideAudioSource: url,
       );
 
-      // 1. Load incoming track on the incoming player in background
+      // 1. Load incoming track on the active player in background
+      await _activePlayer.setVolume(0.0);
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
       } else {
-        await incomingPlayer.setFilePath(url);
+        await _activePlayer.setFilePath(url);
       }
-      await incomingPlayer.setVolume(0.0);
       
-      // 2. Swap active players IMMEDIATELY before starting playback/fade
-      // so that position, duration, and state streams immediately point to the incoming player.
-      _activePlayer = incomingPlayer;
-      _fadePlayer = outgoingPlayer;
-
-      // Broadcast new state so media session / notifications are synced
-      _positionController.add(_activePlayer.position);
-      _durationController.add(_activePlayer.duration);
-      _playerStateController.add(_activePlayer.playerState);
-      _broadcastState();
-
-      // 3. Start playback on the new active player
+      // 2. Start playback on the new active player
       await _activePlayer.play();
 
-      // 4. Perform crossfade loop
+      // 3. Perform crossfade loop
       final steps = (crossfadeSeconds * 10).clamp(10, 100);
       final stepMs = (crossfadeSeconds * 1000 / steps).round();
 
@@ -293,7 +294,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         } catch (_) {}
       }
 
-      // 5. Hard stop and reset volume of outgoing player
+      // 4. Hard stop and reset volume of outgoing player
       try {
         await _fadePlayer.stop();
         await _fadePlayer.setVolume(1.0);
@@ -310,9 +311,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         currentTrackId: nextTrack.id,
         error: e.toString(),
       );
-      // Fallback: make sure active player points to incoming player if it didn't already
-      _activePlayer = incomingPlayer;
-      _fadePlayer = outgoingPlayer;
+      // Ensure fade player is stopped on failure
+      try {
+        await _fadePlayer.stop();
+        await _fadePlayer.setVolume(1.0);
+      } catch (_) {}
       await playTrack(nextTrack);
     }
   }
