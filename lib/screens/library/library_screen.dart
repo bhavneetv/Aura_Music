@@ -5,9 +5,11 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
+import '../../services/import/spotify_import_service.dart';
 import '../../themes/app_theme.dart';
 import 'playlist_detail_screen.dart';
 import 'recently_played_screen.dart';
+import 'spotify_import_preview_screen.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -20,6 +22,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   late TabController _tabController;
   final TextEditingController _playlistNameController = TextEditingController();
   final TextEditingController _playlistDescController = TextEditingController();
+  final TextEditingController _spotifyUrlController = TextEditingController();
   List<Map<String, dynamic>> _playlists = [];
 
   @override
@@ -34,6 +37,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     _tabController.dispose();
     _playlistNameController.dispose();
     _playlistDescController.dispose();
+    _spotifyUrlController.dispose();
     super.dispose();
   }
 
@@ -121,6 +125,146 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showImportPlaylistBottomSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = ref.read(customizationProvider).accentColor;
+    
+    String? inlineError;
+    bool isLoading = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                left: 24, 
+                right: 24, 
+                top: 24, 
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Import Spotify Playlist', 
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Outfit')
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Paste a public Spotify playlist link below to fetch its tracks. Due to public scraping constraints, only the first 100 tracks can be imported.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _spotifyUrlController,
+                    enabled: !isLoading,
+                    decoration: InputDecoration(
+                      labelText: 'Spotify Playlist Link',
+                      errorText: inlineError,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: _spotifyUrlController.text.isNotEmpty 
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded),
+                            onPressed: () {
+                              _spotifyUrlController.clear();
+                              setModalState(() {
+                                inlineError = null;
+                              });
+                            },
+                          )
+                        : null,
+                    ),
+                    onChanged: (_) {
+                      if (inlineError != null) {
+                        setModalState(() {
+                          inlineError = null;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: isLoading ? null : () => Navigator.pop(context),
+                        child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: isLoading 
+                          ? null 
+                          : () async {
+                              final url = _spotifyUrlController.text.trim();
+                              final playlistId = SpotifyImportService.instance.validateAndExtractPlaylistId(url);
+                              
+                              if (playlistId == null) {
+                                setModalState(() {
+                                  inlineError = 'Please enter a valid Spotify playlist URL.';
+                                });
+                                return;
+                              }
+
+                              setModalState(() {
+                                isLoading = true;
+                                inlineError = null;
+                              });
+
+                              try {
+                                final preview = await SpotifyImportService.instance.fetchPlaylistPreview(url);
+                                Navigator.pop(context); // Close bottom sheet
+                                _spotifyUrlController.clear();
+                                
+                                // Navigate to the preview screen
+                                if (context.mounted) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => SpotifyImportPreviewScreen(preview: preview),
+                                    ),
+                                  ).then((_) => _loadPlaylists());
+                                }
+                              } catch (e) {
+                                setModalState(() {
+                                  isLoading = false;
+                                  inlineError = e.toString().replaceFirst('Exception: ', '');
+                                });
+                              }
+                            },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: accentColor,
+                          disabledBackgroundColor: accentColor.withOpacity(0.3),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                            )
+                          : const Text('Load Preview', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }
         );
       },
     );
@@ -390,10 +534,20 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Your Playlists', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey)),
-              TextButton.icon(
-                onPressed: _showCreatePlaylistBottomSheet,
-                icon: Icon(Icons.add_rounded, size: 16, color: accentColor),
-                label: Text('Create', style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _showImportPlaylistBottomSheet,
+                    icon: Icon(Icons.import_export_rounded, size: 16, color: accentColor),
+                    label: Text('Import', style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    onPressed: _showCreatePlaylistBottomSheet,
+                    icon: Icon(Icons.add_rounded, size: 16, color: accentColor),
+                    label: Text('Create', style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ),
             ],
           ),

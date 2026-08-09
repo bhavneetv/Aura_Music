@@ -200,6 +200,45 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     );
   }
 
+  void _showDeletePlaylistDialog(Color accentColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF161616) : const Color(0xFFFAF8F5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Delete Playlist', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          content: Text('Are you sure you want to delete "${_playlist['name']}"? This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final playlists = StorageService.getPlaylists();
+                if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+                  playlists.removeAt(widget.playlistIndex);
+                  await StorageService.savePlaylists(playlists);
+                }
+                if (mounted) {
+                  Navigator.pop(context); // Close dialog
+                  Navigator.pop(context); // Pop detail screen back to library
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -249,6 +288,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               tooltip: 'Download Playlist',
               onPressed: () => _downloadPlaylist(customBranding.accentColor),
             ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+            tooltip: 'Delete Playlist',
+            onPressed: () => _showDeletePlaylistDialog(customBranding.accentColor),
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',
