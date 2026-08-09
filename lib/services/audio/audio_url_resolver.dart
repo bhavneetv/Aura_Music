@@ -107,7 +107,11 @@ class AudioUrlResolver {
         if (response.statusCode == 200 && response.data != null) {
           final cdnUrl = _extractCdnUrlFromData(response.data);
           if (cdnUrl != null && _isDirectCdnLink(cdnUrl)) {
-            return cdnUrl;
+            if (await _isUrlPlayable(cdnUrl)) {
+              return cdnUrl;
+            } else {
+              print('[AURA-RESOLVER] Strategy 2 CDN link expired (404/403): $cdnUrl');
+            }
           }
         }
       } catch (_) {}

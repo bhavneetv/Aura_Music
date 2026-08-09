@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/widgets.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../models/track.dart';
 
@@ -18,7 +20,7 @@ Future<AudioHandler> initAudioHandler() async {
   );
 }
 
-class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
+class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, WidgetsBindingObserver {
   static const String _browserUserAgent =
       'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
@@ -31,6 +33,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final _durationController = StreamController<Duration?>.broadcast();
   final _playerStateController = StreamController<PlayerState>.broadcast();
 
+  String _audioFocusState = 'focused';
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
+
   Stream<Duration> get activePositionStream => _positionController.stream;
   Stream<Duration?> get activeDurationStream => _durationController.stream;
   Stream<PlayerState> get activePlayerStateStream => _playerStateController.stream;
@@ -38,6 +43,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   MyAudioHandler() {
     _activePlayer = _playerA;
     _fadePlayer = _playerB;
+
+    WidgetsBinding.instance.addObserver(this);
+    _initAudioSession();
 
     // Emit an initial idle playback state so Android MediaSession
     // registers available actions (play, pause, next, prev, seek, stop)
@@ -108,6 +116,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> stop() async {
+    WidgetsBinding.instance.removeObserver(this);
     await _activePlayer.stop();
     await _fadePlayer.stop();
     _broadcastState();
@@ -168,6 +177,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     this.mediaItem.add(mediaItem);
     
     try {
+      logPlaybackEvent(
+        eventName: 'PLAY_TRACK_START',
+        currentTrackId: track.id,
+        overrideAudioSource: track.audioUrl,
+      );
+
       // Hard stop secondary fade player to prevent dual overlapping audio playback
       await _fadePlayer.stop();
       await _fadePlayer.setVolume(0.0);
@@ -183,8 +198,6 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         url = url.replaceFirst('http:/', 'http://');
       }
 
-      print('[AURA-HANDLER] playTrack: "${track.title}" url=${url.substring(0, url.length > 80 ? 80 : url.length)}...');
-
       if (url.startsWith('http://') || url.startsWith('https://')) {
         await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
       } else {
@@ -192,9 +205,19 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       }
       await _activePlayer.setVolume(1.0);
       await _activePlayer.play();
-      print('[AURA-HANDLER] playTrack SUCCESS: "${track.title}"');
+      
+      logPlaybackEvent(
+        eventName: 'PLAY_TRACK_SUCCESS',
+        currentTrackId: track.id,
+        overrideAudioSource: url,
+      );
     } catch (e) {
-      print('[AURA-HANDLER] playTrack FAILED: "${track.title}" error=$e');
+      logPlaybackEvent(
+        eventName: 'PLAY_TRACK_FAILED',
+        currentTrackId: track.id,
+        overrideAudioSource: track.audioUrl,
+        error: e.toString(),
+      );
       rethrow;
     }
   }
@@ -225,41 +248,171 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         url = url.replaceFirst('http:/', 'http://');
       }
 
+      logPlaybackEvent(
+        eventName: 'CROSSFADE_START',
+        currentTrackId: nextTrack.id,
+        overrideAudioSource: url,
+      );
+
+      // 1. Load incoming track on the incoming player in background
       if (url.startsWith('http://') || url.startsWith('https://')) {
         await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
       } else {
         await incomingPlayer.setFilePath(url);
       }
       await incomingPlayer.setVolume(0.0);
-      incomingPlayer.play();
+      
+      // 2. Swap active players IMMEDIATELY before starting playback/fade
+      // so that position, duration, and state streams immediately point to the incoming player.
+      _activePlayer = incomingPlayer;
+      _fadePlayer = outgoingPlayer;
 
+      // Broadcast new state so media session / notifications are synced
+      _positionController.add(_activePlayer.position);
+      _durationController.add(_activePlayer.duration);
+      _playerStateController.add(_activePlayer.playerState);
+      _broadcastState();
+
+      // 3. Start playback on the new active player
+      await _activePlayer.play();
+
+      // 4. Perform crossfade loop
       final steps = (crossfadeSeconds * 10).clamp(10, 100);
       final stepMs = (crossfadeSeconds * 1000 / steps).round();
 
       for (int i = 1; i <= steps; i++) {
         await Future.delayed(Duration(milliseconds: stepMs));
         final double progress = i / steps;
-        // Equal-power crossfade curve for seamless overlapping audio
         final double outVol = math.cos(progress * math.pi / 2);
         final double inVol = math.sin(progress * math.pi / 2);
-        await outgoingPlayer.setVolume(outVol.clamp(0.0, 1.0));
-        await incomingPlayer.setVolume(inVol.clamp(0.0, 1.0));
+        
+        // Use try-catch to ignore errors if players are stopped/disposed during loop
+        try {
+          await _fadePlayer.setVolume(outVol.clamp(0.0, 1.0));
+          await _activePlayer.setVolume(inVol.clamp(0.0, 1.0));
+        } catch (_) {}
       }
 
-      await outgoingPlayer.stop();
-      await outgoingPlayer.setVolume(1.0);
+      // 5. Hard stop and reset volume of outgoing player
+      try {
+        await _fadePlayer.stop();
+        await _fadePlayer.setVolume(1.0);
+      } catch (_) {}
 
+      logPlaybackEvent(
+        eventName: 'CROSSFADE_COMPLETE',
+        currentTrackId: nextTrack.id,
+        overrideAudioSource: url,
+      );
+    } catch (e) {
+      logPlaybackEvent(
+        eventName: 'CROSSFADE_FAILED',
+        currentTrackId: nextTrack.id,
+        error: e.toString(),
+      );
+      // Fallback: make sure active player points to incoming player if it didn't already
       _activePlayer = incomingPlayer;
       _fadePlayer = outgoingPlayer;
-
-      _positionController.add(_activePlayer.position);
-      _durationController.add(_activePlayer.duration);
-      _playerStateController.add(_activePlayer.playerState);
-      _broadcastState();
-    } catch (e) {
-      print('Crossfade failed fallback to normal play: $e');
       await playTrack(nextTrack);
     }
+  }
+
+  Future<void> prepareAndResume(Track track, Duration position) async {
+    try {
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RESUME_START',
+        currentTrackId: track.id,
+        error: 'Resuming at ${position.inMilliseconds}ms',
+      );
+
+      await _fadePlayer.stop();
+      await _fadePlayer.setVolume(0.0);
+
+      await _activePlayer.stop();
+      
+      String url = track.audioUrl.trim();
+      if (url.startsWith('https:/') && !url.startsWith('https://')) {
+        url = url.replaceFirst('https:/', 'https://');
+      } else if (url.startsWith('http:/') && !url.startsWith('http://')) {
+        url = url.replaceFirst('http:/', 'http://');
+      }
+
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+      } else {
+        await _activePlayer.setFilePath(url);
+      }
+      
+      await _activePlayer.seek(position);
+      await _activePlayer.setVolume(1.0);
+      await _activePlayer.play();
+
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RESUME_SUCCESS',
+        currentTrackId: track.id,
+      );
+    } catch (e) {
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RESUME_FAILED',
+        currentTrackId: track.id,
+        error: e.toString(),
+      );
+      rethrow;
+    }
+  }
+
+  // ── AudioSession / App Lifecycle ──────────────────────────────
+
+  Future<void> _initAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      session.interruptionEventStream.listen((event) {
+        _audioFocusState = 'interrupted: ${event.type} (begin: ${event.begin})';
+        logPlaybackEvent(
+          eventName: 'AUDIO_FOCUS_INTERRUPTION',
+          error: 'Type: ${event.type}, Begin: ${event.begin}',
+        );
+      });
+      session.becomingNoisyEventStream.listen((_) {
+        _audioFocusState = 'becoming_noisy';
+        logPlaybackEvent(eventName: 'AUDIO_BECOMING_NOISY');
+      });
+    } catch (e) {
+      print('[AURA-HANDLER] Failed to initialize AudioSession monitoring: $e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+    logPlaybackEvent(eventName: 'APP_LIFECYCLE_CHANGE');
+  }
+
+  void logPlaybackEvent({
+    required String eventName,
+    String? currentTrackId,
+    String? previousTrackId,
+    int? queueIndex,
+    String? error,
+    String? overrideAudioSource,
+  }) {
+    final timestamp = DateTime.now().toIso8601String();
+    final pState = _activePlayer.processingState.toString().split('.').last;
+    final isPlaying = _activePlayer.playing;
+    final position = _activePlayer.position.inMilliseconds;
+    final duration = _activePlayer.duration?.inMilliseconds ?? 0;
+    final audioSource = overrideAudioSource ?? mediaItem.value?.extras?['audioUrl'] ?? 'unknown';
+
+    print('[PLAYBACK-LOG] $timestamp | Event: $eventName '
+        '| currentTrackId: ${currentTrackId ?? mediaItem.value?.id} '
+        '| previousTrackId: $previousTrackId '
+        '| queueIndex: $queueIndex '
+        '| playerState: $pState '
+        '| isPlaying: $isPlaying '
+        '| position: ${position}ms | duration: ${duration}ms '
+        '| audioSource: $audioSource | error: $error '
+        '| appLifecycleState: ${_lifecycleState.toString().split('.').last} '
+        '| audioFocusState: $_audioFocusState');
   }
 
   Duration _parseDuration(String durationStr) {

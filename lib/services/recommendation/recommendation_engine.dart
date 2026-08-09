@@ -18,7 +18,7 @@ class RecommendationEngine {
     final hour = DateTime.now().hour;
     if (hour >= 5 && hour < 12) return 'Morning';
     if (hour >= 12 && hour < 17) return 'Afternoon';
-    if (hour >= 17 && hour < 22) return 'Evening';
+    if (hour >= 17 && hour < 19) return 'Evening';
     return 'Night';
   }
 

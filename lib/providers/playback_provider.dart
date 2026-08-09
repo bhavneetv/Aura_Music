@@ -63,6 +63,10 @@ class PlaybackState {
   final Duration? sleepTimerTimeRemaining;
   final bool isSleepTimerEndOfTrack;
 
+  // State machine fields
+  final PlaybackStatus status;
+  final bool playRequested;
+
   PlaybackState({
     this.currentTrack,
     this.isPlaying = false,
@@ -81,6 +85,8 @@ class PlaybackState {
     this.sleepTimerMinutes,
     this.sleepTimerTimeRemaining,
     this.isSleepTimerEndOfTrack = false,
+    this.status = PlaybackStatus.idle,
+    this.playRequested = false,
   });
 
   Duration get queueDuration {
@@ -119,6 +125,8 @@ class PlaybackState {
     int? sleepTimerMinutes,
     Duration? sleepTimerTimeRemaining,
     bool? isSleepTimerEndOfTrack,
+    PlaybackStatus? status,
+    bool? playRequested,
   }) {
     return PlaybackState(
       currentTrack: currentTrack ?? this.currentTrack,
@@ -138,7 +146,41 @@ class PlaybackState {
       sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
       sleepTimerTimeRemaining: sleepTimerTimeRemaining ?? this.sleepTimerTimeRemaining,
       isSleepTimerEndOfTrack: isSleepTimerEndOfTrack ?? this.isSleepTimerEndOfTrack,
+      status: status ?? this.status,
+      playRequested: playRequested ?? this.playRequested,
     );
+  }
+}
+
+enum PlaybackStatus {
+  idle,
+  loading,
+  ready,
+  playing,
+  paused,
+  buffering,
+  completed,
+  error,
+}
+
+class _TransitionLock {
+  bool _isLocked = false;
+  Completer<void>? _completer;
+
+  Future<void> acquire() async {
+    while (_isLocked) {
+      _completer ??= Completer<void>();
+      await _completer!.future;
+    }
+    _isLocked = true;
+  }
+
+  void release() {
+    _isLocked = false;
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+      _completer = null;
+    }
   }
 }
 
@@ -148,7 +190,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   StreamSubscription? _posSub;
   StreamSubscription? _durSub;
   Timer? _sleepTimer;
+  Timer? _watchdogTimer;
+
   bool _isCrossfading = false;
+  bool _isTransitioning = false;
+  int _playbackNonce = 0;
+  int _recoveryRetries = 0;
+  int _trackLoadRetries = 0;
+
+  final _TransitionLock _lock = _TransitionLock();
+
+  Duration? _lastPosition;
+  DateTime? _lastPositionChangeTime;
 
   @override
   PlaybackState build() {
@@ -203,13 +256,30 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     // 3. Listen to player state
     _stateSub = _handler.activePlayerStateStream.listen((playerState) {
-      state = state.copyWith(isPlaying: playerState.playing);
+      final status = _mapPlayerState(playerState);
+      final isPlaying = playerState.playing;
+
+      state = state.copyWith(
+        isPlaying: isPlaying,
+        status: status,
+        playRequested: isPlaying ? true : (status == PlaybackStatus.paused || status == PlaybackStatus.idle ? false : state.playRequested),
+      );
       
+      _handler.logPlaybackEvent(
+        eventName: 'PLAYER_STATE_CHANGE_EVENT',
+        error: 'playing=$isPlaying, state=${playerState.processingState.toString()}',
+      );
+
       // Auto-play next track on completion (debounce to prevent double-fire)
-      if (playerState.processingState == ProcessingState.completed && !_isSwitchingTrack) {
-        _isSwitchingTrack = true;
-        Future.microtask(() => nextTrack());
+      if (playerState.processingState == ProcessingState.completed && !_isTransitioning) {
+        _isTransitioning = true;
+        Future.microtask(() => nextTrack(isAutoAdvance: true));
       }
+    });
+
+    // 4. Setup Playback Health Watchdog Timer
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      _checkPlaybackHealth();
     });
 
     // Load saved Queue State from Hive
@@ -221,6 +291,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       _durSub?.cancel();
       _stateSub?.cancel();
       _sleepTimer?.cancel();
+      _watchdogTimer?.cancel();
     });
 
     return PlaybackState(
@@ -229,6 +300,113 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       gaplessPlayback: savedGapless,
       playbackSpeed: savedSpeed,
     );
+  }
+
+  PlaybackStatus _mapPlayerState(PlayerState playerState) {
+    switch (playerState.processingState) {
+      case ProcessingState.idle:
+        return PlaybackStatus.idle;
+      case ProcessingState.loading:
+        return PlaybackStatus.loading;
+      case ProcessingState.buffering:
+        return PlaybackStatus.buffering;
+      case ProcessingState.ready:
+        return playerState.playing ? PlaybackStatus.playing : PlaybackStatus.ready;
+      case ProcessingState.completed:
+        return PlaybackStatus.completed;
+    }
+  }
+
+  void _checkPlaybackHealth() {
+    final track = state.currentTrack;
+    if (track == null) return;
+
+    final now = DateTime.now();
+    
+    if (state.playRequested) {
+      if (state.status == PlaybackStatus.playing) {
+        final currentPos = state.currentPosition;
+        if (_lastPosition != null && _lastPosition == currentPos) {
+          final stuckDuration = now.difference(_lastPositionChangeTime ?? now);
+          if (stuckDuration.inSeconds >= 6) {
+            _lastPositionChangeTime = now;
+            _performWatchdogRecovery();
+          }
+        } else {
+          _lastPosition = currentPos;
+          _lastPositionChangeTime = now;
+          _recoveryRetries = 0;
+        }
+      } else if (state.status == PlaybackStatus.buffering || state.status == PlaybackStatus.loading) {
+        _lastPosition = null;
+        if (_lastPositionChangeTime == null) {
+          _lastPositionChangeTime = now;
+        } else {
+          final stuckDuration = now.difference(_lastPositionChangeTime!);
+          if (stuckDuration.inSeconds >= 10) {
+            _lastPositionChangeTime = now;
+            _performWatchdogRecovery();
+          }
+        }
+      } else {
+        _lastPosition = null;
+        _lastPositionChangeTime = null;
+      }
+    } else {
+      _lastPosition = null;
+      _lastPositionChangeTime = null;
+    }
+  }
+
+  Future<void> _performWatchdogRecovery() async {
+    final track = state.currentTrack;
+    if (track == null) return;
+
+    _recoveryRetries++;
+    _handler.logPlaybackEvent(
+      eventName: 'WATCHDOG_RECOVERY_TRIGGERED',
+      currentTrackId: track.id,
+      error: 'Attempt $_recoveryRetries for "${track.title}"',
+    );
+
+    if (_recoveryRetries > 2) {
+      _handler.logPlaybackEvent(
+        eventName: 'WATCHDOG_RECOVERY_EXCEEDED',
+        currentTrackId: track.id,
+        error: 'Max retries exceeded. Skipping track.',
+      );
+      _recoveryRetries = 0;
+      nextTrack();
+      return;
+    }
+
+    try {
+      state = state.copyWith(status: PlaybackStatus.loading);
+      
+      final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+      if (freshUrl != null && freshUrl.isNotEmpty) {
+        final updatedTrack = track.copyWith(audioUrl: freshUrl);
+        
+        final updatedQueue = List<Track>.from(state.queue);
+        if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
+          updatedQueue[state.currentIndex] = updatedTrack;
+        }
+        state = state.copyWith(queue: updatedQueue, currentTrack: updatedTrack);
+        await _saveQueue();
+
+        final resumePos = state.currentPosition;
+        await _handler.prepareAndResume(updatedTrack, resumePos);
+      } else {
+        throw Exception('Fresh URL resolution returned empty');
+      }
+    } catch (e) {
+      _handler.logPlaybackEvent(
+        eventName: 'WATCHDOG_RECOVERY_FAILED',
+        currentTrackId: track.id,
+        error: e.toString(),
+      );
+      nextTrack();
+    }
   }
 
   void _loadSavedQueue(String skin, bool norm, bool gapless, double speed) {
@@ -256,12 +434,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         if (tracks.isNotEmpty && idx >= 0 && idx < tracks.length) {
           curr = tracks[idx];
           
-          // Restore position
           final posMs = StorageService.getSetting('playback_pos_${curr.id}', defaultValue: 0) as int;
           _handler.player.seek(Duration(milliseconds: posMs));
         }
 
-        // Apply saved speed
         _handler.player.setSpeed(speed);
 
         state = PlaybackState(
@@ -274,13 +450,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           volumeNormalization: norm,
           gaplessPlayback: gapless,
           playbackSpeed: speed,
+          status: PlaybackStatus.idle,
+          playRequested: false,
         );
         ensureUpcomingRecommendations();
       } catch (e) {
         print('Failed to restore saved queue: $e');
       }
     } else {
-      // Dynamic initial queue based on user's preferred languages
       Future.microtask(() async {
         try {
           final source = ref.read(musicSourceProvider);
@@ -295,6 +472,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
               volumeNormalization: norm,
               gaplessPlayback: gapless,
               playbackSpeed: speed,
+              status: PlaybackStatus.idle,
+              playRequested: false,
             );
             _saveQueue();
           }
@@ -322,40 +501,69 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       newSources[track.id] = QueueSource.user;
     }
 
+    _isTransitioning = true;
+    final myNonce = ++_playbackNonce;
+
     state = state.copyWith(
       queue: List<Track>.from(tracks),
       currentIndex: safeIndex,
       currentTrack: targetTrack,
       queueSources: newSources,
+      playRequested: true,
+      status: PlaybackStatus.loading,
     );
     await _saveQueue();
 
-    _streamTrack(targetTrack);
+    try {
+      await _streamTrack(targetTrack, nonce: myNonce);
+    } finally {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_playbackNonce == myNonce) {
+          _isTransitioning = false;
+        }
+      });
+    }
   }
 
-  Future<void> jumpToQueueIndex(int index) async {
+  Future<void> jumpToQueueIndex(int index, {int? nonce}) async {
     if (index < 0 || index >= state.queue.length) return;
+    
+    final myNonce = nonce ?? ++_playbackNonce;
+    if (nonce == null) {
+      _isTransitioning = true;
+    }
+    
     final targetTrack = state.queue[index];
+    
     state = state.copyWith(
       currentIndex: index,
       currentTrack: targetTrack,
+      playRequested: true,
+      status: PlaybackStatus.loading,
     );
     await _saveQueue();
-    await _streamTrack(targetTrack);
+    
+    try {
+      await _streamTrack(targetTrack, nonce: myNonce);
+    } finally {
+      if (nonce == null) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (_playbackNonce == myNonce) {
+            _isTransitioning = false;
+          }
+        });
+      }
+    }
   }
-
-  // ── Smart Queue Controls ────────────────────────────────────
 
   void playTrack(Track track) async {
     int idx = state.queue.indexWhere((t) => t.id == track.id || (t.title.trim().toLowerCase() == track.title.trim().toLowerCase() && t.artist.trim().toLowerCase() == track.artist.trim().toLowerCase()));
 
     if (idx != -1) {
-      // Track is already part of active queue — just jump index without altering queue order
       jumpToQueueIndex(idx);
       return;
     }
 
-    // Check if session context changed (e.g. user selected a song from a different genre)
     final prevContext = StorageService.getSessionContext();
     final newGenre = track.genre.trim().toUpperCase();
 
@@ -378,21 +586,31 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final newSources = Map<String, QueueSource>.from(state.queueSources);
     newSources[track.id] = QueueSource.user;
     
+    _isTransitioning = true;
+    final myNonce = ++_playbackNonce;
+
     state = state.copyWith(
       queue: currentQueue,
       currentIndex: idx,
       currentTrack: track,
       queueSources: newSources,
+      playRequested: true,
+      status: PlaybackStatus.loading,
     );
     await _saveQueue();
 
-    _streamTrack(track);
+    try {
+      await _streamTrack(track, nonce: myNonce);
+    } finally {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_playbackNonce == myNonce) {
+          _isTransitioning = false;
+        }
+      });
+    }
   }
 
-  int _playbackNonce = 0;
-
-  Future<void> _streamTrack(Track track) async {
-    final myNonce = ++_playbackNonce;
+  Future<void> _streamTrack(Track track, {required int nonce}) async {
     triggerHaptic(HapticFeedbackType.selection);
     RecommendationEngine.instance.recordTrackStarted(track);
 
@@ -401,21 +619,25 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       audioUrl = audioUrl.replaceAll('_320.', '_160.');
     }
 
-    // Check if downloaded locally first
     final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
     if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
     }
 
-    // If audioUrl is empty or invalid, attempt resolution via AudioUrlResolver
+    if (nonce != _playbackNonce) {
+      print('[AURA-PLAY] Aborting playback for "${track.title}" before resolution (nonce mismatch)');
+      return;
+    }
+
     if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
       print('[AURA-PLAY] Empty/unresolved audioUrl for "${track.title}", resolving via AudioUrlResolver...');
       final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
-      // Check if user changed song while we were resolving
-      if (_playbackNonce != myNonce) {
+      
+      if (nonce != _playbackNonce) {
         print('[AURA-PLAY] Stale resolution for "${track.title}" (user changed song), discarding');
         return;
       }
+
       if (resolved != null && resolved.isNotEmpty) {
         audioUrl = resolved;
         track = track.copyWith(audioUrl: audioUrl);
@@ -430,31 +652,67 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (audioUrl.isNotEmpty) {
       try {
         await StorageService.addListeningHistory(track, state.currentPosition.inSeconds.toDouble());
-        // Final nonce check before actually starting playback
-        if (_playbackNonce != myNonce) {
+        
+        if (nonce != _playbackNonce) {
           print('[AURA-PLAY] Stale playback for "${track.title}" (user changed song), discarding');
           return;
         }
+
+        state = state.copyWith(status: PlaybackStatus.loading);
         await _handler.playTrack(track.copyWith(audioUrl: audioUrl));
+
+        if (nonce != _playbackNonce) {
+          print('[AURA-PLAY] Playback started but nonce changed, letting it be handled by the new transition');
+          return;
+        }
+
+        _trackLoadRetries = 0;
+        state = state.copyWith(
+          status: PlaybackStatus.playing,
+          isPlaying: true,
+        );
 
         _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
       } catch (e) {
         print('[AURA-PLAY] Initial playback failed for "${track.title}": $e');
         if (e.toString().contains('Loading interrupted')) return;
-        if (_playbackNonce != myNonce) return;
+        if (nonce != _playbackNonce) return;
+
+        _trackLoadRetries++;
+        if (_trackLoadRetries > 2) {
+          _handler.logPlaybackEvent(
+            eventName: 'PLAYBACK_MAX_RETRIES_EXCEEDED',
+            currentTrackId: track.id,
+            error: 'Failed 3 times. Skipping track.',
+          );
+          _trackLoadRetries = 0;
+          nextTrack();
+          return;
+        }
+
         try {
           final resolvedUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
-          if (_playbackNonce != myNonce) return;
+          if (nonce != _playbackNonce) return;
+          
           if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
             print('[AURA-PLAY] Retrying with resolved URL: $resolvedUrl');
             final resolvedTrack = track.copyWith(audioUrl: resolvedUrl);
+            
             await _handler.playTrack(resolvedTrack);
+            
+            if (nonce != _playbackNonce) return;
+
             final updatedQueue = List<Track>.from(state.queue);
             if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
               updatedQueue[state.currentIndex] = resolvedTrack;
             }
-            state = state.copyWith(queue: updatedQueue, currentTrack: resolvedTrack);
+            state = state.copyWith(
+              queue: updatedQueue, 
+              currentTrack: resolvedTrack,
+              status: PlaybackStatus.playing,
+              isPlaying: true,
+            );
             await _saveQueue();
             _preloadUpcomingTracks();
             ensureUpcomingRecommendations();
@@ -463,15 +721,35 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         } catch (resolveErr) {
           print('[AURA-PLAY] AudioUrlResolver fallback also failed: $resolveErr');
         }
-        // Do NOT auto-skip track on error — stay on current track to prevent random 1-in-10 skipping
-        state = state.copyWith(isPlaying: false);
+
+        if (nonce != _playbackNonce) return;
+        state = state.copyWith(
+          status: PlaybackStatus.error,
+          isPlaying: false,
+        );
       }
     } else {
       print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}"');
-      state = state.copyWith(isPlaying: false);
+      if (nonce != _playbackNonce) return;
+
+      _trackLoadRetries++;
+      if (_trackLoadRetries > 2) {
+        _handler.logPlaybackEvent(
+          eventName: 'PLAYBACK_RESOLVE_MAX_RETRIES_EXCEEDED',
+          currentTrackId: track.id,
+          error: 'Failed 3 times resolving URL. Skipping.',
+        );
+        _trackLoadRetries = 0;
+        nextTrack();
+        return;
+      }
+
+      state = state.copyWith(
+        status: PlaybackStatus.error,
+        isPlaying: false,
+      );
     }
   }
-
 
   Future<void> ensureUpcomingRecommendations() async {
     if (state.currentTrack == null) return;
@@ -480,7 +758,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (remainingUpcoming >= 5) return;
 
     try {
-      // Use contextual recommendations anchored to the current track
       final source = ref.read(musicSourceProvider);
       List<Track> recommendations;
       if (source is JamendoSource) {
@@ -495,7 +772,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         recommendations = await source.getTracksByGenre(genreQuery);
       }
 
-      final Set<String> existingTitles = state.queue.map((t) => t.title.trim().toLowerCase()).toSet();
+      final Set<String> currentQueueTitles = state.queue.map((t) => t.title.trim().toLowerCase()).toSet();
+      final Set<String> existingTitles = Set<String>.from(currentQueueTitles);
+
+      final history = StorageService.getListeningHistory();
+      for (var item in history) {
+        if (item['title'] != null) {
+          existingTitles.add(item['title'].toString().trim().toLowerCase());
+        }
+      }
+
       List<Track> ranked = RecommendationEngine.instance.rankRecommendations(
         recommendations,
         currentTrack: state.currentTrack,
@@ -509,6 +795,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           currentTrack: state.currentTrack,
           excludeIds: existingTitles,
         );
+        
+        if (ranked.isEmpty) {
+           ranked = RecommendationEngine.instance.rankRecommendations(
+             freshBatch.isNotEmpty ? freshBatch : recommendations,
+             currentTrack: state.currentTrack,
+             excludeIds: currentQueueTitles,
+           );
+        }
       }
 
       if (ranked.isNotEmpty) {
@@ -601,14 +895,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final item = updated.removeAt(oldIndex);
     updated.insert(newIndex, item);
     
-    // Haptic feedback: triple light haptic on start (0) or end (length-1), single light for intermediate
     if (newIndex == 0 || newIndex == updated.length - 1) {
       _triggerTripleLightHaptic();
     } else {
       triggerHaptic(HapticFeedbackType.light);
     }
 
-    // Adjust current index
     int newIdx = state.currentIndex;
     if (oldIndex == state.currentIndex) {
       newIdx = newIndex;
@@ -642,7 +934,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     state = state.copyWith(isShuffle: nextShuffle);
     
     if (nextShuffle && state.queue.isNotEmpty) {
-      // Shuffle the queue list, keeping current track at index 0 or preserving index
       List<Track> shuffled = List.from(state.queue);
       final current = state.currentTrack;
       if (current != null) {
@@ -660,11 +951,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _saveQueue();
   }
 
-  Future<void> _autoPlayNextRecommended() async {
+  Future<void> _autoPlayNextRecommended({required int nonce}) async {
     final current = state.currentTrack;
     if (current == null) return;
 
-    // Prune queue if too long to maintain responsive state
+    if (nonce != _playbackNonce) return;
+
     List<Track> workingQueue = List.from(state.queue);
     int workingIdx = state.currentIndex;
     if (workingIdx > 5) {
@@ -677,8 +969,17 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final source = ref.read(musicSourceProvider);
       List<Track> recommendations = await source.getDynamicRecommendations();
 
-      final Set<String> existingIds = workingQueue.map((t) => t.id).toSet();
-      final Set<String> existingTitles = workingQueue.map((t) => t.title.trim().toLowerCase()).toSet();
+      if (nonce != _playbackNonce) return;
+
+      final Set<String> currentQueueTitles = workingQueue.map((t) => t.title.trim().toLowerCase()).toSet();
+      final Set<String> existingTitles = Set<String>.from(currentQueueTitles);
+
+      final history = StorageService.getListeningHistory();
+      for (var item in history) {
+        if (item['title'] != null) {
+          existingTitles.add(item['title'].toString().trim().toLowerCase());
+        }
+      }
 
       List<Track> ranked = RecommendationEngine.instance.rankRecommendations(
         recommendations,
@@ -686,9 +987,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         excludeIds: existingTitles,
       );
 
-      // If all candidates in current batch were excluded, query fresh dynamic recommendations again
       if (ranked.isEmpty) {
         final freshBatch = await source.getDynamicRecommendations();
+        if (nonce != _playbackNonce) return;
         freshBatch.shuffle();
         ranked = RecommendationEngine.instance.rankRecommendations(
           freshBatch,
@@ -699,18 +1000,28 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         if (ranked.isEmpty && freshBatch.isNotEmpty) {
           ranked = freshBatch.where((t) => !existingTitles.contains(t.title.trim().toLowerCase())).toList();
         }
+
+        if (ranked.isEmpty) {
+           ranked = RecommendationEngine.instance.rankRecommendations(
+             freshBatch.isNotEmpty ? freshBatch : recommendations,
+             currentTrack: current,
+             excludeIds: currentQueueTitles,
+           );
+           if (ranked.isEmpty && freshBatch.isNotEmpty) {
+             ranked = freshBatch.where((t) => !currentQueueTitles.contains(t.title.trim().toLowerCase())).toList();
+           }
+        }
       }
 
       Track? nextTrackToPlay;
       if (ranked.isNotEmpty) {
         nextTrackToPlay = ranked.first;
       } else if (recommendations.isNotEmpty) {
-        final unplayed = recommendations.where((t) => !existingTitles.contains(t.title.trim().toLowerCase())).toList();
+        final unplayed = recommendations.where((t) => !currentQueueTitles.contains(t.title.trim().toLowerCase())).toList();
         if (unplayed.isNotEmpty) {
           unplayed.shuffle();
           nextTrackToPlay = unplayed.first;
         } else {
-          // Generate dynamic variation if all songs have been played
           final sample = (List.from(recommendations)..shuffle()).first;
           nextTrackToPlay = sample.copyWith(
             id: '${sample.id}_${DateTime.now().millisecondsSinceEpoch}',
@@ -719,6 +1030,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       }
 
       if (nextTrackToPlay != null) {
+        if (nonce != _playbackNonce) return;
+
         final updatedQueue = List<Track>.from(state.queue)..add(nextTrackToPlay);
         final nextIdx = updatedQueue.length - 1;
 
@@ -732,29 +1045,45 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           queueSources: updatedSources,
         );
         await _saveQueue();
-        _streamTrack(nextTrackToPlay);
+        await _streamTrack(nextTrackToPlay, nonce: nonce);
       }
     } catch (e) {
       print('Error auto-playing next recommended: $e');
     }
   }
 
-  bool _isSwitchingTrack = false;
-
-  Future<void> nextTrack({bool isCrossfade = false}) async {
+  Future<void> nextTrack({bool isCrossfade = false, bool isAutoAdvance = false}) async {
     if (state.queue.isEmpty) return;
-    _isSwitchingTrack = true;
+    
+    if (isAutoAdvance && _isTransitioning) {
+      _handler.logPlaybackEvent(
+        eventName: 'NEXT_TRACK_IGNORED',
+        error: 'Auto-advance skipped because a transition is already active.',
+      );
+      return;
+    }
+    
+    _isTransitioning = true;
+    final myNonce = ++_playbackNonce;
+    
+    _handler.logPlaybackEvent(
+      eventName: 'NEXT_TRACK_REQUESTED',
+      queueIndex: state.currentIndex,
+      error: 'isCrossfade=$isCrossfade, isAutoAdvance=$isAutoAdvance, nonce=$myNonce',
+    );
 
     if (state.isSleepTimerEndOfTrack) {
       triggerHaptic(HapticFeedbackType.medium);
       await _handler.pause();
       cancelSleepTimer();
-      _isSwitchingTrack = false;
+      _isTransitioning = false;
       return;
     }
     
+    await _lock.acquire();
     try {
-      // Log previous track telemetry and handle skip realignments
+      if (_playbackNonce != myNonce) return;
+
       if (state.currentTrack != null) {
         final skippedTrack = state.currentTrack!;
         final playedSec = state.currentPosition.inSeconds;
@@ -765,17 +1094,14 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           state.totalDuration,
         );
 
-        // If skipped early (< 30s), treat as negative feedback
         if (playedSec < 30) {
           final skippedGenre = skippedTrack.genre.trim().toUpperCase();
           final skippedArtist = skippedTrack.artist.split(',').first.trim();
 
-          // Check if the skipped song's genre differs from the active session
           final sessionCtx = StorageService.getSessionContext();
           final activeGenre = sessionCtx['genre'] ?? '';
 
           if (skippedGenre.isNotEmpty && activeGenre.isNotEmpty && skippedGenre != activeGenre) {
-            // Skipped a mismatched genre — purge all tracks of that genre from upcoming queue
             if (state.currentIndex + 1 < state.queue.length) {
               List<Track> cleanedQueue = List.from(state.queue);
               final upcoming = cleanedQueue.sublist(state.currentIndex + 1);
@@ -784,10 +1110,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
               state = state.copyWith(queue: cleanedQueue);
             }
           } else if (skippedGenre.isNotEmpty && state.currentIndex + 1 < state.queue.length) {
-            // Skipped within same genre — re-rank upcoming to deprioritize similar tracks
             List<Track> cleanedQueue = List.from(state.queue);
             final upcoming = cleanedQueue.sublist(state.currentIndex + 1);
-            // Remove tracks by the same skipped artist
             upcoming.removeWhere((t) => t.artist.split(',').first.trim().toLowerCase() == skippedArtist.toLowerCase());
             cleanedQueue = cleanedQueue.sublist(0, state.currentIndex + 1)..addAll(upcoming);
             state = state.copyWith(queue: cleanedQueue);
@@ -795,8 +1119,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         }
       }
 
-      if (state.repeatMode == RepeatMode.one && state.currentTrack != null) {
-        playTrack(state.currentTrack!);
+      if (state.repeatMode == RepeatMode.one && state.currentTrack != null && isAutoAdvance) {
+        await _streamTrack(state.currentTrack!, nonce: myNonce);
         return;
       }
 
@@ -805,7 +1129,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         if (state.repeatMode == RepeatMode.all) {
           nextIdx = 0;
         } else {
-          await _autoPlayNextRecommended();
+          await _autoPlayNextRecommended(nonce: myNonce);
           return;
         }
       }
@@ -819,6 +1143,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           currentPosition: Duration.zero,
           progress: 0.0,
           isPlaying: true,
+          status: PlaybackStatus.playing,
+          playRequested: true,
         );
         await _saveQueue();
         final crossfadeSec = StorageService.getCrossfadeDuration();
@@ -826,20 +1152,34 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
       } else {
-        await jumpToQueueIndex(nextIdx);
+        await jumpToQueueIndex(nextIdx, nonce: myNonce);
       }
     } finally {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _isSwitchingTrack = false;
+      _lock.release();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_playbackNonce == myNonce) {
+          _isTransitioning = false;
+        }
       });
     }
   }
 
-  void previousTrack() {
-    if (state.queue.isEmpty || _isSwitchingTrack) return;
-    _isSwitchingTrack = true;
+  Future<void> previousTrack() async {
+    if (state.queue.isEmpty) return;
     
+    _isTransitioning = true;
+    final myNonce = ++_playbackNonce;
+    
+    _handler.logPlaybackEvent(
+      eventName: 'PREVIOUS_TRACK_REQUESTED',
+      queueIndex: state.currentIndex,
+      error: 'nonce=$myNonce',
+    );
+
+    await _lock.acquire();
     try {
+      if (_playbackNonce != myNonce) return;
+      
       int prevIdx = state.currentIndex - 1;
       if (prevIdx < 0) {
         if (state.repeatMode == RepeatMode.all) {
@@ -848,18 +1188,21 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           prevIdx = 0;
         }
       }
-      jumpToQueueIndex(prevIdx);
+      await jumpToQueueIndex(prevIdx, nonce: myNonce);
     } finally {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _isSwitchingTrack = false;
+      _lock.release();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_playbackNonce == myNonce) {
+          _isTransitioning = false;
+        }
       });
     }
   }
 
-  // ── Audio Core Modifiers ────────────────────────────────────
-
   void togglePlay() {
-    _handler.player.playing ? _handler.pause() : _handler.play();
+    final playReq = !_handler.player.playing;
+    state = state.copyWith(playRequested: playReq);
+    playReq ? _handler.play() : _handler.pause();
   }
 
   void seek(double progress) {
@@ -889,7 +1232,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   void toggleVolumeNormalization() {
     final next = !state.volumeNormalization;
     state = state.copyWith(volumeNormalization: next);
-    // Standard volume normalization by applying a peak limit or lowering base volume
     _handler.player.setVolume(next ? 0.75 : 1.0);
     StorageService.saveSetting('volume_normalization', next);
   }
@@ -904,8 +1246,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     state = state.copyWith(playerSkin: skin);
     StorageService.saveSetting('player_skin', skin);
   }
-
-  // ── Sleep Timer ─────────────────────────────────────────────
 
   void startSleepTimerTillEndOfTrack() {
     _sleepTimer?.cancel();
@@ -927,7 +1267,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     _sleepTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       final remaining = state.sleepTimerTimeRemaining;
       if (remaining == null || remaining.inSeconds <= 1) {
-        // Timer fired! Stop player
         _handler.pause();
         cancelSleepTimer();
       } else {
@@ -947,11 +1286,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     );
   }
 
-  /// Called when user likes/favorites a track — boosts affinity and re-ranks queue
   void onTrackLiked(Track track) {
     RecommendationEngine.instance.recordTrackLiked(track);
 
-    // Re-rank upcoming queue with boosted affinities
     if (state.currentTrack != null && state.currentIndex + 1 < state.queue.length) {
       final upcoming = List<Track>.from(state.queue.sublist(state.currentIndex + 1));
       final reranked = RecommendationEngine.instance.rerankUpcomingQueue(upcoming, state.currentTrack!);
@@ -960,7 +1297,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       _saveQueue();
     }
 
-    // Trigger fresh recommendations to fill queue with similar content
     ensureUpcomingRecommendations();
   }
 }
