@@ -8,7 +8,7 @@ jobs:
     name: 🎉 iOS Build
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Load Version Properties
         run: |
@@ -17,12 +17,12 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          architecture: x64
 
-      - run: flutter pub get
-
-      - run: pod repo update
-        working-directory: ios
+      - name: Setup CocoaPods & Dependencies
+        run: |
+          flutter pub get
+          cd ios
+          pod install --repo-update
 
       - name: Create .env File from Secrets
         run: |
@@ -31,44 +31,19 @@ jobs:
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
-      # Prepares Generated.xcconfig, runs pod install, WITHOUT
-      # attempting Flutter's own final assembly/signing-gated step
-      - name: Prepare iOS project (config only, no build)
-        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
-
-      - name: Archive via xcodebuild directly (bypasses Flutter's team check)
+      - name: Build iOS Release App (Unsigned)
         run: |
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -sdk iphoneos \
-            -configuration Release \
-            -archivePath "$PWD/build/Runner.xcarchive" \
-            ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
-            ASSETCATALOG_COMPILER_INCLUDE_ALL_APP_ICON_ASSETS=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            archive
-        working-directory: ios
+          flutter build ios --release --no-codesign --no-tree-shake-icons \
+            --build-name=${{ env.VERSION_NAME }} \
+            --build-number=${{ env.VERSION_CODE }} \
+            --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} \
+            --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} \
+            --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
-      - name: Verify Runner.app and inspect size
-        run: |
-          APP_PATH="ios/build/Runner.xcarchive/Products/Applications/Runner.app"
-          if [ ! -d "$APP_PATH" ]; then
-            echo "Runner.app not found at $APP_PATH — real build failure."
-            find ios/build -maxdepth 4 2>/dev/null
-            exit 1
-          fi
-          echo "--- Size ---"
-          du -sh "$APP_PATH"
-          echo "--- Contents ---"
-          find "$APP_PATH" -maxdepth 2
-
-      - name: Package IPA
+      - name: Package IPA from Runner.app
         run: |
           mkdir -p Payload
-          cp -RL "ios/build/Runner.xcarchive/Products/Applications/Runner.app" Payload/
+          cp -RL "build/ios/iphoneos/Runner.app" Payload/
           echo "--- Payload size after copy ---"
           du -sh Payload
           ditto -c -k --keepParent Payload FlutterIpaExport.ipa
@@ -82,4 +57,4 @@ jobs:
           file: FlutterIpaExport.ipa
           tag: ${{ env.RELEASE_TAG }}
           overwrite: true
-          body: "${{ env.RELEASE_TAG }} released"
+          body: "${{ env.RELEASE_TAG }} iOS release build"
