@@ -424,6 +424,16 @@ class StorageService {
     await saveSetting('progress_bar_style', style);
   }
 
+  // ── Navigation Bar Visual Style ──────────────────────────────
+
+  static String getNavigationBarStyle() {
+    return getSetting('nav_bar_style', defaultValue: 'default') as String;
+  }
+
+  static Future<void> setNavigationBarStyle(String style) async {
+    await saveSetting('nav_bar_style', style);
+  }
+
   // ── Downloads Tracker ───────────────────────────────────────
 
   static Map<String, String> getDownloadedTracks() {

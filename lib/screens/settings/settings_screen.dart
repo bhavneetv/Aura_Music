@@ -440,6 +440,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           () => _showScreenThemeDialog(playbackNotifier),
         ),
         _buildSelectionTile(
+          'Navigation Bar Style',
+          customBranding.navBarStyle == 'os_style'
+              ? 'OS STYLE (iOS Liquid Glass / Android M3)'
+              : 'DEFAULT (Floating Glass)',
+          () => _showNavigationBarStyleDialog(),
+        ),
+        _buildSelectionTile(
           'Playback Speed',
           '${playbackState.playbackSpeed}x',
           () => _showPlaybackSpeedDialog(playbackNotifier),
@@ -712,17 +719,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Widget _buildSelectionTile(String title, String valuePreview, VoidCallback onTap) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final customBranding = ref.read(customizationProvider);
+
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(valuePreview, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-          const SizedBox(width: 6),
-          const Icon(Icons.arrow_drop_down_rounded, color: Colors.grey),
-        ],
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          valuePreview,
+          style: TextStyle(
+            color: customBranding.accentColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
+      trailing: const Icon(Icons.arrow_drop_down_rounded, color: Colors.grey),
       onTap: onTap,
     );
   }
@@ -866,6 +880,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 },
               );
             }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showNavigationBarStyleDialog() {
+    final customNotifier = ref.read(customizationProvider.notifier);
+    final currentStyle = ref.read(customizationProvider).navBarStyle;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Navigation Bar Style', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: const Text('Default (Floating Glass)'),
+                subtitle: const Text('Custom sleek floating curved glass bar'),
+                value: 'default',
+                groupValue: currentStyle,
+                onChanged: (val) {
+                  if (val != null) {
+                    customNotifier.updateNavigationBarStyle(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              RadioListTile<String>(
+                title: const Text('OS Style (Native System)'),
+                subtitle: const Text('iOS 26 Liquid Glass / Android 16 Material 3 stock bar'),
+                value: 'os_style',
+                groupValue: currentStyle,
+                onChanged: (val) {
+                  if (val != null) {
+                    customNotifier.updateNavigationBarStyle(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+            ],
           ),
         );
       },

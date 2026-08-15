@@ -1,0 +1,257 @@
+import 'dart:io';
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import '../providers/playback_provider.dart';
+import 'glass_bottom_navigation.dart';
+
+/// Platform detection helper for OS-specific rendering
+class PlatformInfo {
+  static bool get isIOS => !kIsWeb && Platform.isIOS;
+  static bool get isAndroid => !kIsWeb && Platform.isAndroid;
+  static bool get isMacOS => !kIsWeb && Platform.isMacOS;
+
+  /// Detection for iOS 26 Liquid Glass translucent refractive material capabilities
+  static bool isIOS26OrHigher() {
+    return isIOS;
+  }
+}
+
+/// Destination model for Adaptive Navigation Bar
+class AdaptiveNavigationDestination {
+  final dynamic icon;
+  final dynamic selectedIcon;
+  final String label;
+  final bool isSearch;
+
+  const AdaptiveNavigationDestination({
+    required this.icon,
+    this.selectedIcon,
+    required this.label,
+    this.isSearch = false,
+  });
+}
+
+/// Adaptive Navigation Bar Widget supporting Default Floating Glass and Native OS Style
+/// (iOS 26 Liquid Glass / Android 16 Material 3)
+class AdaptiveNavigationBar extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+  final List<AdaptiveNavigationDestination> destinations;
+  final String navBarStyle; // 'default' or 'os_style'
+  final Color accentColor;
+
+  const AdaptiveNavigationBar({
+    super.key,
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+    required this.destinations,
+    required this.navBarStyle,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (navBarStyle == 'os_style') {
+      if (PlatformInfo.isIOS) {
+        return _buildIOSLiquidGlassNavigationBar(context, isDark);
+      } else {
+        return _buildAndroidMaterial3NavigationBar(context, isDark);
+      }
+    }
+
+    // Default: App's custom floating glass capsule nav bar
+    return _buildDefaultFloatingGlassBar(context, isDark);
+  }
+
+  // ── 1. iOS 26 Stock "Liquid Glass" Navigation Bar ─────────────────────────
+  Widget _buildIOSLiquidGlassNavigationBar(BuildContext context, bool isDark) {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final navBgColor = (isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7)).withValues(alpha: 0.68);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: navBgColor,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.70),
+            width: 0.8,
+          ),
+        ),
+      ),
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+          child: Stack(
+            children: [
+              // Liquid Glass Specular Highlight Refraction Layer
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withValues(alpha: isDark ? 0.12 : 0.40),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.35],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Tab Bar Content
+              Padding(
+                padding: EdgeInsets.only(top: 8, bottom: mathMax(bottomPadding, 6)),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: List.generate(destinations.length, (index) {
+                    final isSelected = selectedIndex == index;
+                    final dest = destinations[index];
+
+                    final IconData displayIcon = isSelected
+                        ? _getIOSIcon(dest.selectedIcon ?? dest.icon, isSelected: true, isSearch: dest.isSearch)
+                        : _getIOSIcon(dest.icon, isSelected: false, isSearch: dest.isSearch);
+
+                    final Color itemColor = isSelected
+                        ? accentColor
+                        : (isDark ? Colors.white.withValues(alpha: 0.45) : Colors.black.withValues(alpha: 0.45));
+
+                    return Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          triggerHaptic(HapticFeedbackType.light);
+                          onDestinationSelected(index);
+                        },
+                        behavior: HitTestBehavior.opaque,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedScale(
+                              scale: isSelected ? 1.08 : 1.0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              child: Icon(displayIcon, size: 24, color: itemColor),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              dest.label,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                color: itemColor,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 2. Android 16 Stock Material 3 Navigation Bar ────────────────────────
+  Widget _buildAndroidMaterial3NavigationBar(BuildContext context, bool isDark) {
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        height: 68,
+        backgroundColor: isDark ? const Color(0xFF1E1E22) : const Color(0xFFF3F3F7),
+        indicatorColor: accentColor.withValues(alpha: 0.22),
+        elevation: 3,
+        surfaceTintColor: Colors.transparent,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? (isDark ? Colors.white : Colors.black87) : Colors.grey,
+          );
+        }),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            size: 24,
+            color: isSelected ? accentColor : (isDark ? Colors.white60 : Colors.black54),
+          );
+        }),
+      ),
+      child: NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: (index) {
+          triggerHaptic(HapticFeedbackType.light);
+          onDestinationSelected(index);
+        },
+        destinations: destinations.map((dest) {
+          final IconData iconData = _getAndroidIcon(dest.icon, isSelected: false);
+          final IconData selectedIconData = _getAndroidIcon(dest.selectedIcon ?? dest.icon, isSelected: true);
+
+          return NavigationDestination(
+            icon: Icon(iconData),
+            selectedIcon: Icon(selectedIconData),
+            label: dest.label,
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // ── 3. Default App Floating Curved Glass Navigation Bar ──────────────────
+  Widget _buildDefaultFloatingGlassBar(BuildContext context, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+      child: GlassBottomBar(
+        items: destinations.map((d) {
+          final iconData = _getAndroidIcon(d.icon, isSelected: false);
+          return GlassBarItem(
+            icon: iconData,
+            label: d.label,
+            nativeSymbolName: d.icon is String ? d.icon as String : null,
+          );
+        }).toList(),
+        currentIndex: selectedIndex,
+        onTap: (index) {
+          triggerHaptic(HapticFeedbackType.light);
+          onDestinationSelected(index);
+        },
+        style: GlassBottomNavStyle(
+          accent: accentColor,
+          height: 60,
+          actionButtonMode: GlassActionButtonMode.nativeLiquidGlassOnIOS26,
+        ),
+      ),
+    );
+  }
+
+  IconData _getIOSIcon(dynamic val, {required bool isSelected, bool isSearch = false}) {
+    if (val is IconData) return val;
+    if (val is String) {
+      if (val.contains('house')) return isSelected ? CupertinoIcons.house_fill : CupertinoIcons.house;
+      if (val.contains('person')) return isSelected ? CupertinoIcons.person_fill : CupertinoIcons.person;
+      if (val.contains('search') || val.contains('magnifyingglass')) return CupertinoIcons.search;
+    }
+    return isSelected ? CupertinoIcons.square_fill : CupertinoIcons.square;
+  }
+
+  IconData _getAndroidIcon(dynamic val, {required bool isSelected}) {
+    if (val is IconData) return val;
+    if (val is String) {
+      if (val.contains('house')) return isSelected ? Icons.home : Icons.home_outlined;
+      if (val.contains('person')) return isSelected ? Icons.person : Icons.person_outline;
+      if (val.contains('search')) return Icons.search;
+    }
+    return isSelected ? Icons.circle : Icons.circle_outlined;
+  }
+
+  double mathMax(double a, double b) => a > b ? a : b;
+}

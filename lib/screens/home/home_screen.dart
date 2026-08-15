@@ -16,6 +16,7 @@ import '../../services/storage/storage_service.dart';
 import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
 
+import '../../widgets/adaptive_navigation_bar.dart';
 import '../../services/update/update_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -66,7 +67,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return Scaffold(
-      bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor),
+      bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
       body: SafeArea(
         bottom: false,
         child: NetworkStatusBanner(
@@ -734,92 +735,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Bottom Navigation Bar Widget - G.2 Sleek Curved Floating Design
-  Widget _buildBottomNavigationBar(BuildContext context, Color accentColor) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      margin: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
-      decoration: BoxDecoration(
-        color: (isDark ? const Color(0xFF141416) : Colors.white).withValues(alpha: 0.75),
-        borderRadius: BorderRadius.circular(32),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-        border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08),
-          width: 1,
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(32),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home', accentColor),
-                _buildNavItem(1, Icons.search_rounded, Icons.search_rounded, 'Search', accentColor),
-                _buildNavItem(2, Icons.library_music_rounded, Icons.library_music_outlined, 'Library', accentColor),
-                _buildNavItem(3, Icons.queue_music_rounded, Icons.queue_music_outlined, 'Queue', accentColor),
-                _buildNavItem(4, Icons.settings_rounded, Icons.settings_outlined, 'Settings', accentColor),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem(int index, IconData selectedIcon, IconData unselectedIcon, String label, Color accentColor) {
-    final isSelected = _currentTab == index;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return GestureDetector(
-      onTap: () {
-        triggerHaptic(HapticFeedbackType.light);
+  // Bottom Navigation Bar Widget - Supporting Default Floating Glass & OS Style (iOS Liquid Glass / Android M3)
+  Widget _buildBottomNavigationBar(BuildContext context, Color accentColor, String navBarStyle) {
+    return AdaptiveNavigationBar(
+      selectedIndex: _currentTab,
+      navBarStyle: navBarStyle,
+      accentColor: accentColor,
+      onDestinationSelected: (index) {
         setState(() {
           _currentTab = index;
         });
       },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? accentColor.withValues(alpha: 0.16) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+      destinations: const [
+        AdaptiveNavigationDestination(
+          icon: 'house',
+          selectedIcon: 'house.fill',
+          label: 'Home',
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isSelected ? selectedIcon : unselectedIcon,
-              size: 22,
-              color: isSelected ? accentColor : (isDark ? Colors.white54 : Colors.black54),
-            ),
-            if (isSelected) ...[
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: accentColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                  fontFamily: 'Outfit',
-                ),
-              ),
-            ],
-          ],
+        AdaptiveNavigationDestination(
+          icon: 'search',
+          selectedIcon: 'search',
+          label: 'Search',
+          isSearch: true,
         ),
-      ),
+        AdaptiveNavigationDestination(
+          icon: Icons.library_music_outlined,
+          selectedIcon: Icons.library_music_rounded,
+          label: 'Library',
+        ),
+        AdaptiveNavigationDestination(
+          icon: Icons.queue_music_outlined,
+          selectedIcon: Icons.queue_music_rounded,
+          label: 'Queue',
+        ),
+        AdaptiveNavigationDestination(
+          icon: Icons.settings_outlined,
+          selectedIcon: Icons.settings_rounded,
+          label: 'Settings',
+        ),
+      ],
     );
   }
   void _showSeeAllTracksSheet(BuildContext context, String sectionTitle, List<Track> existingTracks) async {

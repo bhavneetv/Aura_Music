@@ -9,6 +9,7 @@ class CustomizationState {
   final int red;
   final int green;
   final int blue;
+  final String navBarStyle; // 'default' or 'os_style'
 
   CustomizationState({
     required this.appName,
@@ -16,6 +17,7 @@ class CustomizationState {
     required this.red,
     required this.green,
     required this.blue,
+    required this.navBarStyle,
   });
 
   CustomizationState copyWith({
@@ -24,6 +26,7 @@ class CustomizationState {
     int? red,
     int? green,
     int? blue,
+    String? navBarStyle,
   }) {
     return CustomizationState(
       appName: appName ?? this.appName,
@@ -31,6 +34,7 @@ class CustomizationState {
       red: red ?? this.red,
       green: green ?? this.green,
       blue: blue ?? this.blue,
+      navBarStyle: navBarStyle ?? this.navBarStyle,
     );
   }
 
@@ -46,6 +50,7 @@ class CustomizationNotifier extends Notifier<CustomizationState> {
   static const int _defaultR = 212; // Gold accent R
   static const int _defaultG = 175; // Gold accent G
   static const int _defaultB = 55;  // Gold accent B
+  static const String _defaultNavBarStyle = 'default';
 
   @override
   CustomizationState build() {
@@ -55,6 +60,7 @@ class CustomizationNotifier extends Notifier<CustomizationState> {
     final int savedR = StorageService.getSetting('custom_theme_r', defaultValue: _defaultR) as int;
     final int savedG = StorageService.getSetting('custom_theme_g', defaultValue: _defaultG) as int;
     final int savedB = StorageService.getSetting('custom_theme_b', defaultValue: _defaultB) as int;
+    final String savedNavBar = StorageService.getNavigationBarStyle();
 
     return CustomizationState(
       appName: savedName,
@@ -62,6 +68,7 @@ class CustomizationNotifier extends Notifier<CustomizationState> {
       red: savedR,
       green: savedG,
       blue: savedB,
+      navBarStyle: savedNavBar,
     );
   }
 
@@ -82,6 +89,11 @@ class CustomizationNotifier extends Notifier<CustomizationState> {
     await StorageService.saveSetting('custom_theme_b', b);
   }
 
+  Future<void> updateNavigationBarStyle(String style) async {
+    state = state.copyWith(navBarStyle: style);
+    await StorageService.setNavigationBarStyle(style);
+  }
+
   Future<void> resetToDefault() async {
     state = CustomizationState(
       appName: _defaultAppName,
@@ -89,12 +101,14 @@ class CustomizationNotifier extends Notifier<CustomizationState> {
       red: _defaultR,
       green: _defaultG,
       blue: _defaultB,
+      navBarStyle: _defaultNavBarStyle,
     );
     await StorageService.saveSetting('custom_app_name', _defaultAppName);
     await StorageService.saveSetting('custom_app_icon_code', _defaultIconCode);
     await StorageService.saveSetting('custom_theme_r', _defaultR);
     await StorageService.saveSetting('custom_theme_g', _defaultG);
     await StorageService.saveSetting('custom_theme_b', _defaultB);
+    await StorageService.setNavigationBarStyle(_defaultNavBarStyle);
   }
 }
 
