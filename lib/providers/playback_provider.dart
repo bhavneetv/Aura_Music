@@ -243,7 +243,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Crossfade handling with equal-power overlapping transition.
       // The _isCrossfading flag is only reset when the crossfade completes
       // inside nextTrack(), not via an arbitrary timer.
-      if (StorageService.isCrossfadeEnabled() && dur.inMilliseconds > 0 && !_isCrossfading) {
+      if (StorageService.isCrossfadeEnabled() && state.isPlaying && !_isTransitioning && dur.inMilliseconds > 0 && !_isCrossfading) {
         final crossfadeSec = StorageService.getCrossfadeDuration();
         final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
         if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000)) {
@@ -279,11 +279,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Auto-play next track on completion.
       // Uses _lastCompletedNonce to deduplicate: only fires if the current
       // nonce hasn't already triggered a completion handler.
-      // Does NOT gate on _isTransitioning (which was the root cause of
-      // the original deadlock).
       if (playerState.processingState == ProcessingState.completed) {
         final currentNonce = _playbackNonce;
-        if (currentNonce != _lastCompletedNonce) {
+        if (currentNonce != _lastCompletedNonce && (isPlaying || state.playRequested)) {
           _lastCompletedNonce = currentNonce;
           _isCrossfading = false; // Reset crossfade flag when a track reaches completion
           _handler.logPlaybackEvent(

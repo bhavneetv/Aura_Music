@@ -2208,195 +2208,224 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              // ── Top Bar Header (Back & Options) ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 28),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.more_horiz_rounded, color: Colors.white70, size: 24),
-                      onPressed: () => _showQueueBottomSheet(state, notifier),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Spacer(flex: 1),
-
-              // ── 1. Song Title (Large Bold Centered at Top) ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  track.title,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              children: [
+                // ── Top Bar Header (Back & Options) ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 28),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.more_horiz_rounded, color: Colors.white70, size: 24),
+                        onPressed: () => _showQueueBottomSheet(state, notifier),
+                      ),
+                    ],
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 6),
+                const SizedBox(height: 12),
 
-              // ── 2. Artist (Centered Below Title) ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  track.artist,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                // ── 1. Song Title (Large Bold Centered at Top) ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    track.title,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                // ── 2. Artist (Centered Below Title) ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    track.artist,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── 3. Time Indicator (Centered Above Artwork: 01:23  |  02:35) ──
+                Text(
+                  '${_formatDuration(state.currentPosition)}   |   ${_formatDuration(state.totalDuration)}',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.65),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w400,
+                    color: Colors.white.withValues(alpha: 0.6),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 28),
+                const SizedBox(height: 16),
 
-              // ── 3. Time Indicator (Centered Above Artwork: 01:23  |  02:35) ──
-              Text(
-                '${_formatDuration(state.currentPosition)}   |   ${_formatDuration(state.totalDuration)}',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // ── 4. Circular Artwork with Arc Progress Ring & Dot Knob ──
-              SizedBox(
-                width: ringSize,
-                height: ringSize,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Arc Ring & Dot Knob Painter
-                    CustomPaint(
-                      size: Size(ringSize, ringSize),
-                      painter: _ArcProgressPainter(
-                        progress: progress,
-                        activeColor: accentColor.withValues(alpha: 0.95),
-                        inactiveColor: Colors.white.withValues(alpha: 0.2),
-                      ),
-                    ),
-                    // Circular Album Artwork
-                    Container(
-                      width: artSize,
-                      height: artSize,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: accentColor.withValues(alpha: 0.35),
-                            blurRadius: 35,
-                            spreadRadius: 4,
+                // ── 4. Circular Artwork with Interactive Circular Arc Progress Ring ──
+                GestureDetector(
+                  onPanStart: (details) {
+                    triggerHaptic(HapticFeedbackType.selection);
+                    final double seekVal = _calculateArcProgress(details.localPosition, ringSize);
+                    setState(() {
+                      _isDraggingProgress = true;
+                      _dragProgressValue = seekVal;
+                    });
+                  },
+                  onPanUpdate: (details) {
+                    final double seekVal = _calculateArcProgress(details.localPosition, ringSize);
+                    setState(() {
+                      _dragProgressValue = seekVal;
+                    });
+                  },
+                  onPanEnd: (_) {
+                    notifier.seek(_dragProgressValue);
+                    setState(() {
+                      _isDraggingProgress = false;
+                    });
+                  },
+                  onTapDown: (details) {
+                    triggerHaptic(HapticFeedbackType.selection);
+                    final double seekVal = _calculateArcProgress(details.localPosition, ringSize);
+                    notifier.seek(seekVal);
+                  },
+                  child: SizedBox(
+                    width: ringSize,
+                    height: ringSize,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Arc Ring & Dot Knob Painter
+                        CustomPaint(
+                          size: Size(ringSize, ringSize),
+                          painter: _ArcProgressPainter(
+                            progress: _isDraggingProgress ? _dragProgressValue.clamp(0.0, 1.0) : progress,
+                            activeColor: accentColor.withValues(alpha: 0.95),
+                            inactiveColor: Colors.white.withValues(alpha: 0.2),
                           ),
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.45),
-                            blurRadius: 20,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Image.network(
-                          track.artworkUrl,
+                        ),
+                        // Circular Album Artwork
+                        Container(
                           width: artSize,
                           height: artSize,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: accentColor.withValues(alpha: 0.3),
-                            child: Icon(Icons.music_note_rounded, color: Colors.white38, size: artSize * 0.4),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: accentColor.withValues(alpha: 0.35),
+                                blurRadius: 35,
+                                spreadRadius: 4,
+                              ),
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: ClipOval(
+                            child: Image.network(
+                              track.artworkUrl,
+                              width: artSize,
+                              height: artSize,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: accentColor.withValues(alpha: 0.3),
+                                child: Icon(Icons.music_note_rounded, color: Colors.white38, size: artSize * 0.4),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                // ── 6. Primary Playback Controls ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          state.isShuffle ? Icons.shuffle_rounded : Icons.shuffle_rounded,
+                          color: state.isShuffle ? accentColor : Colors.white54,
+                          size: 22,
+                        ),
+                        onPressed: () => notifier.toggleShuffle(),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 38),
+                        onPressed: () => notifier.previousTrack(),
+                      ),
+                      GestureDetector(
+                        onTap: () => notifier.togglePlay(),
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: accentColor,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: accentColor.withValues(alpha: 0.4),
+                                blurRadius: 15,
+                                offset: const Offset(0, 5),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                            color: isDark ? Colors.black : Colors.white,
+                            size: 36,
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Spacer(flex: 2),
-
-              // ── Primary Playback Controls ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        state.isShuffle ? Icons.shuffle_rounded : Icons.shuffle_rounded,
-                        color: state.isShuffle ? accentColor : Colors.white54,
-                        size: 22,
+                      IconButton(
+                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 38),
+                        onPressed: () => notifier.nextTrack(),
                       ),
-                      onPressed: () => notifier.toggleShuffle(),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 38),
-                      onPressed: () => notifier.previousTrack(),
-                    ),
-                    GestureDetector(
-                      onTap: () => notifier.togglePlay(),
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: accentColor,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: accentColor.withValues(alpha: 0.4),
-                              blurRadius: 15,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
+                      IconButton(
+                        icon: Icon(
+                          isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          color: isFav ? Colors.redAccent : Colors.white54,
+                          size: 24,
                         ),
-                        child: Icon(
-                          state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                          color: isDark ? Colors.black : Colors.white,
-                          size: 36,
-                        ),
+                        onPressed: () async {
+                          triggerHaptic(HapticFeedbackType.selection);
+                          await StorageService.toggleFavoriteTrack(track);
+                          if (StorageService.isFavorite('trackIds', track.id)) {
+                            ref.read(playbackProvider.notifier).onTrackLiked(track);
+                          }
+                          setState(() {});
+                        },
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 38),
-                      onPressed: () => notifier.nextTrack(),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: isFav ? Colors.redAccent : Colors.white54,
-                        size: 24,
-                      ),
-                      onPressed: () async {
-                        triggerHaptic(HapticFeedbackType.selection);
-                        await StorageService.toggleFavoriteTrack(track);
-                        if (StorageService.isFavorite('trackIds', track.id)) {
-                          ref.read(playbackProvider.notifier).onTrackLiked(track);
-                        }
-                        setState(() {});
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
 
               const SizedBox(height: 20),
 
@@ -2471,12 +2500,24 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               // ── Song Summary & Karaoke Insights Section ──
               _buildSongSummarySection(track, isDark, accentColor),
 
-              const SizedBox(height: 24),
             ],
           ),
         ),
       ),
+    ),
     );
+  }
+
+  double _calculateArcProgress(Offset localPosition, double ringSize) {
+    final center = Offset(ringSize / 2, ringSize / 2);
+    final dx = localPosition.dx - center.dx;
+    final dy = localPosition.dy - center.dy;
+    double angle = math.atan2(dy, dx);
+    double normalized = angle + (math.pi / 2);
+    if (normalized < 0) {
+      normalized += 2 * math.pi;
+    }
+    return (normalized / (2 * math.pi)).clamp(0.0, 1.0);
   }
 
   // ── Skins Layout Rendering ───────────────────────────────────

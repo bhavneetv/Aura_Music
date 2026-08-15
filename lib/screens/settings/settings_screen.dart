@@ -514,47 +514,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           () => _showProgressBarStyleDialog(),
         ),
         _buildSwitchTile(
-          'Crossfade Audio',
+          'Crossfade Audio (Coming Soon)',
           'Smooth transition between ending and next song',
-          _crossfadeEnabled,
+          false,
           customBranding.accentColor,
-          (val) async {
-            setState(() {
-              _crossfadeEnabled = val;
-            });
-            await StorageService.setCrossfadeEnabled(val);
+          (val) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Crossfade Audio is coming soon! 🚀'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
           },
         ),
-        if (_crossfadeEnabled)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Crossfade Duration', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text('${_crossfadeDuration.toInt()} seconds', style: TextStyle(color: customBranding.accentColor, fontWeight: FontWeight.bold, fontSize: 13)),
-                  ],
-                ),
-                Slider(
-                  value: _crossfadeDuration,
-                  min: 1.0,
-                  max: 10.0,
-                  divisions: 9,
-                  activeColor: customBranding.accentColor,
-                  label: '${_crossfadeDuration.toInt()} sec',
-                  onChanged: (val) async {
-                    setState(() {
-                      _crossfadeDuration = val;
-                    });
-                    await StorageService.setCrossfadeDuration(val.toInt());
-                  },
-                ),
-              ],
-            ),
-          ),
         _buildSelectionTile(
           'Download Stream Quality',
           _audioQuality,
