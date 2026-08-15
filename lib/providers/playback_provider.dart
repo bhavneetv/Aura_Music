@@ -56,6 +56,7 @@ class PlaybackState {
   
   // Customizations & Player modes
   final String playerSkin; // 'vinyl', 'cd', 'cassette', 'minimal'
+  final String playerScreenTheme; // 'normal' or 'minimal_theme'
   final bool volumeNormalization;
   final bool gaplessPlayback;
   final double playbackSpeed;
@@ -79,6 +80,7 @@ class PlaybackState {
     this.isShuffle = false,
     this.repeatMode = RepeatMode.off,
     this.playerSkin = 'minimal',
+    this.playerScreenTheme = 'normal',
     this.volumeNormalization = false,
     this.gaplessPlayback = true,
     this.playbackSpeed = 1.0,
@@ -119,6 +121,7 @@ class PlaybackState {
     bool? isShuffle,
     RepeatMode? repeatMode,
     String? playerSkin,
+    String? playerScreenTheme,
     bool? volumeNormalization,
     bool? gaplessPlayback,
     double? playbackSpeed,
@@ -140,6 +143,7 @@ class PlaybackState {
       isShuffle: isShuffle ?? this.isShuffle,
       repeatMode: repeatMode ?? this.repeatMode,
       playerSkin: playerSkin ?? this.playerSkin,
+      playerScreenTheme: playerScreenTheme ?? this.playerScreenTheme,
       volumeNormalization: volumeNormalization ?? this.volumeNormalization,
       gaplessPlayback: gaplessPlayback ?? this.gaplessPlayback,
       playbackSpeed: playbackSpeed ?? this.playbackSpeed,
@@ -195,7 +199,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   bool _isCrossfading = false;
   bool _isTransitioning = false;
   int _playbackNonce = 0;
-  int _recoveryRetries = 0;
+  // Nonce snapshot at the time the last completed event fired,
+  // used to deduplicate multiple completed events for the same track.
+  int _lastCompletedNonce = -1;
   int _trackLoadRetries = 0;
 
   final _TransitionLock _lock = _TransitionLock();
@@ -213,6 +219,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     // Load saved settings from Hive (default to minimal cover art skin)
     final savedSkin = StorageService.getSetting('player_skin', defaultValue: 'minimal') as String;
+    final savedScreenTheme = StorageService.getSetting('player_screen_theme', defaultValue: 'normal') as String;
     final savedNorm = StorageService.getSetting('volume_normalization', defaultValue: false) as bool;
     final savedGapless = StorageService.getSetting('gapless_playback', defaultValue: true) as bool;
     final savedSpeed = StorageService.getSetting('playback_speed', defaultValue: 1.0) as double;
@@ -233,16 +240,15 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
       }
 
-      // Crossfade handling with equal-power overlapping transition
-      if (StorageService.isCrossfadeEnabled() && dur.inMilliseconds > 0) {
+      // Crossfade handling with equal-power overlapping transition.
+      // The _isCrossfading flag is only reset when the crossfade completes
+      // inside nextTrack(), not via an arbitrary timer.
+      if (StorageService.isCrossfadeEnabled() && dur.inMilliseconds > 0 && !_isCrossfading) {
         final crossfadeSec = StorageService.getCrossfadeDuration();
         final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
-        if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000) && !_isCrossfading) {
+        if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000)) {
           _isCrossfading = true;
           nextTrack(isCrossfade: true);
-          Future.delayed(Duration(seconds: crossfadeSec + 1), () {
-            _isCrossfading = false;
-          });
         }
       }
     });
@@ -267,18 +273,30 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       
       _handler.logPlaybackEvent(
         eventName: 'PLAYER_STATE_CHANGE_EVENT',
-        error: 'playing=$isPlaying, state=${playerState.processingState.toString()}',
+        error: 'playing=$isPlaying, state=${playerState.processingState.toString()}, nonce=$_playbackNonce',
       );
 
-      // Auto-play next track on completion (debounce to prevent double-fire)
-      if (playerState.processingState == ProcessingState.completed && !_isTransitioning) {
-        _isTransitioning = true;
-        Future.microtask(() => nextTrack(isAutoAdvance: true));
+      // Auto-play next track on completion.
+      // Uses _lastCompletedNonce to deduplicate: only fires if the current
+      // nonce hasn't already triggered a completion handler.
+      // Does NOT gate on _isTransitioning (which was the root cause of
+      // the original deadlock).
+      if (playerState.processingState == ProcessingState.completed) {
+        final currentNonce = _playbackNonce;
+        if (currentNonce != _lastCompletedNonce) {
+          _lastCompletedNonce = currentNonce;
+          _isCrossfading = false; // Reset crossfade flag when a track reaches completion
+          _handler.logPlaybackEvent(
+            eventName: 'AUTO_ADVANCE_TRIGGERED',
+            error: 'nonce=$currentNonce, _isTransitioning=$_isTransitioning',
+          );
+          Future.microtask(() => nextTrack(isAutoAdvance: true));
+        }
       }
     });
 
-    // 4. Setup Playback Health Watchdog Timer
-    _watchdogTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    // 4. Setup Playback Health Watchdog Timer (diagnostic logging only)
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       _checkPlaybackHealth();
     });
 
@@ -296,6 +314,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     return PlaybackState(
       playerSkin: savedSkin,
+      playerScreenTheme: savedScreenTheme,
       volumeNormalization: savedNorm,
       gaplessPlayback: savedGapless,
       playbackSpeed: savedSpeed,
@@ -317,95 +336,35 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
+  /// Diagnostic-only watchdog: logs warnings if playback appears stuck.
+  /// Does NOT auto-recover or auto-skip — the root cause fixes in the
+  /// transition logic should prevent stuck states from occurring.
   void _checkPlaybackHealth() {
     final track = state.currentTrack;
     if (track == null) return;
 
     final now = DateTime.now();
     
-    if (state.playRequested) {
-      if (state.status == PlaybackStatus.playing) {
-        final currentPos = state.currentPosition;
-        if (_lastPosition != null && _lastPosition == currentPos) {
-          final stuckDuration = now.difference(_lastPositionChangeTime ?? now);
-          if (stuckDuration.inSeconds >= 6) {
-            _lastPositionChangeTime = now;
-            _performWatchdogRecovery();
-          }
-        } else {
-          _lastPosition = currentPos;
+    if (state.playRequested && state.isPlaying) {
+      final currentPos = state.currentPosition;
+      if (_lastPosition != null && _lastPosition == currentPos) {
+        final stuckDuration = now.difference(_lastPositionChangeTime ?? now);
+        if (stuckDuration.inSeconds >= 8) {
+          _handler.logPlaybackEvent(
+            eventName: 'WATCHDOG_STUCK_DETECTED',
+            currentTrackId: track.id,
+            error: 'Position stuck at ${currentPos.inMilliseconds}ms for ${stuckDuration.inSeconds}s. _isTransitioning=$_isTransitioning, _isCrossfading=$_isCrossfading, nonce=$_playbackNonce',
+          );
+          // Reset the timer so we don't spam logs
           _lastPositionChangeTime = now;
-          _recoveryRetries = 0;
-        }
-      } else if (state.status == PlaybackStatus.buffering || state.status == PlaybackStatus.loading) {
-        _lastPosition = null;
-        if (_lastPositionChangeTime == null) {
-          _lastPositionChangeTime = now;
-        } else {
-          final stuckDuration = now.difference(_lastPositionChangeTime!);
-          if (stuckDuration.inSeconds >= 10) {
-            _lastPositionChangeTime = now;
-            _performWatchdogRecovery();
-          }
         }
       } else {
-        _lastPosition = null;
-        _lastPositionChangeTime = null;
+        _lastPosition = currentPos;
+        _lastPositionChangeTime = now;
       }
     } else {
       _lastPosition = null;
       _lastPositionChangeTime = null;
-    }
-  }
-
-  Future<void> _performWatchdogRecovery() async {
-    final track = state.currentTrack;
-    if (track == null) return;
-
-    _recoveryRetries++;
-    _handler.logPlaybackEvent(
-      eventName: 'WATCHDOG_RECOVERY_TRIGGERED',
-      currentTrackId: track.id,
-      error: 'Attempt $_recoveryRetries for "${track.title}"',
-    );
-
-    if (_recoveryRetries > 2) {
-      _handler.logPlaybackEvent(
-        eventName: 'WATCHDOG_RECOVERY_EXCEEDED',
-        currentTrackId: track.id,
-        error: 'Max retries exceeded. Skipping track.',
-      );
-      _recoveryRetries = 0;
-      nextTrack();
-      return;
-    }
-
-    try {
-      state = state.copyWith(status: PlaybackStatus.loading);
-      
-      final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
-      if (freshUrl != null && freshUrl.isNotEmpty) {
-        final updatedTrack = track.copyWith(audioUrl: freshUrl);
-        
-        final updatedQueue = List<Track>.from(state.queue);
-        if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
-          updatedQueue[state.currentIndex] = updatedTrack;
-        }
-        state = state.copyWith(queue: updatedQueue, currentTrack: updatedTrack);
-        await _saveQueue();
-
-        final resumePos = state.currentPosition;
-        await _handler.prepareAndResume(updatedTrack, resumePos);
-      } else {
-        throw Exception('Fresh URL resolution returned empty');
-      }
-    } catch (e) {
-      _handler.logPlaybackEvent(
-        eventName: 'WATCHDOG_RECOVERY_FAILED',
-        currentTrackId: track.id,
-        error: e.toString(),
-      );
-      nextTrack();
     }
   }
 
@@ -520,11 +479,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     try {
       await _streamTrack(targetTrack, nonce: myNonce);
     } finally {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_playbackNonce == myNonce) {
-          _isTransitioning = false;
-        }
-      });
+      _isTransitioning = false;
     }
   }
 
@@ -551,11 +506,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       await _streamTrack(targetTrack, nonce: myNonce);
     } finally {
       if (nonce == null) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (_playbackNonce == myNonce) {
-            _isTransitioning = false;
-          }
-        });
+        _isTransitioning = false;
       }
     }
   }
@@ -607,11 +558,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     try {
       await _streamTrack(track, nonce: myNonce);
     } finally {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_playbackNonce == myNonce) {
-          _isTransitioning = false;
-        }
-      });
+      _isTransitioning = false;
     }
   }
 
@@ -732,6 +679,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           status: PlaybackStatus.error,
           isPlaying: false,
         );
+        // Automatically skip unplayable track after a brief delay
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+            nextTrack(isAutoAdvance: true);
+          }
+        });
       }
     } else {
       print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}"');
@@ -753,6 +706,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         status: PlaybackStatus.error,
         isPlaying: false,
       );
+      // Automatically skip unplayable track after a brief delay
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+          nextTrack(isAutoAdvance: true);
+        }
+      });
     }
   }
 
@@ -1072,14 +1031,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   Future<void> nextTrack({bool isCrossfade = false, bool isAutoAdvance = false}) async {
     if (state.queue.isEmpty) return;
     
-    if (isAutoAdvance && _isTransitioning) {
-      _handler.logPlaybackEvent(
-        eventName: 'NEXT_TRACK_IGNORED',
-        error: 'Auto-advance skipped because a transition is already active.',
-      );
-      return;
-    }
-    
     _isTransitioning = true;
     final myNonce = ++_playbackNonce;
     
@@ -1184,22 +1135,36 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         }
 
         if (audioUrl.isNotEmpty) {
-          state = state.copyWith(
-            currentIndex: nextIdx,
-            currentTrack: targetTrack,
-            totalDuration: _parseDuration(targetTrack.duration),
-            currentPosition: Duration.zero,
-            progress: 0.0,
-            isPlaying: true,
-            status: PlaybackStatus.playing,
-            playRequested: true,
-          );
-          await _saveQueue();
           final crossfadeSec = StorageService.getCrossfadeDuration();
-          await _handler.crossfadeToTrack(targetTrack.copyWith(audioUrl: audioUrl), crossfadeSec);
-          _preloadUpcomingTracks();
-          ensureUpcomingRecommendations();
+          final success = await _handler.crossfadeToTrack(
+            targetTrack.copyWith(audioUrl: audioUrl),
+            crossfadeSec,
+            onSwapped: () {
+              if (myNonce == _playbackNonce) {
+                state = state.copyWith(
+                  currentIndex: nextIdx,
+                  currentTrack: targetTrack,
+                  totalDuration: _parseDuration(targetTrack.duration),
+                  currentPosition: Duration.zero,
+                  progress: 0.0,
+                  isPlaying: true,
+                  status: PlaybackStatus.playing,
+                  playRequested: true,
+                );
+                _saveQueue();
+              }
+            },
+          );
+          _isCrossfading = false;
+          if (success) {
+            _preloadUpcomingTracks();
+            ensureUpcomingRecommendations();
+          } else {
+            // Fallback to normal jump if crossfade failed
+            await jumpToQueueIndex(nextIdx, nonce: myNonce);
+          }
         } else {
+          _isCrossfading = false;
           // Fallback to normal jump on URL resolution failure
           await jumpToQueueIndex(nextIdx, nonce: myNonce);
         }
@@ -1208,11 +1173,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       }
     } finally {
       _lock.release();
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_playbackNonce == myNonce) {
-          _isTransitioning = false;
-        }
-      });
+      _isTransitioning = false;
+      // If crossfade was requested but failed or wasn't taken, ensure flag is reset
+      if (isCrossfade) _isCrossfading = false;
     }
   }
 
@@ -1243,11 +1206,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       await jumpToQueueIndex(prevIdx, nonce: myNonce);
     } finally {
       _lock.release();
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_playbackNonce == myNonce) {
-          _isTransitioning = false;
-        }
-      });
+      _isTransitioning = false;
     }
   }
 
@@ -1297,6 +1256,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   void setPlayerSkin(String skin) {
     state = state.copyWith(playerSkin: skin);
     StorageService.saveSetting('player_skin', skin);
+  }
+
+  void setPlayerScreenTheme(String theme) {
+    state = state.copyWith(playerScreenTheme: theme);
+    StorageService.saveSetting('player_screen_theme', theme);
   }
 
   void startSleepTimerTillEndOfTrack() {

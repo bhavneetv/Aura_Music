@@ -205,6 +205,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
     final isFav = StorageService.isFavorite('trackIds', track.id);
 
+    // ── Minimal Theme Layout ─────────────────────────────────────
+    if (state.playerScreenTheme == 'minimal_theme') {
+      return _buildMinimalThemeScreen(state, notifier, track, targetAccent, isDark, isFav);
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: TweenAnimationBuilder<Color?>(
@@ -212,6 +217,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         tween: ColorTween(begin: targetAccent, end: targetAccent),
         builder: (context, currentAccentColor, child) {
           final activeAccent = currentAccentColor ?? targetAccent;
+
 
           return Container(
             height: double.infinity,
@@ -1451,9 +1457,319 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     );
   }
 
+  // ── Minimal Theme Full-Screen Layout ──────────────────────────
+
+  Widget _buildMinimalThemeScreen(
+    PlaybackState state,
+    PlaybackNotifier notifier,
+    Track track,
+    Color accentColor,
+    bool isDark,
+    bool isFav,
+  ) {
+    final screenW = MediaQuery.of(context).size.width;
+    final screenH = MediaQuery.of(context).size.height;
+    final artSize = screenW * 0.60;
+    final ringSize = artSize + 20;
+    final progress = state.progress.clamp(0.0, 1.0);
+
+    // Deep gradient derived from album accent colour
+    final bgDark = HSLColor.fromColor(accentColor).withLightness(0.06).withSaturation(0.4).toColor();
+    final bgMid = HSLColor.fromColor(accentColor).withLightness(0.12).withSaturation(0.5).toColor();
+
+    return Scaffold(
+      backgroundColor: bgDark,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [bgMid, bgDark, bgDark],
+            stops: const [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ── Top bar: back + options ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 30),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    Text(
+                      'NOW PLAYING',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.more_horiz_rounded, color: Colors.white70, size: 24),
+                      onPressed: () => _showQueueBottomSheet(state, notifier),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Spacer(flex: 2),
+
+              // ── Circular artwork with progress ring ──
+              SizedBox(
+                width: ringSize,
+                height: ringSize,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Progress ring
+                    SizedBox(
+                      width: ringSize,
+                      height: ringSize,
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 3.0,
+                        backgroundColor: Colors.white.withOpacity(0.08),
+                        valueColor: AlwaysStoppedAnimation<Color>(accentColor.withOpacity(0.9)),
+                      ),
+                    ),
+                    // Album art circle
+                    Container(
+                      width: artSize,
+                      height: artSize,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: accentColor.withOpacity(0.25),
+                            blurRadius: 40,
+                            spreadRadius: 5,
+                          ),
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.4),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.network(
+                          track.artworkUrl,
+                          width: artSize,
+                          height: artSize,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: accentColor.withOpacity(0.3),
+                            child: Icon(Icons.music_note_rounded, color: Colors.white38, size: artSize * 0.4),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Spacer(flex: 1),
+
+              // ── Track title & artist ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Column(
+                  children: [
+                    Text(
+                      track.title,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      track.artist,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Time labels ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 48),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDuration(state.currentPosition),
+                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                    Text(
+                      _formatDuration(state.totalDuration),
+                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 28),
+
+              // ── Primary controls: favorite, prev, play/pause, next, options ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // Favorite
+                    IconButton(
+                      icon: Icon(
+                        isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: isFav ? accentColor : Colors.white54,
+                        size: 24,
+                      ),
+                      onPressed: () async {
+                        await StorageService.toggleFavoriteTrack(track);
+                        // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+                        (context as Element).markNeedsBuild();
+                      },
+                    ),
+                    // Previous
+                    IconButton(
+                      icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 36),
+                      onPressed: () => notifier.previousTrack(),
+                    ),
+                    // Play / Pause
+                    GestureDetector(
+                      onTap: () => notifier.togglePlay(),
+                      child: Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(color: Colors.white.withOpacity(0.15), blurRadius: 20, spreadRadius: 2),
+                          ],
+                        ),
+                        child: Icon(
+                          state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          color: bgDark,
+                          size: 38,
+                        ),
+                      ),
+                    ),
+                    // Next
+                    IconButton(
+                      icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 36),
+                      onPressed: () => notifier.nextTrack(),
+                    ),
+                    // Download / options
+                    IconButton(
+                      icon: const Icon(Icons.download_rounded, color: Colors.white54, size: 24),
+                      onPressed: () {
+                        DownloadService.instance.startDownload(track);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Downloading "${track.title}"...'), duration: const Duration(seconds: 2)),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ── Secondary controls: shuffle, queue, lyrics, repeat ──
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 48),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        Icons.shuffle_rounded,
+                        color: state.isShuffle ? accentColor : Colors.white30,
+                        size: 20,
+                      ),
+                      onPressed: () => notifier.toggleShuffle(),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.queue_music_rounded, color: Colors.white30, size: 20),
+                      onPressed: () => _showQueueBottomSheet(state, notifier),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.lyrics_rounded,
+                        color: (_lyricsResult != null && _lyricsResult!.hasLyrics) ? accentColor : Colors.white30,
+                        size: 20,
+                      ),
+                      onPressed: (_lyricsResult != null && _lyricsResult!.hasLyrics)
+                          ? () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => LyricsScreen(
+                                    track: track,
+                                    lyricsResult: _lyricsResult!,
+                                  ),
+                                ),
+                              );
+                            }
+                          : null,
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        state.repeatMode == RepeatMode.one
+                            ? Icons.repeat_one_rounded
+                            : Icons.repeat_rounded,
+                        color: state.repeatMode != RepeatMode.off ? accentColor : Colors.white30,
+                        size: 20,
+                      ),
+                      onPressed: () {
+                        final nextMode = {
+                          RepeatMode.off: RepeatMode.all,
+                          RepeatMode.all: RepeatMode.one,
+                          RepeatMode.one: RepeatMode.off,
+                        }[state.repeatMode]!;
+                        notifier.setRepeatMode(nextMode);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              const Spacer(flex: 1),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Skins Layout Rendering ───────────────────────────────────
 
   Widget _buildSkinStage(String skin, Track track, double angle, bool isDark, Color accentColor) {
+
     switch (skin) {
       case 'cd':
         return Center(

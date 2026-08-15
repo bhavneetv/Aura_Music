@@ -9,6 +9,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Load Version Properties
+        run: |
+          grep -v '^#' version.properties | grep '=' >> $GITHUB_ENV
+
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
@@ -29,7 +34,7 @@ jobs:
       # Prepares Generated.xcconfig, runs pod install, WITHOUT
       # attempting Flutter's own final assembly/signing-gated step
       - name: Prepare iOS project (config only, no build)
-        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+        run: flutter build ios --release --no-codesign --config-only --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
       - name: Archive via xcodebuild directly (bypasses Flutter's team check)
         run: |
@@ -75,6 +80,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: FlutterIpaExport.ipa
-          tag: v3.3
+          tag: ${{ env.RELEASE_TAG }}
           overwrite: true
-          body: "v3.3 released"
+          body: "${{ env.RELEASE_TAG }} released"

@@ -2,14 +2,15 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../version/version_service.dart';
 
 class UpdateService {
   /// Configure your GitHub Username and Repository Name here
   static const String githubOwner = 'bhavneetv';
   static const String githubRepo = 'Aura_Music';
 
-  /// Current App Version (Matches pubspec.yaml version)
-  static const String currentVersion = '3.3';
+  /// Current App Version (Dynamically read from version.properties via AppVersionService)
+  static String get currentVersion => AppVersionService.versionName;
 
   /// GitHub Releases API URL for latest release
   static String get _apiUrl =>

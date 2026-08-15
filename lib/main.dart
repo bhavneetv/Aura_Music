@@ -8,6 +8,7 @@ import 'routes/app_routes.dart';
 import 'themes/app_theme.dart';
 import 'services/storage/storage_service.dart';
 import 'services/audio/audio_handler.dart';
+import 'services/version/version_service.dart';
 
 final audioHandlerProvider = Provider<AudioHandler>((ref) => throw UnimplementedError());
 
@@ -19,6 +20,7 @@ void main() async {
     debugPrint('Could not load .env file: $e');
   }
   await StorageService.init();
+  await AppVersionService.init();
   final audioHandler = await initAudioHandler();
   
   runApp(

@@ -8,6 +8,7 @@ import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../equalizer/equalizer_screen.dart';
 import '../../services/update/update_service.dart';
+import '../../services/version/version_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -434,10 +435,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           () => _showSkinSelectionDialog(playbackNotifier),
         ),
         _buildSelectionTile(
+          'Player Screen Theme',
+          playbackState.playerScreenTheme == 'minimal_theme' ? 'MINIMAL' : 'NORMAL',
+          () => _showScreenThemeDialog(playbackNotifier),
+        ),
+        _buildSelectionTile(
           'Playback Speed',
           '${playbackState.playbackSpeed}x',
           () => _showPlaybackSpeedDialog(playbackNotifier),
         ),
+
         _buildSwitchTile(
           'Volume Normalization',
           'Dampen spikes for a balanced sound',
@@ -613,10 +620,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           trailing: Icon(Icons.qr_code_2_rounded, color: customBranding.accentColor),
           onTap: () => _showShareAppDialog(customBranding.accentColor),
         ),
-        const ListTile(
-          contentPadding: EdgeInsets.symmetric(horizontal: 24),
-          title: Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('v3.3 (Premium)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+          title: const Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          trailing: Text('${AppVersionService.releaseTag} (Premium)', style: const TextStyle(color: Colors.grey, fontSize: 13)),
         ),
         const ListTile(
           contentPadding: EdgeInsets.symmetric(horizontal: 24),
@@ -808,7 +815,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  void _showScreenThemeDialog(PlaybackNotifier notifier) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          title: const Text('Player Screen Theme', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('Normal'),
+                subtitle: const Text('Full player with all controls & lyrics', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                onTap: () {
+                  notifier.setPlayerScreenTheme('normal');
+                  Navigator.pop(context);
+                },
+              ),
+              ListTile(
+                title: const Text('Minimal'),
+                subtitle: const Text('Clean gradient layout with circular artwork', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                onTap: () {
+                  notifier.setPlayerScreenTheme('minimal_theme');
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _showPlaybackSpeedDialog(PlaybackNotifier notifier) {
+
     showDialog(
       context: context,
       builder: (context) {
