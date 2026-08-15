@@ -563,6 +563,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   Future<void> _streamTrack(Track track, {required int nonce}) async {
+    _trackLoadRetries = 0;
     triggerHaptic(HapticFeedbackType.selection);
     RecommendationEngine.instance.recordTrackStarted(track);
 
@@ -581,8 +582,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       return;
     }
 
-    if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
-      print('[AURA-PLAY] Empty/unresolved audioUrl for "${track.title}", resolving via AudioUrlResolver...');
+    // Always resolve fresh working URL if audioUrl is empty or is a JioSaavn CDN link that might be expired
+    if (audioUrl.isEmpty || audioUrl.contains('saavncdn.com') || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
+      print('[AURA-PLAY] Resolving fresh audioUrl for "${track.title}" (id: ${track.id})...');
       final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
       
       if (nonce != _playbackNonce) {
@@ -598,6 +600,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           updatedQueue[state.currentIndex] = track;
         }
         state = state.copyWith(queue: updatedQueue, currentTrack: track);
+        await _saveQueue();
       }
     }
 
@@ -797,15 +800,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id);
       if (localPath == null || !File(localPath).existsSync()) {
         try {
-          if (nextTrackItem.audioUrl.isEmpty) {
-            final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(nextTrackItem);
-            if (freshUrl != null && freshUrl.isNotEmpty) {
-              final List<Track> updatedQueue = List.from(state.queue);
-              if (nextIdx < updatedQueue.length) {
-                updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
-                state = state.copyWith(queue: updatedQueue);
-                _saveQueue();
-              }
+          final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(nextTrackItem, forceFresh: false);
+          if (freshUrl != null && freshUrl.isNotEmpty && freshUrl != nextTrackItem.audioUrl) {
+            final List<Track> updatedQueue = List.from(state.queue);
+            if (nextIdx < updatedQueue.length) {
+              updatedQueue[nextIdx] = nextTrackItem.copyWith(audioUrl: freshUrl);
+              state = state.copyWith(queue: updatedQueue);
+              _saveQueue();
             }
           }
         } catch (_) {}

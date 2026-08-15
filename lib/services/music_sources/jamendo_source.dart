@@ -6,6 +6,7 @@ import '../../models/track.dart';
 import '../storage/storage_service.dart';
 import '../recommendation/recommendation_engine.dart';
 import '../audio/audio_url_resolver.dart';
+import '../audio/des_cipher.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
@@ -367,44 +368,57 @@ class JamendoSource implements MusicSource {
         }
 
         String audioUrl = '';
-        final possibleUrlKeys = [item['downloadUrl'], item['download_url'], item['url'], item['media_url'], item['link']];
-        for (final val in possibleUrlKeys) {
-          if (val == null) continue;
-          if (val is List && val.isNotEmpty) {
-            // 1. Prefer 160kbps link for guaranteed CDN 200 OK playback
-            for (final d in val) {
-              String link = '';
-              String quality = '';
-              if (d is Map) {
-                link = d['url']?.toString() ?? d['link']?.toString() ?? '';
-                quality = (d['quality'] ?? '').toString();
-              } else if (d is String) {
-                link = d;
-              }
-              if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/') && (quality.contains('160') || link.contains('_160.'))) {
-                audioUrl = link;
-                break;
-              }
-            }
-            // 2. Fallback to any valid direct audio URL
-            if (audioUrl.isEmpty) {
+        
+        // Direct DES decryption if encrypted_media_url is present in item or item['more_info']
+        final moreInfo = item['more_info'] is Map ? item['more_info'] as Map : null;
+        final encUrl = (moreInfo != null ? moreInfo['encrypted_media_url'] : null) ?? item['encrypted_media_url'];
+        if (encUrl != null && encUrl.toString().isNotEmpty) {
+          final decrypted = DesCipher.decryptEcb(encUrl.toString(), '38346591');
+          if (decrypted != null && decrypted.startsWith('http')) {
+            audioUrl = decrypted.contains('_96.') ? decrypted.replaceAll('_96.', '_160.') : decrypted;
+          }
+        }
+
+        if (audioUrl.isEmpty) {
+          final possibleUrlKeys = [item['downloadUrl'], item['download_url'], item['url'], item['media_url'], item['link']];
+          for (final val in possibleUrlKeys) {
+            if (val == null) continue;
+            if (val is List && val.isNotEmpty) {
+              // 1. Prefer 160kbps link for guaranteed CDN 200 OK playback
               for (final d in val) {
                 String link = '';
+                String quality = '';
                 if (d is Map) {
                   link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+                  quality = (d['quality'] ?? '').toString();
                 } else if (d is String) {
                   link = d;
                 }
-                if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/')) {
+                if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/') && (quality.contains('160') || link.contains('_160.'))) {
                   audioUrl = link;
                   break;
                 }
               }
+              // 2. Fallback to any valid direct audio URL
+              if (audioUrl.isEmpty) {
+                for (final d in val) {
+                  String link = '';
+                  if (d is Map) {
+                    link = d['url']?.toString() ?? d['link']?.toString() ?? '';
+                  } else if (d is String) {
+                    link = d;
+                  }
+                  if (link.isNotEmpty && link.startsWith('http') && !link.contains('/song/')) {
+                    audioUrl = link;
+                    break;
+                  }
+                }
+              }
+              if (audioUrl.isNotEmpty) break;
+            } else if (val is String && val.startsWith('http') && !val.contains('/song/')) {
+              audioUrl = val;
+              break;
             }
-            if (audioUrl.isNotEmpty) break;
-          } else if (val is String && val.startsWith('http') && !val.contains('/song/')) {
-            audioUrl = val;
-            break;
           }
         }
 

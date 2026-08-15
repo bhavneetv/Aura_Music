@@ -1,20 +1,24 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../models/track.dart';
+import 'des_cipher.dart';
 
 /// Multi-strategy audio URL resolver.
-/// Primary strategy: Song ID lookup on saavn-api.vercel.app/song/[id]
-/// which decrypts and returns fresh 200 OK playable CDN URLs.
+/// Primary strategy: Direct JioSaavn API song details lookup + DES decryption
+/// with key 38346591 which yields live 200 OK CDN URLs.
 class AudioUrlResolver {
   static final AudioUrlResolver instance = AudioUrlResolver._();
   AudioUrlResolver._();
 
+  static const String _jiosaavnDesKey = '38346591';
+
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 3),
-    receiveTimeout: const Duration(seconds: 3),
-    sendTimeout: const Duration(seconds: 2),
+    connectTimeout: const Duration(seconds: 4),
+    receiveTimeout: const Duration(seconds: 4),
+    sendTimeout: const Duration(seconds: 3),
     headers: {
       'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
     },
   ));
 
@@ -29,26 +33,28 @@ class AudioUrlResolver {
   Future<String?> resolveAudioUrl(Track track, {bool forceFresh = false}) async {
     print('[AURA-RESOLVER] resolveAudioUrl for: "${track.title}" (id: ${track.id}) forceFresh=$forceFresh');
 
-    // Strategy 1: Original URL if it's already a direct CDN link
-    if (!forceFresh && _isDirectCdnLink(track.audioUrl)) {
-      print('[AURA-RESOLVER] Strategy 1: Using existing CDN link');
-      String url = track.audioUrl;
-      if (url.contains('saavncdn.com') && url.contains('_320.')) {
-        url = url.replaceAll('_320.', '_160.');
-      }
-      return url;
-    }
-
-    // Strategy 2: Direct Song ID lookup on working JioSaavn API mirrors
+    // Strategy 1: Direct Song ID lookup on official JioSaavn API with DES decryption
     if (track.id.isNotEmpty) {
       final songByIdUrl = await _tryGetSongById(track.id);
       if (songByIdUrl != null) {
-        print('[AURA-RESOLVER] Strategy 2 SUCCESS: Got live URL from song ID lookup');
+        print('[AURA-RESOLVER] Strategy 1 SUCCESS: Got live decrypted URL from song ID lookup');
         return songByIdUrl;
       }
     }
 
-    // Strategy 3: Re-search by title+artist on working search mirrors
+    // Strategy 2: Original URL if it's already a direct CDN link and not forceFresh
+    if (!forceFresh && _isDirectCdnLink(track.audioUrl)) {
+      print('[AURA-RESOLVER] Strategy 2: Checking existing CDN link');
+      String url = track.audioUrl;
+      if (url.contains('saavncdn.com') && url.contains('_320.')) {
+        url = url.replaceAll('_320.', '_160.');
+      }
+      if (await _isUrlPlayable(url)) {
+        return url;
+      }
+    }
+
+    // Strategy 3: Re-search by title+artist on official JioSaavn API & mirrors
     final candidates = await _collectCandidateUrls(track);
     if (candidates.isNotEmpty) {
       final validUrl = await _findFirstPlayableUrl(candidates);
@@ -77,7 +83,7 @@ class AudioUrlResolver {
     if (tracks.isEmpty) return [];
     final List<Track> resolved = [];
     for (final track in tracks) {
-      if (_isDirectCdnLink(track.audioUrl)) {
+      if (_isDirectCdnLink(track.audioUrl) && !track.audioUrl.contains('_320.')) {
         resolved.add(track);
       } else {
         final url = await resolveAudioUrl(track);
@@ -91,9 +97,32 @@ class AudioUrlResolver {
     return resolved;
   }
 
-  // ── Strategy 2: Song ID Lookup ──────────────────────────────────
+  // ── Strategy 1: Direct JioSaavn API Song ID Lookup + DES Decryption ──────────────
 
   Future<String?> _tryGetSongById(String trackId) async {
+    // 1. Primary: Direct JioSaavn official API + DES Decryption
+    try {
+      final directUrl = 'https://www.jiosaavn.com/api.php?__call=song.getDetails&pids=${Uri.encodeComponent(trackId)}&_format=json&_marker=0&api_version=4';
+      print('[AURA-RESOLVER] Trying direct JioSaavn API: $directUrl');
+      final response = await _dio.get(directUrl);
+      if (response.statusCode == 200 && response.data != null) {
+        dynamic data = response.data;
+        if (data is String) {
+          try { data = jsonDecode(data); } catch (_) {}
+        }
+        final cdnUrl = _extractAndDecryptFromJioSaavnData(data, trackId);
+        if (cdnUrl != null && cdnUrl.isNotEmpty) {
+          if (await _isUrlPlayable(cdnUrl)) {
+            print('[AURA-RESOLVER] ✓ Official JioSaavn DES Decrypted URL verified: $cdnUrl');
+            return cdnUrl;
+          }
+        }
+      }
+    } catch (e) {
+      print('[AURA-RESOLVER] Direct JioSaavn API error: $e');
+    }
+
+    // 2. Secondary: Fallback Vercel API mirrors
     final endpoints = [
       'https://saavn.sumit.co/api/songs?ids=$trackId',
       'https://jiosaavn-api-beta.vercel.app/songs?id=$trackId',
@@ -102,7 +131,7 @@ class AudioUrlResolver {
 
     for (final url in endpoints) {
       try {
-        print('[AURA-RESOLVER] Trying song ID lookup: $url');
+        print('[AURA-RESOLVER] Trying mirror song ID lookup: $url');
         final response = await _dio.get(url);
         if (response.statusCode == 200 && response.data != null) {
           final cdnUrl = _extractCdnUrlFromData(response.data);
@@ -110,11 +139,33 @@ class AudioUrlResolver {
             if (await _isUrlPlayable(cdnUrl)) {
               return cdnUrl;
             } else {
-              print('[AURA-RESOLVER] Strategy 2 CDN link expired (404/403): $cdnUrl');
+              print('[AURA-RESOLVER] Mirror CDN link expired (404/403): $cdnUrl');
             }
           }
         }
       } catch (_) {}
+    }
+    return null;
+  }
+
+  /// Helper to extract encrypted_media_url from official JioSaavn json response and decrypt it.
+  String? _extractAndDecryptFromJioSaavnData(dynamic data, String trackId) {
+    if (data is Map) {
+      final songObj = data[trackId] ?? (data['songs'] is List && (data['songs'] as List).isNotEmpty ? data['songs'][0] : null);
+      if (songObj is Map) {
+        final moreInfo = songObj['more_info'];
+        if (moreInfo is Map && moreInfo['encrypted_media_url'] != null) {
+          final encUrl = moreInfo['encrypted_media_url'].toString();
+          final decrypted = DesCipher.decryptEcb(encUrl, _jiosaavnDesKey);
+          if (decrypted != null && decrypted.startsWith('http')) {
+            // Upgrade 96kbps to 160kbps for optimal audio quality
+            if (decrypted.contains('_96.')) {
+              return decrypted.replaceAll('_96.', '_160.');
+            }
+            return decrypted;
+          }
+        }
+      }
     }
     return null;
   }
@@ -131,6 +182,38 @@ class AudioUrlResolver {
       queries.add(track.title.trim());
     }
 
+    // 1. Try official JioSaavn autocomplete search first
+    for (final q in queries) {
+      try {
+        final autoUrl = 'https://www.jiosaavn.com/api.php?__call=autocomplete.get&query=${Uri.encodeComponent(q)}&_format=json&_marker=0';
+        print('[AURA-RESOLVER] Searching official JioSaavn API for "$q"');
+        final response = await _dio.get(autoUrl);
+        if (response.statusCode == 200 && response.data != null) {
+          dynamic data = response.data;
+          if (data is String) {
+            try { data = jsonDecode(data); } catch (_) {}
+          }
+          if (data is Map && data['songs'] is Map && data['songs']['data'] is List) {
+            final songList = data['songs']['data'] as List;
+            for (final item in songList) {
+              if (item is Map && item['id'] != null) {
+                final matchedId = item['id'].toString();
+                final url = await _tryGetSongById(matchedId);
+                if (url != null && !candidates.contains(url)) {
+                  candidates.add(url);
+                }
+              }
+              if (candidates.length >= 3) break;
+            }
+          }
+        }
+      } catch (e) {
+        print('[AURA-RESOLVER] Official JioSaavn autocomplete search error: $e');
+      }
+      if (candidates.isNotEmpty) return candidates;
+    }
+
+    // 2. Fallback to Vercel API mirrors if official autocomplete returned nothing
     for (final mirror in _searchMirrors) {
       for (final q in queries) {
         try {
