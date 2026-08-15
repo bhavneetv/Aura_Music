@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
@@ -17,6 +19,7 @@ import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
 
 import '../../widgets/adaptive_navigation_bar.dart';
+import '../../widgets/ios_native_nav_bar.dart';
 import '../../services/update/update_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -735,7 +738,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Bottom Navigation Bar Widget - Supporting Default Floating Glass & OS Style (iOS Liquid Glass / Android M3)
+  // Bottom Navigation Bar Widget - Supporting Default Floating Glass Capsule & OS Native Style (iOS Liquid Glass on iOS / Android 16 M3 on Android)
   Widget _buildBottomNavigationBar(BuildContext context, Color accentColor, String navBarStyle) {
     return AdaptiveNavigationBar(
       selectedIndex: _currentTab,

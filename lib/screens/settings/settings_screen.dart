@@ -436,14 +436,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         _buildSelectionTile(
           'Player Screen Theme',
-          playbackState.playerScreenTheme == 'minimal_theme' ? 'MINIMAL' : 'NORMAL',
+          _getPlayerScreenThemeName(playbackState.playerScreenTheme),
           () => _showScreenThemeDialog(playbackNotifier),
         ),
         _buildSelectionTile(
           'Navigation Bar Style',
-          customBranding.navBarStyle == 'os_style'
-              ? 'OS STYLE (iOS Liquid Glass / Android M3)'
-              : 'DEFAULT (Floating Glass)',
+          (customBranding.navBarStyle == 'default') ? 'FLOATING GLASS CAPSULE ✨' : 'OS NATIVE STYLE 📱',
           () => _showNavigationBarStyleDialog(),
         ),
         _buildSelectionTile(
@@ -802,55 +800,93 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  String _getPlayerScreenThemeName(String theme) {
+    switch (theme) {
+      case 'minimal_theme':
+        return 'MINIMAL';
+      case 'android_11_theme':
+        return 'ANDROID 11';
+      case 'android_16_theme':
+        return 'ANDROID 16';
+      case 'apple_music_theme':
+        return 'APPLE MUSIC';
+      case 'normal':
+      default:
+        return 'NORMAL (CLASSIC)';
+    }
+  }
+
   void _showScreenThemeDialog(PlaybackNotifier notifier) {
+    final currentTheme = ref.read(playbackProvider).playerScreenTheme;
+
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Player Screen Theme', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text('Player Screen Theme', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(
+                RadioListTile<String>(
                   title: const Text('Normal (Classic)'),
                   subtitle: const Text('Full player with top centered title & controls', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onTap: () {
-                    notifier.setPlayerScreenTheme('normal');
-                    Navigator.pop(context);
+                  value: 'normal',
+                  groupValue: currentTheme,
+                  onChanged: (val) {
+                    if (val != null) {
+                      notifier.setPlayerScreenTheme(val);
+                      Navigator.pop(context);
+                    }
                   },
                 ),
-                ListTile(
+                RadioListTile<String>(
                   title: const Text('Android 11 Theme'),
                   subtitle: const Text('Classic Android 11 media card layout with circle knob', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onTap: () {
-                    notifier.setPlayerScreenTheme('android_11_theme');
-                    Navigator.pop(context);
+                  value: 'android_11_theme',
+                  groupValue: currentTheme,
+                  onChanged: (val) {
+                    if (val != null) {
+                      notifier.setPlayerScreenTheme(val);
+                      Navigator.pop(context);
+                    }
                   },
                 ),
-                ListTile(
+                RadioListTile<String>(
                   title: const Text('Android 16 Theme'),
                   subtitle: const Text('Minimalist layout with uppercase top title & dynamic palette', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onTap: () {
-                    notifier.setPlayerScreenTheme('android_16_theme');
-                    Navigator.pop(context);
+                  value: 'android_16_theme',
+                  groupValue: currentTheme,
+                  onChanged: (val) {
+                    if (val != null) {
+                      notifier.setPlayerScreenTheme(val);
+                      Navigator.pop(context);
+                    }
                   },
                 ),
-                ListTile(
+                RadioListTile<String>(
                   title: const Text('Apple Music Theme'),
                   subtitle: const Text('Full-screen blurred backdrop with sleek glass cards', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onTap: () {
-                    notifier.setPlayerScreenTheme('apple_music_theme');
-                    Navigator.pop(context);
+                  value: 'apple_music_theme',
+                  groupValue: currentTheme,
+                  onChanged: (val) {
+                    if (val != null) {
+                      notifier.setPlayerScreenTheme(val);
+                      Navigator.pop(context);
+                    }
                   },
                 ),
-                ListTile(
-                  title: const Text('Minimal'),
-                  subtitle: const Text('Clean gradient layout with circular artwork & ring', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onTap: () {
-                    notifier.setPlayerScreenTheme('minimal_theme');
-                    Navigator.pop(context);
+                RadioListTile<String>(
+                  title: const Text('Minimal Theme'),
+                  subtitle: const Text('Clean gradient layout with circular artwork & ring progress', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  value: 'minimal_theme',
+                  groupValue: currentTheme,
+                  onChanged: (val) {
+                    if (val != null) {
+                      notifier.setPlayerScreenTheme(val);
+                      Navigator.pop(context);
+                    }
                   },
                 ),
               ],
@@ -899,10 +935,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               RadioListTile<String>(
-                title: const Text('Default (Floating Glass)'),
-                subtitle: const Text('Custom sleek floating curved glass bar'),
-                value: 'default',
-                groupValue: currentStyle,
+                title: const Text('OS Native Style 📱'),
+                subtitle: const Text('iOS 26 Liquid Glass on iOS / Android 16 Material 3 on Android'),
+                value: 'os_style',
+                groupValue: (currentStyle == 'default') ? 'default' : 'os_style',
                 onChanged: (val) {
                   if (val != null) {
                     customNotifier.updateNavigationBarStyle(val);
@@ -911,10 +947,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 },
               ),
               RadioListTile<String>(
-                title: const Text('OS Style (Native System)'),
-                subtitle: const Text('iOS 26 Liquid Glass / Android 16 Material 3 stock bar'),
-                value: 'os_style',
-                groupValue: currentStyle,
+                title: const Text('Floating Glass Capsule ✨'),
+                subtitle: const Text('Custom sleek floating curved glass bar'),
+                value: 'default',
+                groupValue: (currentStyle == 'default') ? 'default' : 'os_style',
                 onChanged: (val) {
                   if (val != null) {
                     customNotifier.updateNavigationBarStyle(val);

@@ -287,14 +287,19 @@ class GlassBottomBar extends StatelessWidget {
                                       : (isDark ? Colors.white54 : Colors.black54),
                                 ),
                                 if (isSelected) ...[
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    item.label,
-                                    style: TextStyle(
-                                      color: effectiveAccent,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      fontFamily: 'Outfit',
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      item.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
+                                      style: TextStyle(
+                                        color: effectiveAccent,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                        fontFamily: 'Outfit',
+                                      ),
                                     ),
                                   ),
                                 ],

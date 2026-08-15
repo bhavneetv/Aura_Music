@@ -70,7 +70,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
   // ── 1. iOS 26 Stock "Liquid Glass" Navigation Bar ─────────────────────────
   Widget _buildIOSLiquidGlassNavigationBar(BuildContext context, bool isDark) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final navBgColor = (isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7)).withValues(alpha: 0.68);
+    final navBgColor = (isDark ? const Color(0xFF141416) : const Color(0xFFF2F2F7)).withValues(alpha: 0.32);
 
     return Container(
       decoration: BoxDecoration(
@@ -208,26 +208,79 @@ class AdaptiveNavigationBar extends StatelessWidget {
 
   // ── 3. Default App Floating Curved Glass Navigation Bar ──────────────────
   Widget _buildDefaultFloatingGlassBar(BuildContext context, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
-      child: GlassBottomBar(
-        items: destinations.map((d) {
-          final iconData = _getAndroidIcon(d.icon, isSelected: false);
-          return GlassBarItem(
-            icon: iconData,
-            label: d.label,
-            nativeSymbolName: d.icon is String ? d.icon as String : null,
-          );
-        }).toList(),
-        currentIndex: selectedIndex,
-        onTap: (index) {
-          triggerHaptic(HapticFeedbackType.light);
-          onDestinationSelected(index);
-        },
-        style: GlassBottomNavStyle(
-          accent: accentColor,
-          height: 60,
-          actionButtonMode: GlassActionButtonMode.nativeLiquidGlassOnIOS26,
+    return Container(
+      margin: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+      decoration: BoxDecoration(
+        color: (isDark ? const Color(0xFF141416) : Colors.white).withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: List.generate(destinations.length, (index) {
+                final isSelected = selectedIndex == index;
+                final dest = destinations[index];
+                final IconData displayIcon = _getAndroidIcon(
+                  isSelected ? (dest.selectedIcon ?? dest.icon) : dest.icon,
+                  isSelected: isSelected,
+                );
+
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      triggerHaptic(HapticFeedbackType.light);
+                      onDestinationSelected(index);
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedScale(
+                          scale: isSelected ? 1.08 : 1.0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          child: Icon(
+                            displayIcon,
+                            color: isSelected ? accentColor : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          dest.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isSelected ? accentColor : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 11,
+                            fontFamily: 'Outfit',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
         ),
       ),
     );
