@@ -580,10 +580,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       return;
     }
 
-    // Always resolve fresh working URL if audioUrl is empty or is a JioSaavn CDN link that might be expired
-    if (audioUrl.isEmpty || audioUrl.contains('saavncdn.com') || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
-      print('[AURA-PLAY] Resolving fresh audioUrl for "${track.title}" (id: ${track.id})...');
-      final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+    // Only resolve fresh working URL if audioUrl is completely empty or invalid
+    if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
+      print('[AURA-PLAY] Resolving audioUrl for "${track.title}" (id: ${track.id})...');
+      final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: false);
       
       if (nonce != _playbackNonce) {
         print('[AURA-PLAY] Stale resolution for "${track.title}" (user changed song), discarding');

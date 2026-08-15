@@ -198,11 +198,20 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
 
                     // Play/Pause button
                     IconButton(
-                      icon: Icon(
-                        state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                        color: ref.watch(customizationProvider).accentColor,
-                        size: 28,
-                      ),
+                      icon: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                valueColor: AlwaysStoppedAnimation<Color>(ref.watch(customizationProvider).accentColor),
+                              ),
+                            )
+                          : Icon(
+                              state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                              color: ref.watch(customizationProvider).accentColor,
+                              size: 28,
+                            ),
                       onPressed: () {
                         notifier.togglePlay();
                       },

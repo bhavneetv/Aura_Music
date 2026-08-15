@@ -48,7 +48,7 @@ jobs:
         continue-on-error: true
 
       - name: Build Release APK
-        run: flutter build apk --release --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+        run: flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
       - name: Verify APK
         run: ls -lh build/app/outputs/flutter-apk/

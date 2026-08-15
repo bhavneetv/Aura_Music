@@ -867,11 +867,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))
                             ],
                           ),
-                          child: Icon(
-                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                            color: isDark ? Colors.black : Colors.white,
-                            size: 36,
-                          ),
+                          child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                              ? Center(
+                                  child: SizedBox(
+                                    width: 26,
+                                    height: 26,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                  color: isDark ? Colors.black : Colors.white,
+                                  size: 36,
+                                ),
                         ),
                       ),
                       IconButton(
@@ -1668,11 +1679,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                   BoxShadow(color: accentColor.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4)),
                                 ],
                               ),
-                              child: Icon(
-                                state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                color: isDark ? Colors.black : Colors.white,
-                                size: 32,
-                              ),
+                              child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                                  ? Center(
+                                      child: SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                        ),
+                                      ),
+                                    )
+                                  : Icon(
+                                      state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                      color: isDark ? Colors.black : Colors.white,
+                                      size: 32,
+                                    ),
                             ),
                           ),
                           IconButton(
@@ -1904,11 +1926,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           color: accentColor,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
-                          state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                          color: isDark ? Colors.black : Colors.white,
-                          size: 36,
-                        ),
+                        child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                            ? Center(
+                                child: SizedBox(
+                                  width: 26,
+                                  height: 26,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                  ),
+                                ),
+                              )
+                            : Icon(
+                                state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                color: isDark ? Colors.black : Colors.white,
+                                size: 36,
+                              ),
                       ),
                     ),
                     IconButton(
@@ -2136,11 +2169,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             color: accentColor,
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(
-                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                            color: isDark ? Colors.black : Colors.white,
-                            size: 36,
-                          ),
+                          child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                              ? Center(
+                                  child: SizedBox(
+                                    width: 26,
+                                    height: 26,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                  color: isDark ? Colors.black : Colors.white,
+                                  size: 36,
+                                ),
                         ),
                       ),
                       IconButton(
@@ -2190,9 +2234,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     final ringSize = artSize + 28;
     final progress = state.progress.clamp(0.0, 1.0);
 
-    // Warm deep gradient derived from album accent color
-    final bgDark = HSLColor.fromColor(accentColor).withLightness(0.08).withSaturation(0.38).toColor();
-    final bgMid = HSLColor.fromColor(accentColor).withLightness(0.18).withSaturation(0.42).toColor();
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.white.withValues(alpha: 0.65) : Colors.black.withValues(alpha: 0.65);
+    final iconSubColor = isDark ? Colors.white54 : Colors.black45;
+
+    // Gradient derived from album accent color with light/dark theme adaptation
+    final bgDark = HSLColor.fromColor(accentColor).withLightness(isDark ? 0.08 : 0.94).withSaturation(0.38).toColor();
+    final bgMid = HSLColor.fromColor(accentColor).withLightness(isDark ? 0.18 : 0.86).withSaturation(0.42).toColor();
 
     return Scaffold(
       backgroundColor: bgDark,
@@ -2219,11 +2267,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 28),
+                        icon: Icon(Icons.keyboard_arrow_down_rounded, color: textColor.withValues(alpha: 0.8), size: 28),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.more_horiz_rounded, color: Colors.white70, size: 24),
+                        icon: Icon(Icons.more_horiz_rounded, color: textColor.withValues(alpha: 0.8), size: 24),
                         onPressed: () => _showQueueBottomSheet(state, notifier),
                       ),
                     ],
@@ -2240,8 +2288,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: textColor,
                       fontSize: 26,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
@@ -2260,7 +2308,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.65),
+                      color: subTextColor,
                       fontSize: 16,
                       fontWeight: FontWeight.w400,
                     ),
@@ -2273,7 +2321,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 Text(
                   '${_formatDuration(state.currentPosition)}   |   ${_formatDuration(state.totalDuration)}',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
+                    color: subTextColor,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.2,
@@ -2321,7 +2369,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           painter: _ArcProgressPainter(
                             progress: _isDraggingProgress ? _dragProgressValue.clamp(0.0, 1.0) : progress,
                             activeColor: accentColor.withValues(alpha: 0.95),
-                            inactiveColor: Colors.white.withValues(alpha: 0.2),
+                            inactiveColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.2),
                           ),
                         ),
                         // Circular Album Artwork
@@ -2337,7 +2385,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 spreadRadius: 4,
                               ),
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.45),
+                                color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.2),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               ),
@@ -2351,7 +2399,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 color: accentColor.withValues(alpha: 0.3),
-                                child: Icon(Icons.music_note_rounded, color: Colors.white38, size: artSize * 0.4),
+                                child: Icon(Icons.music_note_rounded, color: textColor.withValues(alpha: 0.4), size: artSize * 0.4),
                               ),
                             ),
                           ),
@@ -2372,13 +2420,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       IconButton(
                         icon: Icon(
                           state.isShuffle ? Icons.shuffle_rounded : Icons.shuffle_rounded,
-                          color: state.isShuffle ? accentColor : Colors.white54,
+                          color: state.isShuffle ? accentColor : iconSubColor,
                           size: 22,
                         ),
                         onPressed: () => notifier.toggleShuffle(),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 38),
+                        icon: Icon(Icons.skip_previous_rounded, color: textColor, size: 38),
                         onPressed: () => notifier.previousTrack(),
                       ),
                       GestureDetector(
@@ -2397,21 +2445,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               ),
                             ],
                           ),
-                          child: Icon(
-                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                            color: isDark ? Colors.black : Colors.white,
-                            size: 36,
-                          ),
+                          child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
+                              ? Center(
+                                  child: SizedBox(
+                                    width: 26,
+                                    height: 26,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                  color: isDark ? Colors.black : Colors.white,
+                                  size: 36,
+                                ),
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 38),
+                        icon: Icon(Icons.skip_next_rounded, color: textColor, size: 38),
                         onPressed: () => notifier.nextTrack(),
                       ),
                       IconButton(
                         icon: Icon(
                           isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                          color: isFav ? Colors.redAccent : Colors.white54,
+                          color: isFav ? Colors.redAccent : iconSubColor,
                           size: 24,
                         ),
                         onPressed: () async {

@@ -96,8 +96,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   AudioPlayer get player => _activePlayer;
 
-  void Function()? onNextRequested;
-  void Function()? onPreviousRequested;
+  Future<void> Function()? onNextRequested;
+  Future<void> Function()? onPreviousRequested;
 
   // ── Audio Controls ─────────────────────────────────────────
 
@@ -133,7 +133,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   @override
   Future<void> skipToNext() async {
     if (onNextRequested != null) {
-      onNextRequested!();
+      await onNextRequested!();
     } else {
       await customAction('next');
     }
@@ -142,7 +142,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   @override
   Future<void> skipToPrevious() async {
     if (onPreviousRequested != null) {
-      onPreviousRequested!();
+      await onPreviousRequested!();
     } else {
       await customAction('previous');
     }
@@ -168,15 +168,13 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     'Referer': 'https://www.jiosaavn.com/',
   };
 
-  /// Forcefully resets both players to a clean idle state.
-  /// Called before loading a new track to prevent stuck completed/error states.
+  /// Resets fade player and volumes without stopping active player to preserve iOS AVAudioSession in background.
   Future<void> resetForNewTrack() async {
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
 
     try { await _fadePlayer.stop(); } catch (_) {}
     try { await _fadePlayer.setVolume(1.0); } catch (_) {}
-    try { await _activePlayer.stop(); } catch (_) {}
     try { await _activePlayer.setVolume(1.0); } catch (_) {}
   }
 
