@@ -12,7 +12,7 @@ Future<AudioHandler> initAudioHandler() async {
     config: AudioServiceConfig(
       androidNotificationChannelId: 'com.example.music_app.channel.audio',
       androidNotificationChannelName: 'Aura Vinyl Playback',
-      androidNotificationOngoing: false,
+      androidNotificationOngoing: true,
       androidShowNotificationBadge: true,
       androidStopForegroundOnPause: true,
       androidNotificationIcon: 'mipmap/ic_launcher',

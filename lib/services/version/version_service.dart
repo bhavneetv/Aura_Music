@@ -23,8 +23,8 @@ class AppVersionService {
           if (key == 'RELEASE_NAME') releaseName = val;
         }
       }
-    } catch (e) {
-      print('[AURA-VERSION] Failed to load version.properties asset: $e');
+    } catch (_) {
+      // Fall back to default static values if asset is not yet bundled in hot restart
     }
   }
 }

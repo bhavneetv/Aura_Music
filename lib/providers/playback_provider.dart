@@ -290,7 +290,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             eventName: 'AUTO_ADVANCE_TRIGGERED',
             error: 'nonce=$currentNonce, _isTransitioning=$_isTransitioning',
           );
-          Future.microtask(() => nextTrack(isAutoAdvance: true));
+          nextTrack(isAutoAdvance: true);
         }
       }
     });

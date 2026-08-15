@@ -12,6 +12,8 @@ import 'services/version/version_service.dart';
 
 final audioHandlerProvider = Provider<AudioHandler>((ref) => throw UnimplementedError());
 
+AudioHandler? _audioHandlerInstance;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -21,12 +23,13 @@ void main() async {
   }
   await StorageService.init();
   await AppVersionService.init();
-  final audioHandler = await initAudioHandler();
+  
+  _audioHandlerInstance ??= await initAudioHandler();
   
   runApp(
     ProviderScope(
       overrides: [
-        audioHandlerProvider.overrideWithValue(audioHandler),
+        audioHandlerProvider.overrideWithValue(_audioHandlerInstance!),
       ],
       child: const MyApp(),
     ),
