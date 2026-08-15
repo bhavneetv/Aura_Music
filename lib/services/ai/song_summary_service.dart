@@ -70,6 +70,7 @@ class SongSummaryService {
     required String artist,
     required String album,
     required String genre,
+    String? lyricsText,
     bool forceRefresh = false,
   }) async {
     // Read user's summary language preference ('en' -> English, 'hi' -> Hindi)
@@ -94,6 +95,7 @@ class SongSummaryService {
         artist: artist,
         album: album,
         genre: genre,
+        lyricsText: lyricsText,
         outputLanguage: summaryLangName,
       );
 
@@ -123,27 +125,34 @@ class SongSummaryService {
     required String artist,
     required String album,
     required String genre,
+    String? lyricsText,
     required String outputLanguage,
   }) async {
+    String lyricsBlock = '';
+    if (lyricsText != null && lyricsText.trim().isNotEmpty) {
+      lyricsBlock = '\nFULL LYRICS OF THE SONG:\n$lyricsText\n';
+    }
+
     final prompt = '''You are a master music critic and cultural storyteller.
 Analyze the song "$title" by $artist (Album: "$album", Genre/Language: "$genre").
-Provide a concise, high-quality narrative summary of the song's theme and story in $outputLanguage.
+$lyricsBlock
+Provide a comprehensive, complete narrative summary of the ENTIRE song from beginning to end in $outputLanguage.
 
 CRITICAL INSTRUCTIONS:
-- Write a short 3-4 sentence summary of the song's theme and story.
-- Do NOT include or reproduce any actual lyric lines. Do NOT go line-by-line. This must read as a summary, not a transcription.
-- Do NOT just restate the title and artist in different words.
+- Explain the FULL story of the song from the opening verses through the middle build-up to the climax and conclusion. Do NOT summarize only half the song or stop mid-way!
+- Provide a detailed 5-8 sentence complete narrative summary covering all parts and emotional shifts of the full lyrics.
+- Explain what the artist/singer is communicating to the listener across the whole track.
 
 Provide:
-1. **Theme**: Concise 3-4 sentence narrative summary of the theme and story.
-2. **Emotions**: 3-4 specific emotional tones (e.g., Nostalgic, Bittersweet, Triumphant).
-3. **Message**: Core philosophy or underlying message (2 sentences).
-4. **Cultural Notes**: Cinematic context, album, or style notes (1-2 sentences).
+1. **Theme**: Full complete narrative summary covering the entire song's story, verses, chorus, and ending (5-8 detailed sentences).
+2. **Emotions**: 4-6 specific emotional progression tones across the song (e.g. Nostalgic, Melancholic, Passionate, Triumphant).
+3. **Message**: Deep core philosophy or message of the full song (2-3 sentences).
+4. **Cultural Notes**: Cinematic context, lyrical metaphors, album, or musical style notes (2 sentences).
 
 Format your response EXACTLY as:
-THEME: [your 3-4 sentence summary]
+THEME: [your full complete 5-8 sentence narrative summary of the entire song]
 EMOTIONS: [comma-separated emotions list]
-MESSAGE: [your message text]
+MESSAGE: [your deep message text]
 CULTURAL: [cultural/cinematic context]''';
 
     final (text, _) = await AiService.instance.generate(prompt);

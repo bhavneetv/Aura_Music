@@ -1062,12 +1062,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       return;
     }
 
+    String? lyricsText;
+    if (_lyricsResult != null) {
+      if (_lyricsResult!.synced != null && _lyricsResult!.synced!.isNotEmpty) {
+        lyricsText = _lyricsResult!.synced!.map((l) => l.text).join('\n');
+      } else if (_lyricsResult!.plain != null && _lyricsResult!.plain!.isNotEmpty) {
+        lyricsText = _lyricsResult!.plain;
+      }
+    }
+
     SongSummaryService.instance.getSummary(
       trackId: track.id,
       title: track.title,
       artist: track.artist,
       album: track.album,
       genre: track.genre,
+      lyricsText: lyricsText,
       forceRefresh: forceRefresh,
     ).then((summary) {
       final currentTrackId = ref.read(playbackProvider).currentTrack?.id;
