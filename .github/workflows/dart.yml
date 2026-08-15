@@ -18,11 +18,8 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Setup CocoaPods & Dependencies
-        run: |
-          flutter pub get
-          cd ios
-          pod install --repo-update
+      - name: Setup Dependencies
+        run: flutter pub get
 
       - name: Create .env File from Secrets
         run: |
