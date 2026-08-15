@@ -822,26 +822,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return AlertDialog(
           backgroundColor: Theme.of(context).cardColor,
           title: const Text('Player Screen Theme', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('Normal'),
-                subtitle: const Text('Full player with all controls & lyrics', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                onTap: () {
-                  notifier.setPlayerScreenTheme('normal');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Minimal'),
-                subtitle: const Text('Clean gradient layout with circular artwork', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                onTap: () {
-                  notifier.setPlayerScreenTheme('minimal_theme');
-                  Navigator.pop(context);
-                },
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: const Text('Normal (Classic)'),
+                  subtitle: const Text('Full player with top centered title & controls', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  onTap: () {
+                    notifier.setPlayerScreenTheme('normal');
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  title: const Text('Android 11 Theme'),
+                  subtitle: const Text('Classic Android 11 media card layout with circle knob', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  onTap: () {
+                    notifier.setPlayerScreenTheme('android_11_theme');
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  title: const Text('Android 16 Theme'),
+                  subtitle: const Text('Minimalist layout with uppercase top title & dynamic palette', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  onTap: () {
+                    notifier.setPlayerScreenTheme('android_16_theme');
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  title: const Text('Apple Music Theme'),
+                  subtitle: const Text('Full-screen blurred backdrop with sleek glass cards', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  onTap: () {
+                    notifier.setPlayerScreenTheme('apple_music_theme');
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  title: const Text('Minimal'),
+                  subtitle: const Text('Clean gradient layout with circular artwork & ring', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  onTap: () {
+                    notifier.setPlayerScreenTheme('minimal_theme');
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
