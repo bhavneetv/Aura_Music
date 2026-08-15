@@ -601,52 +601,157 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   }
 
   void _showDownloadsDialog() {
-    final downloaded = DownloadService.instance.getDownloadedTracksList();
+    final downloadedTracks = DownloadService.instance.getDownloadedTracksList();
+    final downloadedPlaylists = StorageService.getDownloadedPlaylists();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = ref.read(customizationProvider).accentColor;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+      ),
       builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Downloaded Tracks (Offline)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-              const SizedBox(height: 12),
-              Expanded(
-                child: downloaded.isEmpty
-                    ? const Center(child: Text('No downloaded tracks yet.', style: TextStyle(color: Colors.grey)))
-                    : ListView.builder(
-                        itemCount: downloaded.length,
-                        itemBuilder: (context, index) {
-                          final track = downloaded[index];
-                          return ListTile(
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Image.network(track.artworkUrl, width: 40, height: 40, fit: BoxFit.cover),
-                            ),
-                            title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                            subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
-                              onPressed: () async {
-                                await DownloadService.instance.deleteDownload(track.id);
-                                Navigator.pop(context);
-                                _showDownloadsDialog();
+        return DefaultTabController(
+          length: 2,
+          child: Container(
+            height: MediaQuery.of(context).size.height * 0.75,
+            padding: const EdgeInsets.only(top: 16, left: 16, right: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Downloads (Offline)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit'),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                TabBar(
+                  indicatorColor: accentColor,
+                  labelColor: accentColor,
+                  unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
+                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  tabs: [
+                    Tab(text: 'Tracks (${downloadedTracks.length})'),
+                    Tab(text: 'Playlists (${downloadedPlaylists.length})'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      // ── Tab 1: Offline Tracks ──
+                      downloadedTracks.isEmpty
+                          ? const Center(child: Text('No downloaded tracks yet.', style: TextStyle(color: Colors.grey)))
+                          : ListView.builder(
+                              itemCount: downloadedTracks.length,
+                              itemBuilder: (context, index) {
+                                final track = downloadedTracks[index];
+                                return ListTile(
+                                  leading: ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.network(
+                                      track.artworkUrl,
+                                      width: 40,
+                                      height: 40,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        width: 40, height: 40, color: Colors.grey.shade800,
+                                        child: const Icon(Icons.music_note_rounded, size: 20),
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                    onPressed: () async {
+                                      await DownloadService.instance.deleteDownload(track.id);
+                                      Navigator.pop(context);
+                                      _showDownloadsDialog();
+                                    },
+                                  ),
+                                  onTap: () {
+                                    ref.read(playbackProvider.notifier).playTrack(track);
+                                    Navigator.pop(context);
+                                  },
+                                );
                               },
                             ),
-                            onTap: () {
-                              ref.read(playbackProvider.notifier).playTrack(track);
-                              Navigator.pop(context);
-                            },
-                          );
-                        },
-                      ),
-              ),
-            ],
+
+                      // ── Tab 2: Offline Playlists ──
+                      downloadedPlaylists.isEmpty
+                          ? const Center(child: Text('No downloaded playlists yet.', style: TextStyle(color: Colors.grey)))
+                          : ListView.builder(
+                              itemCount: downloadedPlaylists.length,
+                              itemBuilder: (context, index) {
+                                final playlist = downloadedPlaylists[index];
+                                final List rawTracks = playlist['tracks'] ?? [];
+                                final List<Track> playlistTracks = rawTracks.map((item) {
+                                  final m = Map<String, dynamic>.from(item as Map);
+                                  return Track(
+                                    id: m['id']?.toString() ?? '',
+                                    title: m['title']?.toString() ?? 'Track',
+                                    artist: m['artist']?.toString() ?? 'Unknown Artist',
+                                    album: m['album']?.toString() ?? 'Offline',
+                                    duration: m['duration']?.toString() ?? '3:30',
+                                    artworkUrl: m['artworkUrl']?.toString() ?? '',
+                                    audioUrl: m['audioUrl']?.toString() ?? '',
+                                    genre: m['genre']?.toString() ?? '',
+                                  );
+                                }).toList();
+
+                                return ListTile(
+                                  leading: Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: accentColor.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(Icons.download_done_rounded, color: accentColor, size: 24),
+                                  ),
+                                  title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  subtitle: Text('${playlistTracks.length} songs downloaded offline'),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(Icons.play_circle_fill_rounded, color: accentColor, size: 30),
+                                        onPressed: () {
+                                          if (playlistTracks.isNotEmpty) {
+                                            ref.read(playbackProvider.notifier).playCustomQueue(playlistTracks, initialIndex: 0);
+                                            Navigator.pop(context);
+                                          }
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                        onPressed: () async {
+                                          await StorageService.deleteDownloadedPlaylist(playlist['name']);
+                                          Navigator.pop(context);
+                                          _showDownloadsDialog();
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },

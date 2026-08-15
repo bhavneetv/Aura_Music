@@ -44,6 +44,12 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       },
     );
 
+    await StorageService.registerDownloadedPlaylist(
+      _playlist['name'] ?? 'Custom Playlist',
+      _playlist['description'] ?? '',
+      _playlistTracks,
+    );
+
     if (mounted) {
       setState(() {
         _isDownloadingPlaylist = false;

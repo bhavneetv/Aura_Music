@@ -518,6 +518,49 @@ class StorageService {
     }
   }
 
+  // ── Downloaded Playlists ────────────────────────────────────
+
+  static List<Map<String, dynamic>> getDownloadedPlaylists() {
+    final box = Hive.box(_downloadsBox);
+    final raw = box.get('downloaded_playlists');
+    if (raw == null) return [];
+    try {
+      final decoded = jsonDecode(raw.toString()) as List;
+      return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> registerDownloadedPlaylist(String name, String description, List<Track> tracks) async {
+    final box = Hive.box(_downloadsBox);
+    final playlists = getDownloadedPlaylists();
+    playlists.removeWhere((p) => p['name'] == name);
+    playlists.insert(0, {
+      'name': name,
+      'description': description,
+      'downloadedAt': DateTime.now().toIso8601String(),
+      'tracks': tracks.map((t) => {
+        'id': t.id,
+        'title': t.title,
+        'artist': t.artist,
+        'album': t.album,
+        'duration': t.duration,
+        'artworkUrl': t.artworkUrl,
+        'genre': t.genre,
+        'audioUrl': StorageService.getDownloadedTrackPath(t.id) ?? t.audioUrl,
+      }).toList(),
+    });
+    await box.put('downloaded_playlists', jsonEncode(playlists));
+  }
+
+  static Future<void> deleteDownloadedPlaylist(String name) async {
+    final box = Hive.box(_downloadsBox);
+    final playlists = getDownloadedPlaylists();
+    playlists.removeWhere((p) => p['name'] == name);
+    await box.put('downloaded_playlists', jsonEncode(playlists));
+  }
+
   // ── Playback Queue Box ──────────────────────────────────────
 
   static Map<String, dynamic>? getSavedQueueState() {

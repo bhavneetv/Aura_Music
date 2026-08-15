@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../storage/storage_service.dart';
+import '../audio/audio_url_resolver.dart';
 import '../../models/track.dart';
 
 class DownloadTask {
@@ -83,27 +84,22 @@ class DownloadService extends ChangeNotifier {
 
       // Download audio URL
       String url = track.audioUrl;
-      if (url.isEmpty || url.startsWith('file://')) {
-        for (final baseUrl in ['https://saavn.sumit.co/api', 'https://jiosaavn-api-beta.vercel.app']) {
-          try {
-            final res = await _dio.get('$baseUrl/search/songs?query=${Uri.encodeComponent("${track.title} ${track.artist}")}');
-            final data = res.data;
-            List? results;
-            if (data != null && data['data'] != null) {
-              results = data['data'] is Map ? data['data']['results'] as List? : data['data'] as List?;
-            } else if (data != null && data['results'] != null) {
-              results = data['results'] as List?;
-            }
-            if (results != null && results.isNotEmpty) {
-              final downloads = results.first['downloadUrl'] as List?;
-              if (downloads != null && downloads.isNotEmpty) {
-                final last = downloads.last;
-                url = last is Map ? (last['url']?.toString() ?? last['link']?.toString() ?? '') : last.toString();
-                if (url.isNotEmpty) break;
-              }
-            }
-          } catch (_) {}
-        }
+      if (url.isEmpty || url.startsWith('file://') || url.contains('saavncdn.com')) {
+        try {
+          final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: false);
+          if (resolved != null && resolved.isNotEmpty) {
+            url = resolved;
+          }
+        } catch (_) {}
+      }
+
+      if (url.isEmpty) {
+        try {
+          final resolvedFresh = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+          if (resolvedFresh != null && resolvedFresh.isNotEmpty) {
+            url = resolvedFresh;
+          }
+        } catch (_) {}
       }
 
       if (url.isEmpty) {
