@@ -69,95 +69,23 @@ class AdaptiveNavigationBar extends StatelessWidget {
 
   // ── 1. iOS 26 Stock "Liquid Glass" Navigation Bar ─────────────────────────
   Widget _buildIOSLiquidGlassNavigationBar(BuildContext context, bool isDark) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final navBgColor = (isDark ? const Color(0xFF141416) : const Color(0xFFF2F2F7)).withValues(alpha: 0.32);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: navBgColor,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? Colors.white.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.70),
-            width: 0.8,
-          ),
-        ),
-      ),
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-          child: Stack(
-            children: [
-              // Liquid Glass Specular Highlight Refraction Layer
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white.withValues(alpha: isDark ? 0.12 : 0.40),
-                        Colors.transparent,
-                      ],
-                      stops: const [0.0, 0.35],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Tab Bar Content
-              Padding(
-                padding: EdgeInsets.only(top: 8, bottom: mathMax(bottomPadding, 6)),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: List.generate(destinations.length, (index) {
-                    final isSelected = selectedIndex == index;
-                    final dest = destinations[index];
-
-                    final IconData displayIcon = isSelected
-                        ? _getIOSIcon(dest.selectedIcon ?? dest.icon, isSelected: true, isSearch: dest.isSearch)
-                        : _getIOSIcon(dest.icon, isSelected: false, isSearch: dest.isSearch);
-
-                    final Color itemColor = isSelected
-                        ? accentColor
-                        : (isDark ? Colors.white.withValues(alpha: 0.45) : Colors.black.withValues(alpha: 0.45));
-
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          triggerHaptic(HapticFeedbackType.light);
-                          onDestinationSelected(index);
-                        },
-                        behavior: HitTestBehavior.opaque,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            AnimatedScale(
-                              scale: isSelected ? 1.08 : 1.0,
-                              duration: const Duration(milliseconds: 200),
-                              curve: Curves.easeOutCubic,
-                              child: Icon(displayIcon, size: 24, color: itemColor),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              dest.label,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                color: itemColor,
-                                letterSpacing: -0.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return CupertinoTabBar(
+      currentIndex: selectedIndex,
+      onTap: (index) {
+        triggerHaptic(HapticFeedbackType.light);
+        onDestinationSelected(index);
+      },
+      activeColor: accentColor,
+      inactiveColor: isDark ? CupertinoColors.inactiveGray : CupertinoColors.systemGrey,
+      backgroundColor: (isDark ? const Color(0xFF141416) : const Color(0xFFF2F2F7)).withValues(alpha: 0.65),
+      items: List.generate(destinations.length, (index) {
+        final dest = destinations[index];
+        return BottomNavigationBarItem(
+          icon: Icon(_getIOSIcon(dest.icon, isSelected: false, isSearch: dest.isSearch), size: 24),
+          activeIcon: Icon(_getIOSIcon(dest.selectedIcon ?? dest.icon, isSelected: true, isSearch: dest.isSearch), size: 24),
+          label: dest.label,
+        );
+      }),
     );
   }
 
@@ -305,6 +233,4 @@ class AdaptiveNavigationBar extends StatelessWidget {
     }
     return isSelected ? Icons.circle : Icons.circle_outlined;
   }
-
-  double mathMax(double a, double b) => a > b ? a : b;
 }

@@ -14,7 +14,7 @@ Future<AudioHandler> initAudioHandler() async {
       androidNotificationChannelName: 'Aura Vinyl Playback',
       androidNotificationOngoing: true,
       androidShowNotificationBadge: true,
-      androidStopForegroundOnPause: true,
+      androidStopForegroundOnPause: false,
       androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
@@ -200,6 +200,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         currentTrackId: track.id,
         overrideAudioSource: track.audioUrl,
       );
+
+      try {
+        final session = await AudioSession.instance;
+        await session.setActive(true);
+      } catch (_) {}
 
       // Full reset of both players to prevent stuck completed/error states
       await resetForNewTrack();

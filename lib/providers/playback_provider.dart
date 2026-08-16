@@ -172,9 +172,18 @@ class _TransitionLock {
   Completer<void>? _completer;
 
   Future<void> acquire() async {
+    final stopwatch = Stopwatch()..start();
     while (_isLocked) {
+      if (stopwatch.elapsedMilliseconds > 3000) {
+        print('[AURA-PLAY] Lock acquire timeout, breaking lock');
+        _isLocked = false; // Break deadlock
+        break;
+      }
       _completer ??= Completer<void>();
-      await _completer!.future;
+      await Future.any([
+        _completer!.future,
+        Future.delayed(const Duration(milliseconds: 500)), // periodic check
+      ]);
     }
     _isLocked = true;
   }
@@ -268,7 +277,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       state = state.copyWith(
         isPlaying: isPlaying,
         status: status,
-        playRequested: isPlaying ? true : (status == PlaybackStatus.paused || status == PlaybackStatus.idle ? false : state.playRequested),
+        playRequested: isPlaying ? true : state.playRequested,
       );
       
       _handler.logPlaybackEvent(
@@ -281,7 +290,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // nonce hasn't already triggered a completion handler.
       if (playerState.processingState == ProcessingState.completed) {
         final currentNonce = _playbackNonce;
-        if (currentNonce != _lastCompletedNonce && (isPlaying || state.playRequested)) {
+        if (currentNonce != _lastCompletedNonce) {
           _lastCompletedNonce = currentNonce;
           _isCrossfading = false; // Reset crossfade flag when a track reaches completion
           _handler.logPlaybackEvent(
@@ -680,12 +689,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           status: PlaybackStatus.error,
           isPlaying: false,
         );
-        // Automatically skip unplayable track after a brief delay
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
-            nextTrack(isAutoAdvance: true);
-          }
-        });
+        // Automatically skip unplayable track
+        if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+          nextTrack(isAutoAdvance: true);
+        }
       }
     } else {
       print('[AURA-PLAY] Could not resolve playable audioUrl for "${track.title}"');
@@ -707,12 +714,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         status: PlaybackStatus.error,
         isPlaying: false,
       );
-      // Automatically skip unplayable track after a brief delay
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
-          nextTrack(isAutoAdvance: true);
-        }
-      });
+      // Automatically skip unplayable track
+      if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+        nextTrack(isAutoAdvance: true);
+      }
     }
   }
 

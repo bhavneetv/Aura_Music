@@ -19,7 +19,6 @@ import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
 
 import '../../widgets/adaptive_navigation_bar.dart';
-import '../../widgets/ios_native_nav_bar.dart';
 import '../../services/update/update_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
