@@ -207,6 +207,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   bool _isCrossfading = false;
   bool _isTransitioning = false;
+  bool _isNextTrackPreloaded = false;
   int _playbackNonce = 0;
   // Nonce snapshot at the time the last completed event fired,
   // used to deduplicate multiple completed events for the same track.
@@ -247,6 +248,22 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Save play position periodically in Hive
       if (state.currentTrack != null) {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
+      }
+
+      // Preload next track audio 15 seconds before current ends for zero-latency gapless playback
+      if (state.isPlaying && !_isTransitioning && dur.inMilliseconds > 0) {
+        final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
+        if (remainingMs > 0 && remainingMs <= 15000 && !_isNextTrackPreloaded) {
+          final nextIdx = state.currentIndex + 1;
+          if (nextIdx < state.queue.length) {
+            final nextTrack = state.queue[nextIdx];
+            if (nextTrack.audioUrl.isNotEmpty && 
+                (nextTrack.audioUrl.startsWith('http') || File(nextTrack.audioUrl).existsSync())) {
+              _isNextTrackPreloaded = true;
+              _handler.preloadNextTrack(nextTrack);
+            }
+          }
+        }
       }
 
       // Crossfade handling with equal-power overlapping transition.
@@ -571,6 +588,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
   Future<void> _streamTrack(Track track, {required int nonce}) async {
     _trackLoadRetries = 0;
+    _isNextTrackPreloaded = false; // Reset preload state for the new track
     triggerHaptic(HapticFeedbackType.selection);
     RecommendationEngine.instance.recordTrackStarted(track);
 

@@ -12,9 +12,7 @@ Future<AudioHandler> initAudioHandler() async {
     config: AudioServiceConfig(
       androidNotificationChannelId: 'com.example.music_app.channel.audio',
       androidNotificationChannelName: 'Aura Vinyl Playback',
-      androidNotificationOngoing: true,
       androidShowNotificationBadge: true,
-      androidStopForegroundOnPause: false,
       androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
@@ -41,6 +39,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   // Track active crossfade timer so it can be cancelled
   Timer? _crossfadeTimer;
+
+  // Track the currently preloaded next song to allow instant gapless switching
+  Track? _preloadedTrack;
 
   Stream<Duration> get activePositionStream => _positionController.stream;
   Stream<Duration?> get activeDurationStream => _durationController.stream;
@@ -178,6 +179,31 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     try { await _activePlayer.setVolume(1.0); } catch (_) {}
   }
 
+  /// Silently buffers the audio of the upcoming track into the inactive player to eliminate load times.
+  Future<void> preloadNextTrack(Track nextTrack) async {
+    if (_preloadedTrack?.id == nextTrack.id) return; // Already preloaded
+
+    try {
+      String url = _normalizeUrl(nextTrack.audioUrl);
+      
+      // Stop anything currently on the fade player and mute it just in case
+      await _fadePlayer.stop();
+      await _fadePlayer.setVolume(0.0); 
+
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await _fadePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+      } else {
+        await _fadePlayer.setFilePath(url);
+      }
+      
+      _preloadedTrack = nextTrack;
+      logPlaybackEvent(eventName: 'PRELOAD_TRACK_SUCCESS', currentTrackId: nextTrack.id);
+    } catch (e) {
+      _preloadedTrack = null;
+      logPlaybackEvent(eventName: 'PRELOAD_TRACK_FAILED', currentTrackId: nextTrack.id, error: e.toString());
+    }
+  }
+
   Future<void> playTrack(Track track) async {
     final mediaItem = MediaItem(
       id: track.id,
@@ -206,18 +232,45 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await session.setActive(true);
       } catch (_) {}
 
-      // Full reset of both players to prevent stuck completed/error states
-      await resetForNewTrack();
-
       String url = _normalizeUrl(track.audioUrl);
 
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+      if (_preloadedTrack?.id == track.id) {
+        logPlaybackEvent(
+          eventName: 'USING_PRELOADED_PLAYER', 
+          currentTrackId: track.id,
+          overrideAudioSource: url,
+        );
+        
+        // Swap players for instant playback
+        final outgoingPlayer = _activePlayer;
+        _activePlayer = _fadePlayer;
+        _fadePlayer = outgoingPlayer;
+        
+        await _activePlayer.setVolume(1.0);
+        await _activePlayer.play();
+        _preloadedTrack = null;
+
+        // Clean up the old player asynchronously
+        resetForNewTrack(); 
+        
+        // Broadcast state with new active player
+        _positionController.add(_activePlayer.position);
+        _durationController.add(_activePlayer.duration);
+        _playerStateController.add(_activePlayer.playerState);
+        _broadcastState();
       } else {
-        await _activePlayer.setFilePath(url);
+        // Cold start (track wasn't preloaded)
+        await resetForNewTrack();
+        _preloadedTrack = null;
+
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+        } else {
+          await _activePlayer.setFilePath(url);
+        }
+        await _activePlayer.setVolume(1.0);
+        await _activePlayer.play();
       }
-      await _activePlayer.setVolume(1.0);
-      await _activePlayer.play();
       
       logPlaybackEvent(
         eventName: 'PLAY_TRACK_SUCCESS',
