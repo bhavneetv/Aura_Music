@@ -22,8 +22,16 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   static const String _browserUserAgent =
       'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
-  final AudioPlayer _playerA = AudioPlayer(userAgent: _browserUserAgent);
-  final AudioPlayer _playerB = AudioPlayer(userAgent: _browserUserAgent);
+  final AudioPlayer _playerA = AudioPlayer(
+    userAgent: _browserUserAgent,
+    handleAudioSessionActivation: false,
+    handleInterruptions: false,
+  );
+  final AudioPlayer _playerB = AudioPlayer(
+    userAgent: _browserUserAgent,
+    handleAudioSessionActivation: false,
+    handleInterruptions: false,
+  );
   late AudioPlayer _activePlayer;
   late AudioPlayer _fadePlayer;
 
@@ -104,6 +112,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   @override
   Future<void> play() async {
+    await _ensureAudioSessionActive();
     await _activePlayer.play();
     _broadcastState();
   }
@@ -112,6 +121,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> pause() async {
     await _activePlayer.pause();
     _broadcastState();
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
   }
 
   @override
@@ -129,6 +142,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
     _broadcastState();
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
   }
 
   @override
@@ -227,10 +244,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         overrideAudioSource: track.audioUrl,
       );
 
-      try {
-        final session = await AudioSession.instance;
-        await session.setActive(true);
-      } catch (_) {}
+      await _ensureAudioSessionActive();
 
       String url = _normalizeUrl(track.audioUrl);
 
@@ -302,6 +316,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     final incomingPlayer = _fadePlayer;
 
     try {
+      await _ensureAudioSessionActive();
       String url = _normalizeUrl(nextTrack.audioUrl);
 
       logPlaybackEvent(
@@ -413,6 +428,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   Future<void> prepareAndResume(Track track, Duration position) async {
     try {
+      await _ensureAudioSessionActive();
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_START',
         currentTrackId: track.id,
@@ -459,6 +475,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   }
 
   // ── AudioSession / App Lifecycle ──────────────────────────────
+
+  Future<void> _ensureAudioSessionActive() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (e) {
+      logPlaybackEvent(eventName: 'AUDIO_SESSION_REACTIVATION_FAILED', error: e.toString());
+    }
+  }
 
   Future<void> _initAudioSession() async {
     try {
