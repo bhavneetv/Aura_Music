@@ -92,11 +92,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Home Tab Content
+  // ---------------------------------------------------------------------
+  // HOME TAB
+  // ---------------------------------------------------------------------
   Widget _buildHomeTab(BuildContext context) {
     final trendingAsync = ref.watch(trendingTracksProvider);
     final recommendedAsync = ref.watch(dynamicRecommendationsProvider);
     final customBranding = ref.watch(customizationProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // Get actual listening history from Hive
     final historyList = StorageService.getListeningHistory();
@@ -120,87 +123,150 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final continueTracks = historyTracks.isNotEmpty ? historyTracks.take(10).toList() : Track.mockTracks.sublist(0, 4);
 
-    return VinylRefreshIndicator(
-      onRefresh: () async {
-        ref.invalidate(trendingTracksProvider);
-        ref.invalidate(dynamicRecommendationsProvider);
-        try {
-          await Future.wait([
-            ref.read(trendingTracksProvider.future),
-            ref.read(dynamicRecommendationsProvider.future),
-          ]);
-        } catch (_) {}
-      },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 96, top: 16),
-        children: [
-          // welcome header
-          _buildHomeHeader(context),
-          const SizedBox(height: 24),
+    return DecoratedBox(
+      // Subtle ambient background wash behind the whole tab — gives the
+      // screen depth instead of a flat single-color canvas.
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? [
+                  customBranding.accentColor.withOpacity(0.10),
+                  Colors.transparent,
+                ]
+              : [
+                  customBranding.accentColor.withOpacity(0.06),
+                  Colors.transparent,
+                ],
+          stops: const [0.0, 0.35],
+        ),
+      ),
+      child: VinylRefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(trendingTracksProvider);
+          ref.invalidate(dynamicRecommendationsProvider);
+          try {
+            await Future.wait([
+              ref.read(trendingTracksProvider.future),
+              ref.read(dynamicRecommendationsProvider.future),
+            ]);
+          } catch (_) {}
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 110, top: 12),
+          children: [
+            // welcome header
+            _buildHomeHeader(context),
+            const SizedBox(height: 28),
 
-          // Continue Listening (Actual History)
-          _buildTrackRail(context, 'Continue Listening', continueTracks),
-          const SizedBox(height: 12),
+            // Continue Listening (Actual History)
+            _buildTrackRail(context, 'Continue Listening', continueTracks, large: true),
+            const SizedBox(height: 28),
 
-          // Trending
-          trendingAsync.when(
-            loading: () => const RailShimmer(),
-            error: (err, stack) => _buildTrackRail(context, 'Trending Now', Track.mockTracks.sublist(3, 6)),
-            data: (tracks) => _buildTrackRail(
+            // Trending
+            trendingAsync.when(
+              loading: () => const RailShimmer(),
+              error: (err, stack) => _buildTrackRail(context, 'Trending Now', Track.mockTracks.sublist(3, 6)),
+              data: (tracks) => _buildTrackRail(
+                context,
+                'Trending Now',
+                tracks.isEmpty ? Track.mockTracks.sublist(3, 6) : tracks,
+              ),
+            ),
+            const SizedBox(height: 28),
+
+            // Genres & Moods gradient cards
+            _buildGenreSection(context),
+            const SizedBox(height: 32),
+
+            // Recommended
+            _buildSectionHeader(
               context,
-              'Trending Now',
-              tracks.isEmpty ? Track.mockTracks.sublist(3, 6) : tracks,
+              'Recommended For You',
+              onSeeAll: () {
+                final recsData = recommendedAsync.value ?? Track.mockTracks;
+                _showSeeAllTracksSheet(context, 'Recommended For You', recsData);
+              },
             ),
+            const SizedBox(height: 4),
+            recommendedAsync.when(
+              loading: () => const Column(
+                children: [
+                  TrackTileShimmer(),
+                  TrackTileShimmer(),
+                  TrackTileShimmer(),
+                ],
+              ),
+              error: (err, stack) => _buildTrackList(Track.mockTracks),
+              data: (tracks) => _buildTrackList(tracks.isEmpty ? Track.mockTracks : tracks),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Reusable "Title ---- See all" row so every section matches.
+  Widget _buildSectionHeader(BuildContext context, String title, {VoidCallback? onSeeAll}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final customBranding = ref.watch(customizationProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 20, 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: customBranding.accentColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.2,
+                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-
-          // Genres & Moods gradient cards
-          _buildGenreSection(context),
-          const SizedBox(height: 24),
-
-          // Recommended
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Recommended For You',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontFamily: 'Outfit',
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
+          if (onSeeAll != null)
+            GestureDetector(
+              onTap: onSeeAll,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: customBranding.accentColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'See All',
+                      style: TextStyle(
+                        color: customBranding.accentColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
                       ),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    final recsData = recommendedAsync.value ?? Track.mockTracks;
-                    _showSeeAllTracksSheet(context, 'Recommended For You', recsData);
-                  },
-                  child: Text(
-                    'See All',
-                    style: TextStyle(
-                      color: customBranding.accentColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
                     ),
-                  ),
+                    const SizedBox(width: 2),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 10, color: customBranding.accentColor),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-          recommendedAsync.when(
-            loading: () => const Column(
-              children: [
-                TrackTileShimmer(),
-                TrackTileShimmer(),
-                TrackTileShimmer(),
-              ],
-            ),
-            error: (err, stack) => _buildTrackList(Track.mockTracks),
-            data: (tracks) => _buildTrackList(tracks.isEmpty ? Track.mockTracks : tracks),
-          ),
         ],
       ),
     );
@@ -208,41 +274,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildTrackList(List<Track> tracks) {
     final notifier = ref.read(playbackProvider.notifier);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Column(
       children: List.generate(tracks.length, (index) {
         final track = tracks[index];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-          leading: SizedBox(
-            width: 50,
-            height: 50,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                track.artworkUrl,
-                width: 50,
-                height: 50,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  width: 50,
-                  height: 50,
-                  color: Colors.grey.shade800,
-                  child: const Icon(Icons.music_note_rounded),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => notifier.playTrack(track),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.03),
+                ),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        track.artworkUrl,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          width: 52,
+                          height: 52,
+                          color: Colors.grey.shade800,
+                          child: const Icon(Icons.music_note_rounded, size: 20),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(Icons.favorite_border_rounded, size: 20, color: Colors.grey.shade500),
+                  ],
                 ),
               ),
             ),
           ),
-          title: Text(
-            track.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-          ),
-          subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: const Icon(Icons.favorite_border_rounded, size: 20),
-          onTap: () {
-            notifier.playTrack(track);
-          },
         );
       }),
     );
@@ -298,134 +392,156 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           builder: (context, setModalState) {
             final activeColor = Color.fromARGB(255, selectedR, selectedG, selectedB);
 
-            return Container(
-              padding: EdgeInsets.only(
-                left: 24,
-                right: 24,
-                top: 24,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-              ),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-                boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 20)],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+            return ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  padding: EdgeInsets.only(
+                    left: 24,
+                    right: 24,
+                    top: 24,
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (isDark ? const Color(0xFF1B1B1E) : Colors.white).withOpacity(0.92),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    border: Border(
+                      top: BorderSide(color: Colors.white.withOpacity(isDark ? 0.08 : 0.6), width: 1),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  Row(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.waving_hand_rounded, color: activeColor, size: 28),
-                      const SizedBox(width: 10),
-                      const Text(
-                        'Welcome to Aura Music 🎵',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: activeColor.withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.waving_hand_rounded, color: activeColor, size: 22),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Welcome to Aura Music',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Let\'s personalize your music player! Tell us your name and pick a favorite theme accent color.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade500, height: 1.4),
+                      ),
+                      const SizedBox(height: 22),
+
+                      // 1. Name Input
+                      const Text('What is your name?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: nameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: InputDecoration(
+                          hintText: 'Enter your name (e.g. Bhavneet)...',
+                          filled: true,
+                          fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: activeColor, width: 1.5),
+                          ),
+                          prefixIcon: Icon(Icons.person_rounded, color: activeColor),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+
+                      // 2. Theme Color Selection
+                      const Text('Pick Theme Accent Color', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: colorPresets.map((preset) {
+                          final pColor = preset['color'] as Color;
+                          final isSelected = selectedR == preset['r'] && selectedG == preset['g'] && selectedB == preset['b'];
+
+                          return GestureDetector(
+                            onTap: () {
+                              setModalState(() {
+                                selectedR = preset['r'] as int;
+                                selectedG = preset['g'] as int;
+                                selectedB = preset['b'] as int;
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: pColor,
+                                border: Border.all(
+                                  color: isSelected ? (isDark ? Colors.white : Colors.black) : Colors.transparent,
+                                  width: 3,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: pColor.withValues(alpha: 0.4),
+                                    blurRadius: isSelected ? 12 : 4,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: isSelected ? const Icon(Icons.check_rounded, color: Colors.white, size: 22) : null,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 26),
+
+                      // Save & Continue Button
+                      ElevatedButton(
+                        onPressed: () async {
+                          final name = nameController.text.trim();
+                          if (name.isNotEmpty) {
+                            await StorageService.setUserName(name);
+                          }
+                          await ref.read(customizationProvider.notifier).updateAccentColor(selectedR, selectedG, selectedB);
+                          await StorageService.setCompletedOnboarding(true);
+
+                          if (mounted) {
+                            Navigator.pop(context);
+                            setState(() {});
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: activeColor,
+                          foregroundColor: Colors.black,
+                          minimumSize: const Size(double.infinity, 50),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          elevation: 0,
+                        ),
+                        child: const Text('Save & Get Started ✨', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Let\'s personalize your music player! Tell us your name and pick a favorite theme accent color.',
-                    style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // 1. Name Input
-                  const Text('What is your name?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: nameController,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your name (e.g. Bhavneet)...',
-                      filled: true,
-                      fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      prefixIcon: Icon(Icons.person_rounded, color: activeColor),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // 2. Theme Color Selection
-                  const Text('Pick Theme Accent Color', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: colorPresets.map((preset) {
-                      final pColor = preset['color'] as Color;
-                      final isSelected = selectedR == preset['r'] && selectedG == preset['g'] && selectedB == preset['b'];
-
-                      return GestureDetector(
-                        onTap: () {
-                          setModalState(() {
-                            selectedR = preset['r'] as int;
-                            selectedG = preset['g'] as int;
-                            selectedB = preset['b'] as int;
-                          });
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: pColor,
-                            border: Border.all(
-                              color: isSelected ? (isDark ? Colors.white : Colors.black) : Colors.transparent,
-                              width: 3,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: pColor.withValues(alpha: 0.4),
-                                blurRadius: isSelected ? 10 : 4,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: isSelected ? const Icon(Icons.check_rounded, color: Colors.white, size: 22) : null,
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Save & Continue Button
-                  ElevatedButton(
-                    onPressed: () async {
-                      final name = nameController.text.trim();
-                      if (name.isNotEmpty) {
-                        await StorageService.setUserName(name);
-                      }
-                      await ref.read(customizationProvider.notifier).updateAccentColor(selectedR, selectedG, selectedB);
-                      await StorageService.setCompletedOnboarding(true);
-
-                      if (mounted) {
-                        Navigator.pop(context);
-                        setState(() {});
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: activeColor,
-                      foregroundColor: Colors.black,
-                      minimumSize: const Size(double.infinity, 48),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 2,
-                    ),
-                    child: const Text('Save & Get Started ✨', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                ],
+                ),
               ),
             );
           },
@@ -434,7 +550,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Home Header widget (greeting, title, and search bar)
+  // ---------------------------------------------------------------------
+  // HEADER
+  // ---------------------------------------------------------------------
   Widget _buildHomeHeader(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final customBranding = ref.watch(customizationProvider);
@@ -445,33 +563,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(customBranding.brandingIcon, color: customBranding.accentColor, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                _greeting(),
-                style: TextStyle(
-                  color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.5),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.5,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _greeting(),
+                      style: TextStyle(
+                        color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.55),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ShaderMask(
+                      shaderCallback: (bounds) => LinearGradient(
+                        colors: [
+                          isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                          customBranding.accentColor,
+                        ],
+                      ).createShader(bounds),
+                      child: Text(
+                        customBranding.appName,
+                        style: const TextStyle(
+                          fontFamily: 'Outfit',
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              // Branding icon presented as a soft glass badge instead of a
+              // plain small icon floating next to text.
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: customBranding.accentColor.withOpacity(0.14),
+                  border: Border.all(color: customBranding.accentColor.withOpacity(0.25), width: 1),
+                ),
+                child: Icon(customBranding.brandingIcon, color: customBranding.accentColor, size: 20),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Welcome to ${customBranding.appName}',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontFamily: 'Outfit',
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-                ),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 18),
           _buildLanguageFilterChips(context),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _buildSearchBar(context),
         ],
       ),
@@ -481,42 +626,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildLanguageFilterChips(BuildContext context) {
     final activeLangs = StorageService.getPreferredLanguages();
     final allLangs = ['Punjabi', 'Hindi', 'English', 'Bhangra', 'Bollywood', 'LoFi'];
+    final customBranding = ref.watch(customizationProvider);
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: allLangs.map((lang) {
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: allLangs.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final lang = allLangs[i];
           final isSelected = activeLangs.contains(lang);
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(lang),
-              selected: isSelected,
-              selectedColor: AppTheme.goldAccent.withOpacity(0.2),
-              checkmarkColor: AppTheme.goldAccent,
-              side: BorderSide(
-                color: isSelected ? AppTheme.goldAccent : Colors.white12,
+          return GestureDetector(
+            onTap: () async {
+              List<String> updated = List.from(activeLangs);
+              if (!isSelected) {
+                updated = [lang];
+              } else {
+                updated.remove(lang);
+              }
+              await StorageService.savePreferredLanguages(updated);
+              ref.invalidate(trendingTracksProvider);
+              ref.invalidate(dynamicRecommendationsProvider);
+              setState(() {});
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: isSelected
+                    ? LinearGradient(colors: [
+                        customBranding.accentColor,
+                        customBranding.accentColor.withOpacity(0.7),
+                      ])
+                    : null,
+                color: isSelected ? null : Colors.white12.withOpacity(0.06),
+                border: Border.all(
+                  color: isSelected ? Colors.transparent : Colors.white24.withOpacity(0.15),
+                ),
               ),
-              labelStyle: TextStyle(
-                color: isSelected ? AppTheme.goldAccent : Colors.grey,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                fontSize: 12,
+              child: Text(
+                lang,
+                style: TextStyle(
+                  color: isSelected ? Colors.black : Colors.grey.shade500,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                  fontSize: 12.5,
+                ),
               ),
-              onSelected: (val) async {
-                List<String> updated = List.from(activeLangs);
-                if (val) {
-                  updated = [lang];
-                } else {
-                  updated.remove(lang);
-                }
-                await StorageService.savePreferredLanguages(updated);
-                ref.invalidate(trendingTracksProvider);
-                ref.invalidate(dynamicRecommendationsProvider);
-                setState(() {});
-              },
             ),
           );
-        }).toList(),
+        },
       ),
     );
   }
@@ -526,7 +688,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      height: 48,
+      height: 50,
       decoration: AppTheme.glassDecoration(
         context: context,
         opacity: isDark ? 0.06 : 0.05,
@@ -549,8 +711,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           prefixIcon: Icon(
             Icons.search_rounded,
-            color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.4),
-            size: 20,
+            color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.45),
+            size: 22,
+          ),
+          suffixIcon: Icon(
+            Icons.tune_rounded,
+            color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.3),
+            size: 18,
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
@@ -558,43 +725,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // Horizontal Track rail builder
-  Widget _buildTrackRail(BuildContext context, String title, List<Track> tracks) {
+  // ---------------------------------------------------------------------
+  // TRACK RAIL
+  // ---------------------------------------------------------------------
+  Widget _buildTrackRail(BuildContext context, String title, List<Track> tracks, {bool large = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final customBranding = ref.watch(customizationProvider);
+    final double artSize = large ? 132 : 116;
+    final double cardWidth = large ? 142 : 126;
+    final double railHeight = artSize + 68;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontFamily: 'Outfit',
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              GestureDetector(
-                onTap: () => _showSeeAllTracksSheet(context, title, tracks),
-                child: Text(
-                  'See All',
-                  style: TextStyle(
-                    color: customBranding.accentColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        _buildSectionHeader(context, title, onSeeAll: () => _showSeeAllTracksSheet(context, title, tracks)),
         SizedBox(
-          height: 190,
+          height: railHeight,
           child: Consumer(
             builder: (context, ref, child) {
               final notifier = ref.read(playbackProvider.notifier);
@@ -605,53 +750,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 itemBuilder: (context, index) {
                   final track = tracks[index];
                   return GestureDetector(
-                    onTap: () {
-                      notifier.playTrack(track);
-                    },
+                    onTap: () => notifier.playTrack(track),
                     child: Container(
-                      width: 130,
+                      width: cardWidth,
                       margin: const EdgeInsets.only(right: 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: 120,
-                            height: 120,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(isDark ? 0.4 : 0.15),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 4),
+                          Stack(
+                            children: [
+                              Container(
+                                width: artSize,
+                                height: artSize,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(isDark ? 0.45 : 0.18),
+                                      blurRadius: 14,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                              child: Image.network(
-                                  track.artworkUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Container(
-                                    color: Colors.grey.shade800,
-                                    child: const Icon(Icons.music_note_rounded),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.network(
+                                        track.artworkUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => Container(
+                                          color: Colors.grey.shade800,
+                                          child: const Icon(Icons.music_note_rounded),
+                                        ),
+                                      ),
+                                      // Soft bottom scrim so a small play glyph
+                                      // always reads clearly over any artwork.
+                                      DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.transparent,
+                                              Colors.black.withOpacity(0.35),
+                                            ],
+                                            stops: const [0.6, 1.0],
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: 8,
+                                        bottom: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Colors.white.withOpacity(0.85),
+                                          ),
+                                          child: const Icon(Icons.play_arrow_rounded, size: 16, color: Colors.black),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                            ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 9),
                           Text(
                             track.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             track.artist,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                           ),
                         ],
                       ),
@@ -666,68 +845,98 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------
+  // GENRES
+  // ---------------------------------------------------------------------
   Widget _buildGenreSection(BuildContext context) {
     final customBranding = ref.watch(customizationProvider);
     final List<Map<String, dynamic>> genres = [
-      {'name': 'Jazz & Calm', 'colors': [customBranding.accentColor, customBranding.accentColor.withOpacity(0.6)]},
-      {'name': 'Retro Synth', 'colors': [const Color(0xFFE040FB), const Color(0xFF651FFF)]},
-      {'name': 'Acoustic Study', 'colors': [const Color(0xFF26A69A), const Color(0xFF00796B)]},
-      {'name': 'Lo-Fi Chill', 'colors': [const Color(0xFF42A5F5), const Color(0xFF1565C0)]},
+      {
+        'name': 'Jazz & Calm',
+        'icon': Icons.piano_rounded,
+        'colors': [customBranding.accentColor, customBranding.accentColor.withOpacity(0.55)],
+      },
+      {
+        'name': 'Retro Synth',
+        'icon': Icons.graphic_eq_rounded,
+        'colors': [const Color(0xFFE040FB), const Color(0xFF651FFF)],
+      },
+      {
+        'name': 'Acoustic Study',
+        'icon': Icons.music_note_rounded,
+        'colors': [const Color(0xFF26A69A), const Color(0xFF00796B)],
+      },
+      {
+        'name': 'Lo-Fi Chill',
+        'icon': Icons.nightlight_round,
+        'colors': [const Color(0xFF42A5F5), const Color(0xFF1565C0)],
+      },
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          child: Text(
-            'Genres & Moods',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontFamily: 'Outfit',
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-        ),
+        _buildSectionHeader(context, 'Genres & Moods'),
         SizedBox(
-          height: 90,
+          height: 96,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.only(left: 24, right: 8),
             itemCount: genres.length,
             itemBuilder: (context, index) {
               final genre = genres[index];
+              final colors = genre['colors'] as List<Color>;
               return Container(
-                width: 140,
+                width: 152,
                 margin: const EdgeInsets.only(right: 12),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(22),
                   gradient: LinearGradient(
-                    colors: genre['colors'] as List<Color>,
+                    colors: colors,
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: (genre['colors'] as List<Color>)[0].withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
+                      color: colors[0].withOpacity(0.35),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
                     ),
                   ],
                 ),
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Text(
-                      genre['name'] as String,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                child: Stack(
+                  children: [
+                    // Faint oversized icon watermark in the corner adds
+                    // texture instead of a flat gradient block.
+                    Positioned(
+                      right: -10,
+                      bottom: -10,
+                      child: Icon(
+                        genre['icon'] as IconData,
+                        size: 64,
+                        color: Colors.white.withOpacity(0.14),
                       ),
                     ),
-                  ),
+                    Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Icon(genre['icon'] as IconData, color: Colors.white, size: 20),
+                          Text(
+                            genre['name'] as String,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              height: 1.15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -778,9 +987,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ],
     );
   }
+
   void _showSeeAllTracksSheet(BuildContext context, String sectionTitle, List<Track> existingTracks) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     // Expand list up to 15-25 tracks
     List<Track> fullList = List.from(existingTracks);
     if (fullList.length < 15) {

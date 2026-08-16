@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:cupertino_native/cupertino_native.dart';
 import '../providers/playback_provider.dart';
 import 'glass_bottom_navigation.dart';
 
@@ -69,20 +70,19 @@ class AdaptiveNavigationBar extends StatelessWidget {
 
   // ── 1. iOS 26 Stock "Liquid Glass" Navigation Bar ─────────────────────────
   Widget _buildIOSLiquidGlassNavigationBar(BuildContext context, bool isDark) {
-    return CupertinoTabBar(
+    return CNTabBar(
       currentIndex: selectedIndex,
       onTap: (index) {
         triggerHaptic(HapticFeedbackType.light);
         onDestinationSelected(index);
       },
-      activeColor: accentColor,
-      inactiveColor: isDark ? CupertinoColors.inactiveGray : CupertinoColors.systemGrey,
-      backgroundColor: (isDark ? const Color(0xFF141416) : const Color(0xFFF2F2F7)).withValues(alpha: 0.65),
+      tint: accentColor,
+      height: 85,
       items: List.generate(destinations.length, (index) {
         final dest = destinations[index];
-        return BottomNavigationBarItem(
-          icon: Icon(_getIOSIcon(dest.icon, isSelected: false, isSearch: dest.isSearch), size: 24),
-          activeIcon: Icon(_getIOSIcon(dest.selectedIcon ?? dest.icon, isSelected: true, isSearch: dest.isSearch), size: 24),
+        final isSelected = selectedIndex == index;
+        return CNTabBarItem(
+          icon: CNSymbol(_getIOSSFSymbolName(isSelected ? (dest.selectedIcon ?? dest.icon) : dest.icon, isSelected: isSelected, isSearch: dest.isSearch)),
           label: dest.label,
         );
       }),
@@ -222,6 +222,24 @@ class AdaptiveNavigationBar extends StatelessWidget {
       if (val.contains('search') || val.contains('magnifyingglass')) return CupertinoIcons.search;
     }
     return isSelected ? CupertinoIcons.square_fill : CupertinoIcons.square;
+  }
+
+  String _getIOSSFSymbolName(dynamic val, {required bool isSelected, bool isSearch = false}) {
+    if (val is String) {
+      if (val.contains('house')) return isSelected ? 'house.fill' : 'house';
+      if (val.contains('person')) return isSelected ? 'person.fill' : 'person';
+      if (val.contains('search') || val.contains('magnifyingglass')) return 'magnifyingglass';
+    }
+    if (val == Icons.library_music_outlined || val == Icons.library_music_rounded) {
+      return isSelected ? 'music.note.list' : 'music.note.list';
+    }
+    if (val == Icons.queue_music_outlined || val == Icons.queue_music_rounded) {
+      return isSelected ? 'list.bullet.indent' : 'list.bullet.indent';
+    }
+    if (val == Icons.settings_outlined || val == Icons.settings_rounded) {
+      return isSelected ? 'gearshape.fill' : 'gearshape';
+    }
+    return isSelected ? 'circle.fill' : 'circle';
   }
 
   IconData _getAndroidIcon(dynamic val, {required bool isSelected}) {

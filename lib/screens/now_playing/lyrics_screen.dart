@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
@@ -21,7 +22,8 @@ class LyricsScreen extends ConsumerStatefulWidget {
   ConsumerState<LyricsScreen> createState() => _LyricsScreenState();
 }
 
-class _LyricsScreenState extends ConsumerState<LyricsScreen> {
+class _LyricsScreenState extends ConsumerState<LyricsScreen>
+    with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   late LyricsCandidate _selectedCandidate;
   List<LyricLine>? _currentSyncedLines;
@@ -44,6 +46,11 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
   bool _isLoadingExplanations = false;
   bool _showExplanations = false;
 
+  // Entrance animation for the whole screen
+  late final AnimationController _entranceController;
+  late final Animation<double> _entranceFade;
+  late final Animation<Offset> _entranceSlide;
+
   void _zoomIn() {
     setState(() {
       _fontScale = (_fontScale + 0.15).clamp(0.7, 1.8);
@@ -65,6 +72,23 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
   @override
   void initState() {
     super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _entranceFade = CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOut,
+    );
+    _entranceSlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOutCubic,
+    ));
+    _entranceController.forward();
+
     if (widget.lyricsResult.candidates.isNotEmpty) {
       _selectedCandidate = widget.lyricsResult.candidates.first;
       _applyCandidate(_selectedCandidate);
@@ -202,6 +226,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
   void dispose() {
     _userScrollTimer?.cancel();
     _scrollController.dispose();
+    _entranceController.dispose();
     super.dispose();
   }
 
@@ -213,7 +238,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
 
   void _scrollToActiveLine(int index, int totalLines) {
     if (_userIsScrolling || !_scrollController.hasClients || index < 0 || totalLines <= 0) return;
-    
+
     final key = _lineKeys[index];
     if (key != null && key.currentContext != null) {
       Scrollable.ensureVisible(
@@ -224,8 +249,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
       );
     } else {
       const estimatedHeight = 65.0;
-      final viewportHeight = MediaQuery.of(context).size.height;
-      final targetOffset = mathMax(0.0, (index * estimatedHeight));
+      final targetOffset = _mathMax(0.0, (index * estimatedHeight));
       _scrollController.animateTo(
         targetOffset,
         duration: const Duration(milliseconds: 350),
@@ -234,7 +258,316 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
     }
   }
 
-  double mathMax(double a, double b) => a > b ? a : b;
+  double _mathMax(double a, double b) => a > b ? a : b;
+
+  // ── Bottom sheet with all secondary controls (translate, versions, zoom, sync) ──
+  void _openControlsSheet({
+    required Color textColor,
+    required Color subTextColor,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    final candidates = widget.lyricsResult.candidates;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, sheetSetState) {
+            void update(VoidCallback fn) {
+              setState(fn);
+              sheetSetState(() {});
+            }
+
+            return ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: Container(
+                  padding: EdgeInsets.only(
+                    left: 20,
+                    right: 20,
+                    top: 14,
+                    bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 28,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (isDark ? const Color(0xFF15110D) : Colors.white)
+                        .withValues(alpha: 0.88),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    border: Border(
+                      top: BorderSide(
+                        color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08),
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 18),
+                          decoration: BoxDecoration(
+                            color: subTextColor.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'Lyrics settings',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Sync lock row
+                      _sheetTile(
+                        icon: _isSyncLocked ? Icons.gps_fixed_rounded : Icons.gps_not_fixed_rounded,
+                        iconColor: _isSyncLocked ? accentColor : subTextColor,
+                        title: 'Center lock',
+                        subtitle: _isSyncLocked
+                            ? 'Active line stays centered while playing'
+                            : 'Scroll freely without auto re-centering',
+                        textColor: textColor,
+                        subTextColor: subTextColor,
+                        trailing: Switch.adaptive(
+                          value: _isSyncLocked,
+                          activeColor: accentColor,
+                          onChanged: (v) {
+                            update(() {
+                              _isSyncLocked = v;
+                              _userIsScrolling = false;
+                            });
+                            final synced = _currentSyncedLines;
+                            if (v && synced != null && synced.isNotEmpty) {
+                              _scrollToActiveLine(_activeLineIndex, synced.length);
+                            }
+                          },
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      // Font size row
+                      _sheetTile(
+                        icon: Icons.format_size_rounded,
+                        iconColor: accentColor,
+                        title: 'Text size',
+                        subtitle: '${(_fontScale * 100).round()}%',
+                        textColor: textColor,
+                        subTextColor: subTextColor,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _roundIconButton(
+                              icon: Icons.remove_rounded,
+                              onTap: () => update(_zoomOut),
+                              color: textColor,
+                              background: subTextColor.withValues(alpha: 0.12),
+                            ),
+                            GestureDetector(
+                              onTap: () => update(_resetZoom),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                child: Icon(Icons.refresh_rounded, size: 16, color: subTextColor),
+                              ),
+                            ),
+                            _roundIconButton(
+                              icon: Icons.add_rounded,
+                              onTap: () => update(_zoomIn),
+                              color: textColor,
+                              background: subTextColor.withValues(alpha: 0.12),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+                      Text(
+                        'TRANSLATE',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          color: subTextColor,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: ['Original', 'Hindi', 'English', 'Hinglish'].map((lang) {
+                          final isSel = lang == _activeLanguage;
+                          return GestureDetector(
+                            onTap: () {
+                              update(() {});
+                              _translateLyrics(lang);
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: isSel ? accentColor : subTextColor.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (isSel && _isTranslating)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 6),
+                                      child: SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 1.6,
+                                          color: isDark ? Colors.black : Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  Text(
+                                    lang,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: isSel
+                                          ? (isDark ? Colors.black : Colors.white)
+                                          : textColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+
+                      if (candidates.length > 1) ...[
+                        const SizedBox(height: 22),
+                        Text(
+                          'LYRICS VERSION',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                            color: subTextColor,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ...candidates.map((cand) {
+                          final isSel = cand.id == _selectedCandidate.id;
+                          return GestureDetector(
+                            onTap: () {
+                              _applyCandidate(cand);
+                              sheetSetState(() {});
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isSel
+                                    ? accentColor.withValues(alpha: 0.16)
+                                    : subTextColor.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSel ? accentColor : Colors.transparent,
+                                  width: 1.2,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isSel ? Icons.check_circle_rounded : Icons.circle_outlined,
+                                    size: 18,
+                                    color: isSel ? accentColor : subTextColor,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      cand.languageLabel,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                                        color: textColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _sheetTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required Color textColor,
+    required Color subTextColor,
+    required Widget trailing,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: iconColor.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, size: 18, color: iconColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textColor)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: TextStyle(fontSize: 11.5, color: subTextColor)),
+            ],
+          ),
+        ),
+        trailing,
+      ],
+    );
+  }
+
+  Widget _roundIconButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+    required Color background,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(color: background, shape: BoxShape.circle),
+        child: Icon(icon, size: 15, color: color),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +576,6 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = customBranding.accentColor;
 
-    // Restore normal deep dark accent theme when in dark mode and warm theme when in light mode
     final Color bgTop = isDark
         ? HSLColor.fromColor(accentColor).withLightness(0.08).withSaturation(0.40).toColor()
         : const Color(0xFFFAF7F2);
@@ -268,511 +600,517 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen> {
       }
     }
 
-    final candidates = widget.lyricsResult.candidates;
-
-    // Calculated animated font sizes
-    final double activeFontSize = (22 * _fontScale).clamp(14.0, 36.0);
+    final double activeFontSize = (23 * _fontScale).clamp(14.0, 38.0);
     final double inactiveFontSize = (16 * _fontScale).clamp(11.0, 26.0);
 
     return Scaffold(
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [bgTop, bgBottom],
+      extendBodyBehindAppBar: true,
+      body: Stack(
+        children: [
+          // ── Ambient gradient background with a soft glow behind the active area ──
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            width: double.infinity,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [bgTop, bgBottom],
+              ),
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // ── Header Bar with Title, Artist & Actions ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
+          Positioned(
+            top: -120,
+            left: -60,
+            child: Container(
+              width: 320,
+              height: 320,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [accentColor.withValues(alpha: isDark ? 0.22 : 0.12), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+
+          FadeTransition(
+            opacity: _entranceFade,
+            child: SlideTransition(
+              position: _entranceSlide,
+              child: SafeArea(
+                child: Column(
                   children: [
-                    IconButton(
-                      icon: Icon(Icons.keyboard_arrow_down_rounded, size: 28, color: textColor),
-                      onPressed: () => Navigator.pop(context),
+                    _buildHeader(
+                      textColor: textColor,
+                      subTextColor: subTextColor,
+                      accentColor: activeTextColor,
+                      isDark: isDark,
+                    ),
+                    _buildStatusStrip(
+                      synced: synced,
+                      accentColor: activeTextColor,
+                      isDark: isDark,
                     ),
                     Expanded(
-                      child: Column(
+                      child: widget.lyricsResult.instrumental
+                          ? _buildInstrumentalState(textColor, subTextColor, activeTextColor)
+                          : (synced != null && synced.isNotEmpty)
+                              ? _buildSyncedList(
+                                  synced: synced,
+                                  isDark: isDark,
+                                  activeTextColor: activeTextColor,
+                                  inactiveTextColor: inactiveTextColor,
+                                  activeFontSize: activeFontSize,
+                                  inactiveFontSize: inactiveFontSize,
+                                )
+                              : _buildPlainList(
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  subTextColor: subTextColor,
+                                  inactiveFontSize: inactiveFontSize,
+                                ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Floating quick-access AI toggle, bottom-right ──
+          Positioned(
+            right: 18,
+            bottom: 22,
+            child: FadeTransition(
+              opacity: _entranceFade,
+              child: _buildAiFab(isDark: isDark, accentColor: activeTextColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Header: back button, title/artist, single "more" control ──
+  Widget _buildHeader({
+    required Color textColor,
+    required Color subTextColor,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08),
+              ),
+            ),
+            child: Row(
+              children: [
+                _glassIconButton(
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  color: textColor,
+                  onTap: () => Navigator.pop(context),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        widget.track.title,
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textColor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.track.artist,
+                        style: TextStyle(fontSize: 11.5, color: subTextColor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                _glassIconButton(
+                  icon: Icons.tune_rounded,
+                  color: accentColor,
+                  onTap: () => _openControlsSheet(
+                    textColor: textColor,
+                    subTextColor: subTextColor,
+                    accentColor: accentColor,
+                    isDark: isDark,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _glassIconButton({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Icon(icon, size: 24, color: color),
+      ),
+    );
+  }
+
+  // ── Slim auto badge strip: mode + translation state, no longer a button row ──
+  Widget _buildStatusStrip({
+    required List<LyricLine>? synced,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    final isKaraoke = synced != null && synced.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(isKaraoke ? Icons.graphic_eq_rounded : Icons.notes_rounded, size: 12, color: accentColor),
+                const SizedBox(width: 5),
+                Text(
+                  isKaraoke ? 'Synced' : 'Plain text',
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: accentColor),
+                ),
+              ],
+            ),
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: SizeTransition(sizeFactor: anim, axis: Axis.horizontal, child: child),
+            ),
+            child: _activeLanguage != 'Original'
+                ? Padding(
+                    key: ValueKey(_activeLanguage),
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.amber.withValues(alpha: 0.5), width: 0.8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
+                          const Icon(Icons.translate_rounded, size: 11, color: Colors.amber),
+                          const SizedBox(width: 4),
                           Text(
-                            widget.track.title,
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            widget.track.artist,
-                            style: TextStyle(fontSize: 12, color: subTextColor),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            _activeLanguage,
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Colors.amber),
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(
-                        _showExplanations ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
-                        color: Colors.amber,
-                        size: 22,
-                      ),
-                      tooltip: 'AI Line Meaning',
-                      onPressed: _toggleLineExplanations,
-                    ),
-                    PopupMenuButton<String>(
-                      icon: _isTranslating
-                          ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: activeTextColor))
-                          : Icon(Icons.g_translate_rounded, color: activeTextColor, size: 22),
-                      tooltip: 'Translate Lyrics (AI)',
-                      onSelected: (lang) => _translateLyrics(lang),
-                      itemBuilder: (context) {
-                        return ['Original', 'Hindi', 'English', 'Hinglish'].map((lang) {
-                          final isSel = lang == _activeLanguage;
-                          return PopupMenuItem<String>(
-                            value: lang,
-                            child: Row(
-                              children: [
-                                Icon(
-                                  isSel ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                  size: 18,
-                                  color: isSel ? activeTextColor : Colors.grey,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  lang,
-                                  style: TextStyle(
-                                    fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList();
-                      },
-                    ),
-                    if (candidates.length > 1)
-                      PopupMenuButton<LyricsCandidate>(
-                        icon: Icon(Icons.layers_rounded, color: activeTextColor, size: 22),
-                        tooltip: 'Switch Lyrics Version',
-                        onSelected: _applyCandidate,
-                        itemBuilder: (context) {
-                          return candidates.map((cand) {
-                            final isSel = cand.id == _selectedCandidate.id;
-                            return PopupMenuItem<LyricsCandidate>(
-                              value: cand,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    isSel ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                    size: 18,
-                                    color: isSel ? activeTextColor : Colors.grey,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      cand.languageLabel,
-                                      style: TextStyle(
-                                        fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList();
-                        },
-                      ),
-                  ],
+                  )
+                : const SizedBox.shrink(key: ValueKey('none')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Floating AI sparkle FAB — quick access to line-by-line meaning ──
+  Widget _buildAiFab({required bool isDark, required Color accentColor}) {
+    return GestureDetector(
+      onTap: _toggleLineExplanations,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutBack,
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: _showExplanations
+                ? [Colors.amber.shade400, Colors.amber.shade700]
+                : [accentColor.withValues(alpha: 0.9), accentColor.withValues(alpha: 0.6)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: (_showExplanations ? Colors.amber : accentColor).withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Center(
+          child: _isLoadingExplanations
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : Icon(
+                  _showExplanations ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+                  color: Colors.white,
+                  size: 24,
                 ),
-              ),
+        ),
+      ),
+    );
+  }
 
-              // ── Header Controls Bar: Sync Lock, Mode, AI Explanations & Smooth Zoom Controls ──
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
+  Widget _buildInstrumentalState(Color textColor, Color subTextColor, Color accentColor) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.music_note_rounded, size: 64, color: accentColor.withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+          Text('🎼 Instrumental Track', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+          const SizedBox(height: 8),
+          Text('This song has no spoken or sung lyrics.', style: TextStyle(color: subTextColor)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSyncedList({
+    required List<LyricLine> synced,
+    required bool isDark,
+    required Color activeTextColor,
+    required Color inactiveTextColor,
+    required double activeFontSize,
+    required double inactiveFontSize,
+  }) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollStartNotification && notification.dragDetails != null) {
+          _userIsScrolling = true;
+          _userScrollTimer?.cancel();
+        } else if (notification is ScrollEndNotification) {
+          _userScrollTimer?.cancel();
+          _userScrollTimer = Timer(const Duration(milliseconds: 3500), () {
+            if (mounted) {
+              setState(() {
+                _userIsScrolling = false;
+              });
+              _scrollToActiveLine(_activeLineIndex, synced.length);
+            }
+          });
+        }
+        return false;
+      },
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: MediaQuery.of(context).size.height * 0.30,
+          bottom: MediaQuery.of(context).size.height * 0.38,
+        ),
+        itemCount: synced.length,
+        itemBuilder: (context, index) {
+          final line = synced[index];
+          final isActive = index == _activeLineIndex;
+          final explanation = _lineExplanations[index];
+
+          return Container(
+            key: _getKeyForIndex(index),
+            child: GestureDetector(
+              onTap: () {
+                _userScrollTimer?.cancel();
+                _userIsScrolling = false;
+                ref.read(playbackProvider.notifier).seekToDuration(line.time);
+                _scrollToActiveLine(index, synced.length);
+              },
+              child: AnimatedScale(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                scale: isActive ? 1.0 : 0.97,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: isActive ? activeTextColor.withValues(alpha: 0.10) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Smooth Font Zoom Controls
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.15),
-                            width: 0.8,
-                          ),
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        style: TextStyle(
+                          fontSize: isActive ? activeFontSize : inactiveFontSize,
+                          fontWeight: isActive ? FontWeight.w900 : FontWeight.w500,
+                          color: isActive ? activeTextColor : inactiveTextColor,
+                          height: 1.4,
+                          fontFamily: 'Outfit',
+                          shadows: isActive
+                              ? [Shadow(color: activeTextColor.withValues(alpha: 0.35), blurRadius: 18)]
+                              : null,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            InkWell(
-                              onTap: _zoomOut,
-                              borderRadius: BorderRadius.circular(10),
-                              child: Padding(
-                                padding: const EdgeInsets.all(4),
-                                child: Icon(Icons.remove_rounded, size: 14, color: textColor),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: _resetZoom,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                child: Text(
-                                  '${(_fontScale * 100).round()}%',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: textColor),
-                                ),
-                              ),
-                            ),
-                            InkWell(
-                              onTap: _zoomIn,
-                              borderRadius: BorderRadius.circular(10),
-                              child: Padding(
-                                padding: const EdgeInsets.all(4),
-                                child: Icon(Icons.add_rounded, size: 14, color: textColor),
-                              ),
-                            ),
-                          ],
-                        ),
+                        child: Text(line.text.isEmpty ? '♪' : line.text),
                       ),
-                      const SizedBox(width: 8),
-
-                      // Center Sync Lock Button
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _isSyncLocked = !_isSyncLocked;
-                            _userIsScrolling = false;
-                          });
-                          if (_isSyncLocked && synced != null && synced.isNotEmpty) {
-                            _scrollToActiveLine(_activeLineIndex, synced.length);
-                          }
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: _isSyncLocked ? activeTextColor.withValues(alpha: 0.22) : Colors.transparent,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: _isSyncLocked ? activeTextColor : subTextColor.withValues(alpha: 0.3),
-                              width: 1.0,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _isSyncLocked ? Icons.gps_fixed_rounded : Icons.gps_not_fixed_rounded,
-                                size: 12,
-                                color: _isSyncLocked ? activeTextColor : subTextColor,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                _isSyncLocked ? 'Sync Locked (Center) 🎯' : 'Sync 🎯',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isSyncLocked ? activeTextColor : subTextColor,
-                                ),
-                              ),
-                            ],
-                          ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        transitionBuilder: (child, anim) => FadeTransition(
+                          opacity: anim,
+                          child: SizeTransition(sizeFactor: anim, child: child),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: activeTextColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              synced != null && synced.isNotEmpty ? Icons.sync_rounded : Icons.notes_rounded,
-                              size: 12,
-                              color: activeTextColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              synced != null && synced.isNotEmpty ? 'Karaoke Synced' : 'Plain Text',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: activeTextColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_activeLanguage != 'Original') ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.amber, width: 0.8),
-                          ),
-                          child: Text(
-                            'AI Translated ($_activeLanguage)',
-                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _toggleLineExplanations,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _showExplanations ? Colors.amber.withValues(alpha: 0.25) : activeTextColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: _showExplanations ? Colors.amber : activeTextColor.withValues(alpha: 0.3), width: 0.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isLoadingExplanations) ...[
-                                const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.amber)),
-                                const SizedBox(width: 4),
-                              ] else ...[
-                                Icon(Icons.auto_awesome_rounded, size: 12, color: _showExplanations ? Colors.amber : activeTextColor),
-                                const SizedBox(width: 4),
-                              ],
-                              Text(
-                                _showExplanations ? 'Line Explanations ✨' : 'Summarize Lines ✨',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: _showExplanations ? Colors.amber : activeTextColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        child: (_showExplanations)
+                            ? _buildExplanationChip(
+                                key: ValueKey('exp_$index${explanation ?? ''}'),
+                                isDark: isDark,
+                                isLoading: _isLoadingExplanations && explanation == null,
+                                explanation: explanation,
+                              )
+                            : const SizedBox.shrink(key: ValueKey('exp_empty')),
                       ),
                     ],
                   ),
                 ),
               ),
-              Divider(height: 1, color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08)),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
-              Expanded(
-                child: widget.lyricsResult.instrumental
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.music_note_rounded, size: 64, color: activeTextColor.withValues(alpha: 0.5)),
-                            const SizedBox(height: 16),
-                            Text(
-                              '🎼 Instrumental Track',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
-                            ),
-                            const SizedBox(height: 8),
-                            Text('This song has no spoken or sung lyrics.', style: TextStyle(color: subTextColor)),
-                          ],
-                        ),
+  Widget _buildExplanationChip({
+    required Key key,
+    required bool isDark,
+    required bool isLoading,
+    required String? explanation,
+  }) {
+    if (isLoading) {
+      return Padding(
+        key: key,
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          '✨ Reading between the lines…',
+          style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.amber.withValues(alpha: 0.7)),
+        ),
+      );
+    }
+    if (explanation == null || explanation.isEmpty) {
+      return SizedBox.shrink(key: key);
+    }
+    return Container(
+      key: key,
+      margin: const EdgeInsets.only(top: 6, bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [const Color(0xFF2B2215), const Color(0xFF201A10)]
+              : [const Color(0xFFFFF9EE), const Color(0xFFFFF3DA)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border(left: BorderSide(color: Colors.amber.withValues(alpha: 0.7), width: 3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('💡 ', style: TextStyle(fontSize: 12)),
+          Expanded(
+            child: Text(
+              explanation,
+              style: TextStyle(
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.amber.shade200 : Colors.brown.shade900,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlainList({
+    required bool isDark,
+    required Color textColor,
+    required Color subTextColor,
+    required double inactiveFontSize,
+  }) {
+    if (_currentPlainLyrics == null || _currentPlainLyrics!.isEmpty) {
+      return Center(child: Text('No lyrics available.', style: TextStyle(fontSize: 16, color: subTextColor)));
+    }
+    final lines = _currentPlainLyrics!.split('\n');
+    return ListView.builder(
+      padding: const EdgeInsets.all(24),
+      itemCount: lines.length,
+      itemBuilder: (context, idx) {
+        final lineStr = lines[idx];
+        final explanation = _lineExplanations[idx];
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                style: TextStyle(
+                  fontSize: inactiveFontSize,
+                  height: 1.5,
+                  color: textColor.withValues(alpha: 0.85),
+                  fontFamily: 'Outfit',
+                ),
+                child: Text(lineStr.isEmpty ? '♪' : lineStr),
+              ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: SizeTransition(sizeFactor: anim, child: child),
+                ),
+                child: (_showExplanations && explanation != null && explanation.isNotEmpty)
+                    ? _buildExplanationChip(
+                        key: ValueKey('plain_exp_$idx'),
+                        isDark: isDark,
+                        isLoading: false,
+                        explanation: explanation,
                       )
-                    : (synced != null && synced.isNotEmpty)
-                        ? NotificationListener<ScrollNotification>(
-                            onNotification: (notification) {
-                              if (notification is ScrollStartNotification && notification.dragDetails != null) {
-                                _userIsScrolling = true;
-                                _userScrollTimer?.cancel();
-                              } else if (notification is ScrollEndNotification) {
-                                _userScrollTimer?.cancel();
-                                _userScrollTimer = Timer(const Duration(milliseconds: 3500), () {
-                                  if (mounted) {
-                                    setState(() {
-                                      _userIsScrolling = false;
-                                    });
-                                    _scrollToActiveLine(_activeLineIndex, synced.length);
-                                  }
-                                });
-                              }
-                              return false;
-                            },
-                            child: ListView.builder(
-                              controller: _scrollController,
-                              padding: EdgeInsets.only(
-                                left: 24,
-                                right: 24,
-                                top: MediaQuery.of(context).size.height * 0.35,
-                                bottom: MediaQuery.of(context).size.height * 0.40,
-                              ),
-                              itemCount: synced.length,
-                              itemBuilder: (context, index) {
-                                final line = synced[index];
-                                final isActive = index == _activeLineIndex;
-                                final explanation = _lineExplanations[index];
-
-                                return Container(
-                                  key: _getKeyForIndex(index),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      _userScrollTimer?.cancel();
-                                      _userIsScrolling = false;
-                                      ref.read(playbackProvider.notifier).seekToDuration(line.time);
-                                      _scrollToActiveLine(index, synced.length);
-                                    },
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 250),
-                                      curve: Curves.easeOutCubic,
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          AnimatedDefaultTextStyle(
-                                            duration: const Duration(milliseconds: 250),
-                                            curve: Curves.easeOutCubic,
-                                            style: TextStyle(
-                                              fontSize: isActive ? activeFontSize : inactiveFontSize,
-                                              fontWeight: isActive ? FontWeight.w900 : FontWeight.w500,
-                                              color: isActive ? activeTextColor : inactiveTextColor,
-                                              height: 1.4,
-                                              fontFamily: 'Outfit',
-                                            ),
-                                            child: Text(line.text.isEmpty ? '♪' : line.text),
-                                          ),
-
-                                          // Premium AI Summarized Lyric Line Explanations
-                                          if (_showExplanations) ...[
-                                            const SizedBox(height: 4),
-                                            if (_isLoadingExplanations && explanation == null)
-                                              Text(
-                                                ' (✨ Analyzing line meaning...)',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontStyle: FontStyle.italic,
-                                                  color: Colors.amber.withValues(alpha: 0.7),
-                                                ),
-                                              )
-                                            else if (explanation != null && explanation.isNotEmpty)
-                                              Container(
-                                                margin: const EdgeInsets.only(top: 4, bottom: 2),
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                decoration: BoxDecoration(
-                                                  color: isDark ? const Color(0xFF2B2215) : const Color(0xFFFFF9EE),
-                                                  borderRadius: BorderRadius.circular(10),
-                                                  border: Border.all(color: Colors.amber.withValues(alpha: 0.45), width: 0.8),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.amber.withValues(alpha: 0.08),
-                                                      blurRadius: 6,
-                                                      offset: const Offset(0, 2),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    const Text('💡 ', style: TextStyle(fontSize: 12)),
-                                                    Expanded(
-                                                      child: Text(
-                                                        '($explanation)',
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          fontStyle: FontStyle.italic,
-                                                          fontWeight: FontWeight.w600,
-                                                          color: isDark ? Colors.amber.shade200 : Colors.brown.shade900,
-                                                          height: 1.35,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          )
-                        : ListView(
-                            padding: const EdgeInsets.all(24),
-                            children: [
-                              if (_currentPlainLyrics != null && _currentPlainLyrics!.isNotEmpty)
-                                ..._currentPlainLyrics!.split('\n').asMap().entries.map((entry) {
-                                  final idx = entry.key;
-                                  final lineStr = entry.value;
-                                  final explanation = _lineExplanations[idx];
-
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 6),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        AnimatedDefaultTextStyle(
-                                          duration: const Duration(milliseconds: 250),
-                                          curve: Curves.easeOutCubic,
-                                          style: TextStyle(
-                                            fontSize: inactiveFontSize,
-                                            height: 1.5,
-                                            color: textColor.withValues(alpha: 0.85),
-                                            fontFamily: 'Outfit',
-                                          ),
-                                          child: Text(lineStr.isEmpty ? '♪' : lineStr),
-                                        ),
-                                        if (_showExplanations && explanation != null && explanation.isNotEmpty) ...[
-                                          const SizedBox(height: 4),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: isDark ? const Color(0xFF2B2215) : const Color(0xFFFFF9EE),
-                                              borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: Colors.amber.withValues(alpha: 0.45), width: 0.8),
-                                            ),
-                                            child: Row(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                const Text('💡 ', style: TextStyle(fontSize: 12)),
-                                                Expanded(
-                                                  child: Text(
-                                                    '($explanation)',
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontStyle: FontStyle.italic,
-                                                      fontWeight: FontWeight.w600,
-                                                      color: isDark ? Colors.amber.shade200 : Colors.brown.shade900,
-                                                      height: 1.35,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  );
-                                })
-                              else
-                                Text('No lyrics available.', style: TextStyle(fontSize: 16, color: subTextColor)),
-                            ],
-                          ),
+                    : const SizedBox.shrink(key: ValueKey('plain_exp_empty')),
               ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
