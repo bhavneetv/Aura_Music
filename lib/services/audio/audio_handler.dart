@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:audio_service/audio_service.dart';
@@ -121,10 +122,6 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> pause() async {
     await _activePlayer.pause();
     _broadcastState();
-    try {
-      final session = await AudioSession.instance;
-      await session.setActive(false);
-    } catch (_) {}
   }
 
   @override
@@ -142,10 +139,6 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
     _broadcastState();
-    try {
-      final session = await AudioSession.instance;
-      await session.setActive(false);
-    } catch (_) {}
   }
 
   @override
@@ -596,7 +589,17 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       ProcessingState.completed: AudioProcessingState.completed,
     };
 
-    final isPlaying = _activePlayer.playing;
+    final pState = _activePlayer.processingState;
+    // CRITICAL iOS FIX: When a track reaches 'completed', the player's
+    // .playing becomes false. If we broadcast playing=false to iOS
+    // MPNowPlayingInfoCenter, iOS will immediately suspend our background
+    // task before nextTrack() can start the next song. Keep reporting
+    // playing=true during the completed state so iOS keeps us alive
+    // through the transition. The next playTrack() call will broadcast
+    // the real state within milliseconds.
+    final isPlaying = pState == ProcessingState.completed
+        ? true
+        : _activePlayer.playing;
 
     playbackState.add(PlaybackState(
       controls: [
@@ -616,7 +619,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         MediaAction.seekBackward,
       },
       androidCompactActionIndices: const [0, 1, 3],
-      processingState: stateMap[_activePlayer.processingState] ?? AudioProcessingState.idle,
+      processingState: stateMap[pState] ?? AudioProcessingState.idle,
       playing: isPlaying,
       updatePosition: _activePlayer.position,
       bufferedPosition: _activePlayer.bufferedPosition,

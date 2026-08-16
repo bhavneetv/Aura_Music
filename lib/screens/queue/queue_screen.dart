@@ -173,7 +173,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           child: upcomingTracks.isEmpty
               ? const Center(child: Text('No upcoming songs in queue', style: TextStyle(color: Colors.grey)))
               : ReorderableListView.builder(
-                  padding: const EdgeInsets.only(bottom: 96),
+                  padding: const EdgeInsets.only(bottom: 150),
                   itemCount: upcomingTracks.length,
                   onReorder: (oldIndex, newIndex) {
                     triggerHaptic(HapticFeedbackType.medium);

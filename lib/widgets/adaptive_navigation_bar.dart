@@ -77,12 +77,20 @@ class AdaptiveNavigationBar extends StatelessWidget {
         onDestinationSelected(index);
       },
       tint: accentColor,
-      height: 85,
+      iconSize: 18.0,
+      height: 80,
       items: List.generate(destinations.length, (index) {
         final dest = destinations[index];
         final isSelected = selectedIndex == index;
         return CNTabBarItem(
-          icon: CNSymbol(_getIOSSFSymbolName(isSelected ? (dest.selectedIcon ?? dest.icon) : dest.icon, isSelected: isSelected, isSearch: dest.isSearch)),
+          icon: CNSymbol(
+            _getIOSSFSymbolName(
+              isSelected ? (dest.selectedIcon ?? dest.icon) : dest.icon,
+              isSelected: isSelected,
+              isSearch: dest.isSearch,
+            ),
+            size: 18.0,
+          ),
           label: dest.label,
         );
       }),

@@ -404,7 +404,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 96, top: 12),
+          padding: const EdgeInsets.only(bottom: 150, top: 12),
           itemCount: tracks.length,
           itemBuilder: (context, index) {
             final track = tracks[index];
@@ -471,7 +471,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 96),
+      padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 150),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 16,
@@ -565,7 +565,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 96),
+                  padding: const EdgeInsets.only(bottom: 150),
                   itemCount: _playlists.length,
                   itemBuilder: (context, index) {
                     final playlist = _playlists[index];

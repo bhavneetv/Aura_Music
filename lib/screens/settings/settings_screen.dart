@@ -412,7 +412,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             MediaQuery.of(context).platformBrightness == Brightness.dark);
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 96, top: 16),
+      padding: const EdgeInsets.only(bottom: 150, top: 16),
       children: [
         // Title
         Padding(

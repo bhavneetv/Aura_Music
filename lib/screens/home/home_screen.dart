@@ -69,6 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return Scaffold(
+      extendBody: true,
       bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
       body: SafeArea(
         bottom: false,
@@ -79,11 +80,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               tabBody,
 
               // Persistent Mini Player above bottom nav bar
-              const Positioned(
+              Positioned(
                 left: 0,
                 right: 0,
-                bottom: 0,
-                child: MiniPlayer(),
+                bottom: (customBranding.navBarStyle == 'os_style' && PlatformInfo.isIOS)
+                    ? 82.0
+                    : (customBranding.navBarStyle == 'os_style' ? 70.0 : 76.0),
+                child: const MiniPlayer(),
               ),
             ],
           ),
@@ -155,7 +158,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 110, top: 12),
+          padding: const EdgeInsets.only(bottom: 150, top: 12),
           children: [
             // welcome header
             _buildHomeHeader(context),

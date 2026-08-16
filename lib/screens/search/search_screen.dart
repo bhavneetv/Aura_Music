@@ -821,7 +821,7 @@ Output ONLY valid JSON:
       if (isFocused) {
         // FOCUSED STATE: Show ONLY Search History query chips
         return ListView(
-          padding: const EdgeInsets.only(bottom: 96, top: 16),
+          padding: const EdgeInsets.only(bottom: 150, top: 16),
           children: [
             _buildChipSection(
               _isAiMode ? 'AI Recent Searches' : 'Search History',
@@ -837,7 +837,7 @@ Output ONLY valid JSON:
       final historyTracks = _getHistoryTracksList();
 
       return ListView(
-        padding: const EdgeInsets.only(bottom: 96, top: 16),
+        padding: const EdgeInsets.only(bottom: 150, top: 16),
         children: [
           // 1. AI Playlist Groups Section
           if (aiSessionsMap.isNotEmpty) ...[
@@ -886,7 +886,7 @@ Output ONLY valid JSON:
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 96, top: 8),
+          padding: const EdgeInsets.only(bottom: 150, top: 8),
           itemCount: _filteredTracks.length + (showAiBanner ? 1 : 0),
           itemBuilder: (context, index) {
             if (showAiBanner && index == 0) {
