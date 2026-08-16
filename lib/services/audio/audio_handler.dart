@@ -46,6 +46,13 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   // Track whether playback was interrupted so we can auto-resume
   bool _wasPlayingBeforeInterruption = false;
 
+  // CRITICAL iOS FIX: Flag that keeps the system notification reporting
+  // playing=true during the ENTIRE gap between two songs (from completed
+  // through loading/buffering until the next track's play() succeeds).
+  // Without this, iOS suspends the app during the loading phase because
+  // the player reports playing=false while setAudioSource() is loading.
+  bool _isTrackTransitioning = false;
+
   // Track active crossfade timer so it can be cancelled
   Timer? _crossfadeTimer;
 
@@ -231,6 +238,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     this.mediaItem.add(mediaItem);
     
     try {
+      // CRITICAL: Mark transition BEFORE any async work so _broadcastState()
+      // keeps reporting playing=true to iOS throughout the load.
+      _isTrackTransitioning = true;
+      _broadcastState(); // Immediately tell iOS we're still playing
+
       logPlaybackEvent(
         eventName: 'PLAY_TRACK_START',
         currentTrackId: track.id,
@@ -264,6 +276,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         _positionController.add(_activePlayer.position);
         _durationController.add(_activePlayer.duration);
         _playerStateController.add(_activePlayer.playerState);
+        _isTrackTransitioning = false;
         _broadcastState();
       } else {
         // Cold start (track wasn't preloaded)
@@ -277,6 +290,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         }
         await _activePlayer.setVolume(1.0);
         await _activePlayer.play();
+        _isTrackTransitioning = false;
       }
       
       logPlaybackEvent(
@@ -285,6 +299,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         overrideAudioSource: url,
       );
     } catch (e) {
+      _isTrackTransitioning = false;
       logPlaybackEvent(
         eventName: 'PLAY_TRACK_FAILED',
         currentTrackId: track.id,
@@ -309,6 +324,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     final incomingPlayer = _fadePlayer;
 
     try {
+      // Mark transitioning so iOS keeps us alive during the load
+      _isTrackTransitioning = true;
+      _broadcastState();
+
       await _ensureAudioSessionActive();
       String url = _normalizeUrl(nextTrack.audioUrl);
 
@@ -353,6 +372,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       onSwapped?.call();
 
       // Broadcast updated state with the new active player
+      _isTrackTransitioning = false; // Crossfade swap done, real audio is playing
       _positionController.add(_activePlayer.position);
       _durationController.add(_activePlayer.duration);
       _playerStateController.add(_activePlayer.playerState);
@@ -403,6 +423,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
       return true;
     } catch (e) {
+      _isTrackTransitioning = false;
       logPlaybackEvent(
         eventName: 'CROSSFADE_FAILED',
         currentTrackId: nextTrack.id,
@@ -421,6 +442,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   Future<void> prepareAndResume(Track track, Duration position) async {
     try {
+      _isTrackTransitioning = true;
+      _broadcastState();
+
       await _ensureAudioSessionActive();
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_START',
@@ -441,12 +465,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       await _activePlayer.seek(position);
       await _activePlayer.setVolume(1.0);
       await _activePlayer.play();
+      _isTrackTransitioning = false;
 
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_SUCCESS',
         currentTrackId: track.id,
       );
     } catch (e) {
+      _isTrackTransitioning = false;
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_FAILED',
         currentTrackId: track.id,
@@ -506,6 +532,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
             switch (event.type) {
               case AudioInterruptionType.pause:
               case AudioInterruptionType.duck:
+                _ensureAudioSessionActive();
                 _activePlayer.play();
                 break;
               case AudioInterruptionType.unknown:
@@ -590,14 +617,16 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     };
 
     final pState = _activePlayer.processingState;
-    // CRITICAL iOS FIX: When a track reaches 'completed', the player's
-    // .playing becomes false. If we broadcast playing=false to iOS
-    // MPNowPlayingInfoCenter, iOS will immediately suspend our background
-    // task before nextTrack() can start the next song. Keep reporting
-    // playing=true during the completed state so iOS keeps us alive
-    // through the transition. The next playTrack() call will broadcast
-    // the real state within milliseconds.
-    final isPlaying = pState == ProcessingState.completed
+    // CRITICAL iOS FIX: Keep reporting playing=true to the system during
+    // the ENTIRE window between songs — from the moment the active track
+    // reaches 'completed' through the loading/buffering of the next track
+    // until play() actually starts on the new track. Without this, iOS
+    // sees playing=false during the loading phase and immediately suspends
+    // the app, killing the next-track transition.
+    //
+    // _isTrackTransitioning covers the loading gap (set in playTrack/crossfadeToTrack).
+    // pState == completed covers the instant before the provider calls nextTrack().
+    final isPlaying = (_isTrackTransitioning || pState == ProcessingState.completed)
         ? true
         : _activePlayer.playing;
 
