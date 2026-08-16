@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -84,10 +86,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   topRight: Radius.circular(28),
                 ),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                   Center(
                     child: Container(
                       width: 36,
@@ -173,6 +176,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
+
+                  if (Platform.isAndroid) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            final corePalette = await DynamicColorPlugin.getCorePalette();
+                            if (corePalette != null) {
+                              final color = Color(corePalette.primary.get(40));
+                              customNotifier.updateAccentColor(color.red, color.green, color.blue);
+                              if (context.mounted) {
+                                Navigator.pop(context); // Close the sheet to see the change
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Phone theme synced successfully!')),
+                                );
+                              }
+                            } else {
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Dynamic color not supported on this device.')),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Failed to get phone theme color.')),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.sync_rounded, size: 20),
+                        label: const Text('Sync Phone Theme', style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: activeCustomState.accentColor.withOpacity(0.5)),
+                          foregroundColor: activeCustomState.accentColor,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
                   // RGB Accent color sliders
                   Row(
@@ -273,6 +322,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ],
                   ),
                 ],
+              ),
               ),
             );
           },
