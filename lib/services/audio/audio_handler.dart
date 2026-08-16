@@ -121,7 +121,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   @override
   Future<void> play() async {
     await _ensureAudioSessionActive();
-    await _activePlayer.play();
+    _activePlayer.play(); // don't await, it blocks until song ends
     _broadcastState();
   }
 
@@ -266,7 +266,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         _fadePlayer = outgoingPlayer;
         
         await _activePlayer.setVolume(1.0);
-        await _activePlayer.play();
+        _activePlayer.play(); // DON'T AWAIT: it blocks until song finishes!
         _preloadedTrack = null;
 
         // Clean up the old player asynchronously
@@ -289,7 +289,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
           await _activePlayer.setFilePath(url);
         }
         await _activePlayer.setVolume(1.0);
-        await _activePlayer.play();
+        _activePlayer.play(); // DON'T AWAIT
         _isTrackTransitioning = false;
       }
       
@@ -347,7 +347,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       }
       
       // 2. Start playback on the incoming player at volume 0
-      await incomingPlayer.play();
+      incomingPlayer.play(); // DON'T AWAIT
 
       // 3. NOW swap active players — incoming is loaded and playing
       _activePlayer = incomingPlayer;
@@ -464,7 +464,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       
       await _activePlayer.seek(position);
       await _activePlayer.setVolume(1.0);
-      await _activePlayer.play();
+      _activePlayer.play(); // DON'T AWAIT
       _isTrackTransitioning = false;
 
       logPlaybackEvent(
@@ -618,17 +618,21 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
     final pState = _activePlayer.processingState;
     // CRITICAL iOS FIX: Keep reporting playing=true to the system during
-    // the ENTIRE window between songs — from the moment the active track
-    // reaches 'completed' through the loading/buffering of the next track
-    // until play() actually starts on the new track. Without this, iOS
-    // sees playing=false during the loading phase and immediately suspends
-    // the app, killing the next-track transition.
-    //
-    // _isTrackTransitioning covers the loading gap (set in playTrack/crossfadeToTrack).
-    // pState == completed covers the instant before the provider calls nextTrack().
+    // the ENTIRE window between songs.
     final isPlaying = (_isTrackTransitioning || pState == ProcessingState.completed)
         ? true
         : _activePlayer.playing;
+
+    var mappedState = stateMap[pState] ?? AudioProcessingState.idle;
+
+    // CRITICAL iOS FIX: Never broadcast 'completed' or 'idle' to the system
+    // if we are transitioning to the next track, as audio_service will drop
+    // the background assertion. Broadcast 'buffering' instead.
+    if (_isTrackTransitioning || pState == ProcessingState.completed) {
+      if (mappedState == AudioProcessingState.completed || mappedState == AudioProcessingState.idle) {
+        mappedState = AudioProcessingState.buffering;
+      }
+    }
 
     playbackState.add(PlaybackState(
       controls: [
@@ -648,7 +652,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         MediaAction.seekBackward,
       },
       androidCompactActionIndices: const [0, 1, 3],
-      processingState: stateMap[pState] ?? AudioProcessingState.idle,
+      processingState: mappedState,
       playing: isPlaying,
       updatePosition: _activePlayer.position,
       bufferedPosition: _activePlayer.bufferedPosition,
