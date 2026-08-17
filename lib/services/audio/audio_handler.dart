@@ -191,7 +191,13 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
 
-    try { await _fadePlayer.stop(); } catch (_) {}
+    // CRITICAL iOS FIX: Use pause() instead of stop() for the outgoing player.
+    // Calling stop() on an AVPlayer in the background can cause iOS to aggressively
+    // throttle network privileges or drop the audio session, causing the newly
+    // started player to stall after playing its initial 1-second buffer.
+    // The player will naturally release resources when setAudioSource is called next.
+    try { await _fadePlayer.pause(); } catch (_) {}
+    try { await _fadePlayer.seek(Duration.zero); } catch (_) {}
     try { await _fadePlayer.setVolume(1.0); } catch (_) {}
     try { await _activePlayer.setVolume(1.0); } catch (_) {}
   }
@@ -291,6 +297,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await _activePlayer.setVolume(1.0);
         _activePlayer.play(); // DON'T AWAIT
         _isTrackTransitioning = false;
+        _broadcastState();
       }
       
       logPlaybackEvent(
@@ -404,9 +411,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
       await completer.future;
 
-      // 5. Hard stop and reset volume of outgoing player
+      // 5. Pause and reset volume of outgoing player instead of hard stop
       try {
-        await _fadePlayer.stop();
+        await _fadePlayer.pause();
+        await _fadePlayer.seek(Duration.zero);
         await _fadePlayer.setVolume(1.0);
       } catch (_) {}
 
@@ -431,9 +439,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       );
       _crossfadeTimer?.cancel();
       _crossfadeTimer = null;
-      // Ensure fade player is stopped on failure
+      // Ensure fade player is paused on failure
       try {
-        await _fadePlayer.stop();
+        await _fadePlayer.pause();
         await _fadePlayer.setVolume(1.0);
       } catch (_) {}
       return false;
