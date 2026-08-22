@@ -71,7 +71,7 @@ public class AudioRoutingPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         // Headphones / Earphones if connected
         if let availableInputs = session.availableInputs {
             for input in availableInputs {
-                if input.portType == .headphones || input.portType == .headset || input.portType == .bluetoothHFP {
+                if input.portType == .headphones || input.portType == .bluetoothHFP {
                     let isActive = activePortTypes.contains(input.portType)
                     list.append([
                         "id": input.uid,
@@ -91,7 +91,7 @@ public class AudioRoutingPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 typeName = "speaker"
             case .builtInReceiver:
                 typeName = "earpiece"
-            case .headphones, .headset:
+            case .headphones:
                 typeName = "headset"
             case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
                 typeName = "bluetooth"

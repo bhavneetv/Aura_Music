@@ -39,7 +39,9 @@ import Intents
     })
 
     GeneratedPluginRegistrant.register(with: self)
-    AudioRoutingPlugin.register(with: self)
+    if let registrar = self.registrar(forPlugin: "AudioRoutingPlugin") {
+      AudioRoutingPlugin.register(with: registrar)
+    }
 
     // Check for pending Siri queries stored in shared App Group defaults
     checkPendingSiriQuery()
