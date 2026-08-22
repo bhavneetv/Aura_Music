@@ -41,7 +41,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
       children: [
         // 1. Page Title & Header Actions
         Padding(
-          padding: const EdgeInsets.only(left: 20, right: 12, top: 16, bottom: 8),
+          padding: EdgeInsets.only(left: 20, right: 12, top: MediaQuery.of(context).padding.top + 8, bottom: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [

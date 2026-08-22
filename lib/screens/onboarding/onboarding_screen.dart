@@ -54,10 +54,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     {'name': 'Marathi', 'native': 'मराठी', 'flag': '🚩'},
     {'name': 'Bengali', 'native': 'বাংলা', 'flag': '🐯'},
     {'name': 'Urdu', 'native': 'اردو', 'flag': '🌙'},
-    {'name': 'Spanish', 'native': 'Español', 'flag': '🇪🇸'},
-    {'name': 'French', 'native': 'Français', 'flag': '🇫🇷'},
-    {'name': 'Japanese', 'native': '日本語', 'flag': '🇯🇵'},
-    {'name': 'Korean', 'native': '한국어', 'flag': '🇰🇷'},
+
   ];
   final Set<String> _selectedLanguages = {'English', 'Hindi'};
 

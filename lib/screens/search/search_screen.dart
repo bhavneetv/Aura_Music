@@ -776,7 +776,7 @@ Output ONLY valid JSON:
       children: [
         // Premium Header & Search Bar Container
         Padding(
-          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 8),
+          padding: EdgeInsets.only(left: 20, right: 20, top: MediaQuery.of(context).padding.top + 8, bottom: 8),
           child: Column(
             children: [
               Row(

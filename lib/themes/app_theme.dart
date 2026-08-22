@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
@@ -50,6 +51,18 @@ class AppTheme {
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBg,
       primaryColor: accentColor,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+          systemNavigationBarColor: Colors.transparent,
+        ),
+      ),
       colorScheme: ColorScheme.dark(
         primary: accentColor,
         surface: darkSurface,
@@ -106,6 +119,18 @@ class AppTheme {
       brightness: Brightness.light,
       scaffoldBackgroundColor: lightBg,
       primaryColor: accentColor,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+          systemNavigationBarColor: Colors.transparent,
+        ),
+      ),
       colorScheme: ColorScheme.light(
         primary: accentColor,
         surface: lightSurface,

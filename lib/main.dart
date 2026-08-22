@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -19,6 +20,19 @@ AudioHandler? _audioHandlerInstance;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
+
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
@@ -54,13 +68,29 @@ class MyApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final customBranding = ref.watch(customizationProvider);
 
-    return MaterialApp.router(
-      title: customBranding.appName,
-      debugShowCheckedModeBanner: false,
-      themeMode: themeMode,
-      theme: AppTheme.buildLightTheme(customBranding.accentColor),
-      darkTheme: AppTheme.buildDarkTheme(customBranding.accentColor),
-      routerConfig: appRouter,
+    final isDark = themeMode == ThemeMode.dark ||
+        (themeMode == ThemeMode.system &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
+
+    final overlayStyle = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    );
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayStyle,
+      child: MaterialApp.router(
+        title: customBranding.appName,
+        debugShowCheckedModeBanner: false,
+        themeMode: themeMode,
+        theme: AppTheme.buildLightTheme(customBranding.accentColor),
+        darkTheme: AppTheme.buildDarkTheme(customBranding.accentColor),
+        routerConfig: appRouter,
+      ),
     );
   }
 }

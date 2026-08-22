@@ -72,6 +72,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       extendBody: true,
       bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
       body: SafeArea(
+        top: false,
         bottom: false,
         child: NetworkStatusBanner(
           child: Stack(
@@ -153,7 +154,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 160, top: 12),
+          padding: EdgeInsets.only(bottom: 160, top: MediaQuery.of(context).padding.top + 8),
           children: [
             // 1. Personal Header & Greeting
             _buildHomeHeader(context, accentColor),

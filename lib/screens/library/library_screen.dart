@@ -362,7 +362,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       children: [
         // 1. Header & Title Bar
         Padding(
-          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 8),
+          padding: EdgeInsets.only(left: 20, right: 20, top: MediaQuery.of(context).padding.top + 8, bottom: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
