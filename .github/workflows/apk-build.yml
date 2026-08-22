@@ -42,10 +42,27 @@ jobs:
           echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> .env
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'BHanu505verma' }}" >> .env
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || 'BHanu505verma' }}" >> .env
+          echo "KEYSTORE_BASE64=${{ secrets.KEYSTORE_BASE64 }}" >> .env
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'BHanu505verma' }}" >> $GITHUB_ENV
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || 'BHanu505verma' }}" >> $GITHUB_ENV
 
-      - name: Analyze Project
-        run: flutter analyze
-        continue-on-error: true
+      - name: Setup Android Release Keystore
+        run: |
+          KEY_B64="${{ secrets.KEYSTORE_BASE64 }}"
+          if [ -z "$KEY_B64" ]; then
+            KEY_B64=$(grep KEYSTORE_BASE64 .env | cut -d '=' -f2- | tr -d '"')
+          fi
+          echo "$KEY_B64" | base64 --decode > android/aura-release-key.jks
+          cat <<EOF > android/key.properties
+          storePassword=${{ env.ANDROID_STORE_PASSWORD }}
+          keyPassword=${{ env.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ env.ANDROID_KEY_ALIAS }}
+          storeFile=../aura-release-key.jks
+          EOF
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}

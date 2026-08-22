@@ -27,6 +27,12 @@ jobs:
           echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> .env
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'BHanu505verma' }}" >> .env
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || 'BHanu505verma' }}" >> .env
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'BHanu505verma' }}" >> $GITHUB_ENV
+          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || 'BHanu505verma' }}" >> $GITHUB_ENV
 
       - name: Build iOS Release App (Unsigned)
         run: |
