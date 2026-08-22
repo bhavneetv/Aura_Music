@@ -1,11 +1,9 @@
-import Flutter
 import UIKit
-import AVFoundation
+import Flutter
 import Intents
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  private let channelName = "com.example.music_app/voice_assistant"
   private let appGroupId = "group.com.example.musicApp"
   private var voiceChannel: FlutterMethodChannel?
 
@@ -13,26 +11,22 @@ import Intents
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    do {
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP])
-      try AVAudioSession.sharedInstance().setActive(true)
-    } catch {
-      print("Failed to set AVAudioSession category: \(error)")
-    }
-
-    let controller: FlutterViewController = window?.rootViewController as! FlutterViewController
-    voiceChannel = FlutterMethodChannel(name: channelName, binaryMessenger: controller.binaryMessenger)
+    let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
+    voiceChannel = FlutterMethodChannel(
+      name: "com.example.music_app/siri",
+      binaryMessenger: controller.binaryMessenger
+    )
 
     voiceChannel?.setMethodCallHandler({ [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
-      if call.method == "syncLibraryIndex" {
+      if call.method == "updateLibraryIndex" {
         if let args = call.arguments as? [String: Any], let jsonStr = args["json"] as? String {
           let success = self.writeLibraryIndexToAppGroup(jsonStr: jsonStr)
           result(success)
         } else {
-          result(FlutterError(code: "INVALID_ARGUMENTS", message: "JSON required", details: nil))
+          result(false)
         }
-      } else if call.method == "donateMediaItem" {
+      } else if call.method == "donateMediaIntent" {
         if let args = call.arguments as? [String: Any] {
           self.donateMediaIntent(args: args)
           result(true)
@@ -59,7 +53,7 @@ import Intents
     restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
   ) -> Bool {
     if let intent = userActivity.interaction?.intent as? INPlayMediaIntent {
-      let query = intent.mediaSearch?.mediaName ?? intent.mediaContainer?.name ?? ""
+      let query = intent.mediaSearch?.mediaName ?? intent.mediaContainer?.title ?? ""
       if !query.isEmpty {
         sendVoiceQueryToFlutter(query: query)
         return true
@@ -86,7 +80,6 @@ import Intents
   }
 
   private func donateMediaIntent(args: [String: Any]) {
-    let intent = INPlayMediaIntent()
     let title = args["title"] as? String ?? ""
     let artist = args["artist"] as? String ?? ""
     
@@ -96,13 +89,22 @@ import Intents
       mediaName: title,
       artistName: artist,
       albumName: args["album"] as? String,
-      genreName: args["genre"] as? String,
-      moodName: nil,
+      genreNames: (args["genre"] as? String).map { [$0] },
+      moodNames: nil,
       releaseDate: nil,
-      reference: nil,
+      reference: .unknown,
       mediaIdentifier: args["id"] as? String
     )
-    intent.mediaSearch = search
+    let intent = INPlayMediaIntent(
+      mediaItems: nil,
+      mediaContainer: nil,
+      playShuffled: nil,
+      playbackRepeatMode: .unknown,
+      resumePlayback: nil,
+      playbackQueueLocation: .unknown,
+      playbackSpeed: nil,
+      mediaSearch: search
+    )
     
     let interaction = INInteraction(intent: intent, response: nil)
     interaction.donate { error in
@@ -128,6 +130,6 @@ import Intents
   }
 
   private func sendVoiceQueryToFlutter(query: String) {
-    voiceChannel?.invokeMethod("onVoiceQuery", ["query": query])
+    voiceChannel?.invokeMethod("onVoiceQuery", arguments: ["query": query])
   }
 }
