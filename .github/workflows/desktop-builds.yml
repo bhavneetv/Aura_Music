@@ -29,6 +29,14 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
+      - name: Create .env File from Secrets
+        shell: bash
+        run: |
+          touch .env
+          echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
+          echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
+          echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
+
       - name: Build Windows Release
         run: |
           flutter build windows --release --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
@@ -67,6 +75,13 @@ jobs:
 
       - name: Install Dependencies
         run: flutter pub get
+
+      - name: Create .env File from Secrets
+        run: |
+          touch .env
+          echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
+          echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
+          echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
       - name: Build macOS Release (Unsigned)
         run: |
@@ -110,6 +125,13 @@ jobs:
 
       - name: Install Dependencies
         run: flutter pub get
+
+      - name: Create .env File from Secrets
+        run: |
+          touch .env
+          echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
+          echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
+          echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
       - name: Build Linux Release
         run: |

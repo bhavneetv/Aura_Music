@@ -26,10 +26,18 @@ if (keystorePropertiesFile.exists()) {
             !keyAlias.isNullOrBlank() && !storeFileStr.isNullOrBlank()) {
             val sFile = file(storeFileStr)
             if (sFile.exists() && sFile.length() > 0) {
-                hasValidKeystore = true
+                // Verify password and alias using Java KeyStore API
+                val ks = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+                FileInputStream(sFile).use { fis ->
+                    ks.load(fis, storePassword.toCharArray())
+                }
+                if (ks.containsAlias(keyAlias)) {
+                    hasValidKeystore = true
+                }
             }
         }
     } catch (e: Exception) {
+        println("AURA WARNING: Release keystore validation failed (${e.message}). Falling back to debug signing.")
         hasValidKeystore = false
     }
 }

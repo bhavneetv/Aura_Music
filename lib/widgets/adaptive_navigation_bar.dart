@@ -78,7 +78,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
       },
       tint: accentColor,
       iconSize: 18.0,
-      height: 80,
+      height: 50,
       items: List.generate(destinations.length, (index) {
         final dest = destinations[index];
         final isSelected = selectedIndex == index;

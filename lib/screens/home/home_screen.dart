@@ -71,8 +71,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final double bottomInset = MediaQuery.of(context).padding.bottom;
     final double bottomMargin = bottomInset > 0 ? bottomInset + 8.0 : 16.0;
     final double miniPlayerBottom = (customBranding.navBarStyle == 'os_style')
-        ? (PlatformInfo.isIOS ? bottomInset + 84.0 : bottomInset + 70.0)
-        : (bottomMargin + 64.0);
+        ? (PlatformInfo.isIOS ? bottomInset + 52.0 : (bottomInset > 0 ? bottomInset + 66.0 : 66.0))
+        : (bottomMargin + 56.0);
 
     return Scaffold(
       extendBody: true,
