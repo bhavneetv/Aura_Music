@@ -309,10 +309,81 @@ class Android16SquigglySliderTrackShape extends RoundedRectSliderTrackShape {
   }
 }
 
+// ── 5. Waveform Voice Note Track Shape ──────────────────────────
+
+class WaveformSliderTrackShape extends RoundedRectSliderTrackShape {
+  final int barCount;
+
+  WaveformSliderTrackShape({this.barCount = 50});
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+    double additionalActiveTrackHeight = 0.0,
+  }) {
+    final Canvas canvas = context.canvas;
+    final Rect trackRect = getPreferredRect(
+      parentBox: parentBox,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+      offset: offset,
+    );
+
+    final Paint activePaint = Paint()
+      ..color = sliderTheme.activeTrackColor ?? Colors.amber
+      ..style = PaintingStyle.fill;
+
+    final Paint inactivePaint = Paint()
+      ..color = (sliderTheme.inactiveTrackColor ?? Colors.grey).withValues(alpha: 0.25)
+      ..style = PaintingStyle.fill;
+
+    final double availableWidth = trackRect.width;
+    if (availableWidth <= 0) return;
+
+    final double gap = 2.0;
+    final double barWidth = math.max(2.0, (availableWidth - (gap * barCount)) / barCount);
+    final double centerY = trackRect.center.dy;
+    final double maxHeight = 16.0;
+
+    for (int i = 0; i < barCount; i++) {
+      final double x = trackRect.left + i * (barWidth + gap);
+      // Generate pseudo-acoustic bar heights
+      final double norm = 0.2 + 0.8 * (math.sin(i * 0.45) * math.cos(i * 0.2)).abs();
+      final double barHeight = math.max(3.0, norm * maxHeight);
+
+      final Rect barRect = Rect.fromCenter(
+        center: Offset(x + barWidth / 2, centerY),
+        width: barWidth,
+        height: barHeight,
+      );
+      final RRect rrect = RRect.fromRectAndRadius(barRect, Radius.circular(barWidth / 2));
+
+      if (x + barWidth / 2 <= thumbCenter.dx) {
+        canvas.drawRRect(rrect, activePaint);
+      } else {
+        canvas.drawRRect(rrect, inactivePaint);
+      }
+    }
+  }
+}
+
 // ── Helper to resolve track shape based on style name ────────
 
 SliderTrackShape resolveSliderTrackShape(String style) {
   switch (style.toLowerCase()) {
+    case 'waveform':
+    case 'voice_note':
+      return WaveformSliderTrackShape();
     case 'android16':
     case 'android_16':
       return Android16SquigglySliderTrackShape();

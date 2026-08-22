@@ -11,7 +11,9 @@ class StorageService {
   static const String _downloadsBox = 'downloads_box';
   static const String _queueBox = 'queue_box';
   static const String _affinityBox = 'affinity_box';
+  static const String _summaryBox = 'song_summaries_box';
   static const String _lyricsBox = 'lyrics_box';
+  static const String _waveformBox = 'waveform_box';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -27,6 +29,7 @@ class StorageService {
     await Hive.openBox(_affinityBox);
     await Hive.openBox(_summaryBox);
     await Hive.openBox(_lyricsBox);
+    await Hive.openBox(_waveformBox);
   }
 
   // ── Settings ────────────────────────────────────────────────
@@ -774,8 +777,6 @@ class StorageService {
 
   // ── Song Summary Cache ─────────────────────────────────────────
 
-  static const String _summaryBox = 'song_summaries_box';
-
   static Map<String, dynamic>? getSongSummary(String trackId) {
     final box = Hive.box(_summaryBox);
     final raw = box.get(trackId);
@@ -812,6 +813,25 @@ class StorageService {
 
   static Future<void> saveLyrics(String trackId, Map<String, dynamic> data) async {
     final box = Hive.box(_lyricsBox);
+    await box.put(trackId, jsonEncode(data));
+  }
+
+  // ── Waveform Cache ──────────────────────────────────────────────
+
+  static List<double>? getWaveformData(String trackId) {
+    final box = Hive.box(_waveformBox);
+    final raw = box.get(trackId);
+    if (raw == null) return null;
+    try {
+      final List decoded = jsonDecode(raw.toString());
+      return decoded.map((e) => (e as num).toDouble()).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> saveWaveformData(String trackId, List<double> data) async {
+    final box = Hive.box(_waveformBox);
     await box.put(trackId, jsonEncode(data));
   }
 }

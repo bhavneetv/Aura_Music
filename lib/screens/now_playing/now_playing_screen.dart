@@ -13,6 +13,7 @@ import '../../services/download/download_service.dart';
 import '../../services/ai/song_summary_service.dart';
 import '../../services/lyrics/lyrics_service.dart';
 import '../../widgets/custom_slider_track_shapes.dart';
+import '../../widgets/waveform_seek_bar.dart';
 import '../../themes/app_theme.dart';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
@@ -783,21 +784,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         ? Duration(milliseconds: (_dragProgressValue * state.totalDuration.inMilliseconds).round())
                         : state.currentPosition;
 
+                    final isWaveformStyle = StorageService.getProgressBarStyle() == 'waveform';
+
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: Column(
                         children: [
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              trackHeight: 3.5,
-                              activeTrackColor: customBranding.accentColor,
-                              thumbColor: customBranding.accentColor,
-                              trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                            ),
-                            child: Slider(
-                              value: sliderValue,
+                          if (isWaveformStyle)
+                            WaveformSeekBar(
+                              track: track,
+                              progress: sliderValue,
+                              currentPosition: currentDisplayPosition,
+                              totalDuration: state.totalDuration,
+                              activeColor: customBranding.accentColor,
+                              isDark: isDark,
                               onChangeStart: (val) {
                                 triggerHaptic(HapticFeedbackType.selection);
                                 setState(() {
@@ -816,8 +816,39 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                   _isDraggingProgress = false;
                                 });
                               },
+                            )
+                          else
+                            SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 3.5,
+                                activeTrackColor: customBranding.accentColor,
+                                thumbColor: customBranding.accentColor,
+                                trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                              ),
+                              child: Slider(
+                                value: sliderValue,
+                                onChangeStart: (val) {
+                                  triggerHaptic(HapticFeedbackType.selection);
+                                  setState(() {
+                                    _isDraggingProgress = true;
+                                    _dragProgressValue = val;
+                                  });
+                                },
+                                onChanged: (val) {
+                                  setState(() {
+                                    _dragProgressValue = val;
+                                  });
+                                },
+                                onChangeEnd: (val) {
+                                  notifier.seek(val);
+                                  setState(() {
+                                    _isDraggingProgress = false;
+                                  });
+                                },
+                              ),
                             ),
-                          ),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Row(
@@ -1633,22 +1664,34 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       const SizedBox(height: 20),
 
                       // Android 11 Wave / Progress Bar with Circle Knob
-                      SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 4.0,
-                          activeTrackColor: accentColor,
-                          inactiveTrackColor: textColor.withValues(alpha: 0.15),
-                          thumbColor: accentColor,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0, disabledThumbRadius: 8.0),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                      if (StorageService.getProgressBarStyle() == 'waveform')
+                        WaveformSeekBar(
+                          track: track,
+                          progress: progress,
+                          currentPosition: state.currentPosition,
+                          totalDuration: state.totalDuration,
+                          activeColor: accentColor,
+                          isDark: isDark,
+                          onChangeEnd: (val) => notifier.seek(val),
+                        )
+                      else
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 4.0,
+                            activeTrackColor: accentColor,
+                            inactiveTrackColor: textColor.withValues(alpha: 0.15),
+                            thumbColor: accentColor,
+                            trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.0, disabledThumbRadius: 8.0),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                          ),
+                          child: Slider(
+                            value: progress,
+                            onChanged: (val) {
+                              notifier.seek(val);
+                            },
+                          ),
                         ),
-                        child: Slider(
-                          value: progress,
-                          onChanged: (val) {
-                            notifier.seek(val);
-                          },
-                        ),
-                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: Row(
@@ -1883,20 +1926,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
                   children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 4.5,
-                        activeTrackColor: accentColor,
-                        inactiveTrackColor: textColor.withValues(alpha: 0.15),
-                        thumbColor: accentColor,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.5, disabledThumbRadius: 8.5),
-                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                    if (StorageService.getProgressBarStyle() == 'waveform')
+                      WaveformSeekBar(
+                        track: track,
+                        progress: progress,
+                        currentPosition: state.currentPosition,
+                        totalDuration: state.totalDuration,
+                        activeColor: accentColor,
+                        isDark: isDark,
+                        onChangeEnd: (val) => notifier.seek(val),
+                      )
+                    else
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 4.5,
+                          activeTrackColor: accentColor,
+                          inactiveTrackColor: textColor.withValues(alpha: 0.15),
+                          thumbColor: accentColor,
+                          trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8.5, disabledThumbRadius: 8.5),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 16.0),
+                        ),
+                        child: Slider(
+                          value: progress,
+                          onChanged: (val) => notifier.seek(val),
+                        ),
                       ),
-                      child: Slider(
-                        value: progress,
-                        onChanged: (val) => notifier.seek(val),
-                      ),
-                    ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Row(
@@ -2126,20 +2181,32 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   padding: const EdgeInsets.symmetric(horizontal: 28),
                   child: Column(
                     children: [
-                      SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 4.0,
-                          activeTrackColor: Colors.white,
-                          inactiveTrackColor: Colors.white.withValues(alpha: 0.2),
-                          thumbColor: Colors.white,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7.0, disabledThumbRadius: 7.0),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14.0),
+                      if (StorageService.getProgressBarStyle() == 'waveform')
+                        WaveformSeekBar(
+                          track: track,
+                          progress: progress,
+                          currentPosition: state.currentPosition,
+                          totalDuration: state.totalDuration,
+                          activeColor: Colors.white,
+                          isDark: true,
+                          onChangeEnd: (val) => notifier.seek(val),
+                        )
+                      else
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 4.0,
+                            activeTrackColor: Colors.white,
+                            inactiveTrackColor: Colors.white.withValues(alpha: 0.2),
+                            thumbColor: Colors.white,
+                            trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7.0, disabledThumbRadius: 7.0),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14.0),
+                          ),
+                          child: Slider(
+                            value: progress,
+                            onChanged: (val) => notifier.seek(val),
+                          ),
                         ),
-                        child: Slider(
-                          value: progress,
-                          onChanged: (val) => notifier.seek(val),
-                        ),
-                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Row(
