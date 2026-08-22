@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
@@ -97,20 +98,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   ),
                   child: Row(
                     children: [
-                      ClipRRect(
+                      AppArtworkImage(
+                        artworkUrl: state.currentTrack!.artworkUrl,
+                        trackId: state.currentTrack!.id,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          state.currentTrack!.artworkUrl,
-                          width: 52,
-                          height: 52,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            width: 52,
-                            height: 52,
-                            color: Colors.grey.shade800,
-                            child: const Icon(Icons.music_note_rounded, size: 24),
-                          ),
-                        ),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -196,20 +190,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                             children: [
                               const Icon(Icons.drag_handle_rounded, color: Colors.grey, size: 20),
                               const SizedBox(width: 8),
-                              ClipRRect(
+                              AppArtworkImage(
+                                artworkUrl: track.artworkUrl,
+                                trackId: track.id,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
                                 borderRadius: BorderRadius.circular(6),
-                                child: Image.network(
-                                  track.artworkUrl,
-                                  width: 40,
-                                  height: 40,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Container(
-                                    width: 40,
-                                    height: 40,
-                                    color: Colors.grey.shade800,
-                                    child: const Icon(Icons.music_note_rounded, size: 20),
-                                  ),
-                                ),
                               ),
                             ],
                           ),

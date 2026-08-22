@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/track.dart';
 
@@ -460,6 +461,7 @@ class StorageService {
   }
 
   static List<Track> getFullDownloadedTracks() {
+    if (!Hive.isBoxOpen(_downloadsBox)) return [];
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
     if (raw == null) return [];
@@ -470,6 +472,14 @@ class StorageService {
         if (val is Map) {
           final localPath = val['localPath']?.toString() ?? '';
           if (localPath.isNotEmpty) {
+            final localArt = val['localArtworkPath']?.toString() ?? '';
+            final remoteArt = val['artworkUrl']?.toString() ?? '';
+
+            String finalArt = remoteArt;
+            if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
+              finalArt = localArt;
+            }
+
             tracks.add(
               Track(
                 id: val['id']?.toString() ?? key.toString(),
@@ -477,7 +487,7 @@ class StorageService {
                 artist: val['artist']?.toString() ?? 'Unknown Artist',
                 album: val['album']?.toString() ?? 'Offline',
                 duration: val['duration']?.toString() ?? '3:30',
-                artworkUrl: val['artworkUrl']?.toString() ?? '',
+                artworkUrl: finalArt,
                 audioUrl: localPath,
                 genre: val['genre']?.toString() ?? 'OFFLINE',
               ),
@@ -496,7 +506,25 @@ class StorageService {
     return downloads[trackId];
   }
 
-  static Future<void> registerDownloadTrack(Track track, String localPath) async {
+  static String? getDownloadedArtworkPath(String trackId) {
+    if (!Hive.isBoxOpen(_downloadsBox)) return null;
+    final box = Hive.box(_downloadsBox);
+    final raw = box.get('downloaded_tracks');
+    if (raw == null) return null;
+    try {
+      final Map decoded = jsonDecode(raw.toString()) as Map;
+      final val = decoded[trackId];
+      if (val is Map) {
+        final localArt = val['localArtworkPath']?.toString() ?? '';
+        if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
+          return localArt;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> registerDownloadTrack(Track track, String localPath, {String? artworkLocalPath}) async {
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
     Map<String, dynamic> downloads = {};
@@ -512,6 +540,7 @@ class StorageService {
       'album': track.album,
       'duration': track.duration,
       'artworkUrl': track.artworkUrl,
+      'localArtworkPath': artworkLocalPath ?? '',
       'genre': track.genre,
       'localPath': localPath,
       'downloadedAt': DateTime.now().toIso8601String(),

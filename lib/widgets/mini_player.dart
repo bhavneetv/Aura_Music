@@ -5,6 +5,7 @@ import '../themes/app_theme.dart';
 import '../routes/bouncy_player_route.dart';
 import '../screens/now_playing/now_playing_screen.dart';
 import '../providers/customization_provider.dart';
+import 'app_artwork_image.dart';
 
 class MiniPlayer extends ConsumerStatefulWidget {
   const MiniPlayer({super.key});
@@ -153,16 +154,11 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
                             ),
                           ],
                         ),
-                        child: ClipRRect(
+                        child: AppArtworkImage(
+                          artworkUrl: track.artworkUrl,
+                          trackId: track.id,
+                          fit: BoxFit.cover,
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            track.artworkUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => Container(
-                              color: AppTheme.goldAccent,
-                              child: const Icon(Icons.music_note_rounded, color: Colors.white),
-                            ),
-                          ),
                         ),
                       ),
                     ),

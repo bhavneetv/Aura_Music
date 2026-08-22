@@ -4,12 +4,14 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/track.dart';
 import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
 import '../services/audio/audio_url_resolver.dart';
 import '../services/recommendation/recommendation_engine.dart';
 import '../services/music_sources/jamendo_source.dart';
+import '../services/voice/voice_assistant_service.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
 
@@ -477,13 +479,79 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     );
   }
 
+  bool _isLocalTrack(Track track) {
+    if (track.audioUrl.isNotEmpty && !track.audioUrl.startsWith('http')) {
+      final file = File(track.audioUrl);
+      if (file.existsSync() && file.lengthSync() > 0) return true;
+    }
+    final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
+    if (downloadedPath != null && downloadedPath.isNotEmpty) {
+      final file = File(downloadedPath);
+      if (file.existsSync() && file.lengthSync() > 0) return true;
+    }
+    return false;
+  }
+
+  Track _resolveSingleTrackWithLocalDownload(Track track) {
+    final downloadedAudio = StorageService.getDownloadedTrackPath(track.id);
+    final downloadedArt = StorageService.getDownloadedArtworkPath(track.id);
+
+    String audioUrl = track.audioUrl;
+    if (downloadedAudio != null && File(downloadedAudio).existsSync() && File(downloadedAudio).lengthSync() > 0) {
+      audioUrl = downloadedAudio;
+    }
+
+    String artworkUrl = track.artworkUrl;
+    if (downloadedArt != null && File(downloadedArt).existsSync() && File(downloadedArt).lengthSync() > 0) {
+      artworkUrl = downloadedArt;
+    }
+
+    if (audioUrl != track.audioUrl || artworkUrl != track.artworkUrl) {
+      return track.copyWith(audioUrl: audioUrl, artworkUrl: artworkUrl);
+    }
+    return track;
+  }
+
+  List<Track> _resolveTracksWithLocalDownloads(List<Track> tracks) {
+    return tracks.map((t) => _resolveSingleTrackWithLocalDownload(t)).toList();
+  }
+
+  Future<bool> _checkIsOffline() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (results.contains(ConnectivityResult.none) || results.isEmpty) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   void playCustomQueue(List<Track> tracks, {int initialIndex = 0}) async {
     if (tracks.isEmpty) return;
-    final safeIndex = initialIndex.clamp(0, tracks.length - 1);
-    final targetTrack = tracks[safeIndex];
+
+    final resolvedTracks = _resolveTracksWithLocalDownloads(tracks);
+    final offline = await _checkIsOffline();
+
+    List<Track> finalQueue = resolvedTracks;
+    if (offline) {
+      final downloadedOnly = resolvedTracks.where((t) => _isLocalTrack(t)).toList();
+      if (downloadedOnly.isNotEmpty) {
+        finalQueue = downloadedOnly;
+      } else {
+        finalQueue = StorageService.getFullDownloadedTracks();
+      }
+    }
+
+    if (finalQueue.isEmpty) return;
+
+    final targetTrackCandidate = resolvedTracks[initialIndex.clamp(0, resolvedTracks.length - 1)];
+    int safeIndex = finalQueue.indexWhere((t) => t.id == targetTrackCandidate.id);
+    if (safeIndex == -1) safeIndex = 0;
+
+    final targetTrack = finalQueue[safeIndex];
 
     final newSources = <String, QueueSource>{};
-    for (final track in tracks) {
+    for (final track in finalQueue) {
       newSources[track.id] = QueueSource.user;
     }
 
@@ -491,7 +559,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final myNonce = ++_playbackNonce;
 
     state = state.copyWith(
-      queue: List<Track>.from(tracks),
+      queue: List<Track>.from(finalQueue),
       currentIndex: safeIndex,
       currentTrack: targetTrack,
       totalDuration: _parseDuration(targetTrack.duration),
@@ -516,7 +584,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       _isTransitioning = true;
     }
     
-    final targetTrack = state.queue[index];
+    final targetTrack = _resolveSingleTrackWithLocalDownload(state.queue[index]);
     
     state = state.copyWith(
       currentIndex: index,
@@ -537,34 +605,58 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   void playTrack(Track track) async {
-    int idx = state.queue.indexWhere((t) => t.id == track.id || (t.title.trim().toLowerCase() == track.title.trim().toLowerCase() && t.artist.trim().toLowerCase() == track.artist.trim().toLowerCase()));
+    final resolvedTrack = _resolveSingleTrackWithLocalDownload(track);
+    final offline = await _checkIsOffline();
+
+    if (offline && !_isLocalTrack(resolvedTrack)) {
+      final downloadedTracks = StorageService.getFullDownloadedTracks();
+      if (downloadedTracks.isNotEmpty) {
+        playCustomQueue(downloadedTracks, initialIndex: 0);
+        return;
+      }
+    }
+
+    List<Track> currentQueue = _resolveTracksWithLocalDownloads(state.queue);
+    int idx = currentQueue.indexWhere((t) => t.id == resolvedTrack.id || (t.title.trim().toLowerCase() == resolvedTrack.title.trim().toLowerCase() && t.artist.trim().toLowerCase() == resolvedTrack.artist.trim().toLowerCase()));
 
     if (idx != -1) {
+      currentQueue[idx] = resolvedTrack;
+      if (offline) {
+        currentQueue = currentQueue.where((t) => _isLocalTrack(t)).toList();
+        idx = currentQueue.indexWhere((t) => t.id == resolvedTrack.id);
+        if (idx == -1) idx = 0;
+      }
       jumpToQueueIndex(idx);
       return;
     }
 
     final prevContext = StorageService.getSessionContext();
-    final newGenre = track.genre.trim().toUpperCase();
+    final newGenre = resolvedTrack.genre.trim().toUpperCase();
 
     bool contextPivoted = false;
     if (newGenre.isNotEmpty && prevContext['genre'] != null && prevContext['genre']!.isNotEmpty && prevContext['genre'] != newGenre) {
       contextPivoted = true;
     }
 
-    List<Track> currentQueue;
-
     if (contextPivoted) {
-      currentQueue = [track];
+      currentQueue = [resolvedTrack];
       idx = 0;
     } else {
-      currentQueue = List.from(state.queue);
-      currentQueue.add(track);
+      currentQueue.add(resolvedTrack);
       idx = currentQueue.length - 1;
+    }
+
+    if (offline) {
+      currentQueue = currentQueue.where((t) => _isLocalTrack(t)).toList();
+      idx = currentQueue.indexWhere((t) => t.id == resolvedTrack.id);
+      if (idx == -1) {
+        currentQueue.insert(0, resolvedTrack);
+        idx = 0;
+      }
     }
     
     final newSources = Map<String, QueueSource>.from(state.queueSources);
-    newSources[track.id] = QueueSource.user;
+    newSources[resolvedTrack.id] = QueueSource.user;
     
     _isTransitioning = true;
     final myNonce = ++_playbackNonce;
@@ -572,8 +664,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     state = state.copyWith(
       queue: currentQueue,
       currentIndex: idx,
-      currentTrack: track,
-      totalDuration: _parseDuration(track.duration),
+      currentTrack: resolvedTrack,
+      totalDuration: _parseDuration(resolvedTrack.duration),
       queueSources: newSources,
       playRequested: true,
       status: PlaybackStatus.loading,
@@ -581,7 +673,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     await _saveQueue();
 
     try {
-      await _streamTrack(track, nonce: myNonce);
+      await _streamTrack(resolvedTrack, nonce: myNonce);
     } finally {
       _isTransitioning = false;
     }
@@ -593,6 +685,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     triggerHaptic(HapticFeedbackType.selection);
     RecommendationEngine.instance.recordTrackStarted(track);
 
+    final resolvedTrack = _resolveSingleTrackWithLocalDownload(track);
+    track = resolvedTrack;
     String audioUrl = track.audioUrl;
     if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
       audioUrl = audioUrl.replaceAll('_320.', '_160.');
@@ -652,6 +746,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           status: PlaybackStatus.playing,
           isPlaying: true,
         );
+
+        VoiceAssistantService.instance.donateTrack(track);
+        VoiceAssistantService.instance.syncLibraryIndexToPlatform();
 
         _preloadUpcomingTracks();
         ensureUpcomingRecommendations();
@@ -745,6 +842,30 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     
     int remainingUpcoming = state.queue.length - (state.currentIndex + 1);
     if (remainingUpcoming >= 5) return;
+
+    final offline = await _checkIsOffline();
+    if (offline) {
+      final fullDownloads = StorageService.getFullDownloadedTracks();
+      if (fullDownloads.isNotEmpty) {
+        final currentQueueIds = state.queue.map((t) => t.id).toSet();
+        final unplayedOffline = fullDownloads.where((t) => !currentQueueIds.contains(t.id)).toList();
+
+        if (unplayedOffline.isNotEmpty) {
+          final needed = 5 - remainingUpcoming;
+          final toAdd = unplayedOffline.take(needed).toList();
+          final updatedQueue = List<Track>.from(state.queue)..addAll(toAdd);
+
+          final updatedSources = Map<String, QueueSource>.from(state.queueSources);
+          for (final track in toAdd) {
+            updatedSources[track.id] = QueueSource.recommendation;
+          }
+
+          state = state.copyWith(queue: updatedQueue, queueSources: updatedSources);
+          await _saveQueue();
+        }
+      }
+      return;
+    }
 
     try {
       final source = ref.read(musicSourceProvider);
@@ -955,6 +1076,38 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (current == null) return;
 
     if (nonce != _playbackNonce) return;
+
+    final offline = await _checkIsOffline();
+    if (offline) {
+      final fullDownloads = StorageService.getFullDownloadedTracks();
+      if (fullDownloads.isNotEmpty) {
+        final currentQueueIds = state.queue.map((t) => t.id).toSet();
+        List<Track> unplayedOffline = fullDownloads.where((t) => !currentQueueIds.contains(t.id)).toList();
+
+        if (unplayedOffline.isEmpty) {
+          unplayedOffline = List.from(fullDownloads)..shuffle();
+        }
+
+        if (unplayedOffline.isNotEmpty) {
+          final nextOfflineTrack = unplayedOffline.first;
+          final updatedQueue = List<Track>.from(state.queue)..add(nextOfflineTrack);
+          final nextIdx = updatedQueue.length - 1;
+
+          final updatedSources = Map<String, QueueSource>.from(state.queueSources);
+          updatedSources[nextOfflineTrack.id] = QueueSource.recommendation;
+
+          state = state.copyWith(
+            queue: updatedQueue,
+            currentIndex: nextIdx,
+            currentTrack: nextOfflineTrack,
+            queueSources: updatedSources,
+          );
+          await _saveQueue();
+          await _streamTrack(nextOfflineTrack, nonce: nonce);
+          return;
+        }
+      }
+    }
 
     List<Track> workingQueue = List.from(state.queue);
     int workingIdx = state.currentIndex;

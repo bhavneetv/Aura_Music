@@ -10,6 +10,8 @@ import 'services/storage/storage_service.dart';
 import 'services/audio/audio_handler.dart';
 import 'services/version/version_service.dart';
 
+import 'services/voice/voice_assistant_service.dart';
+
 final audioHandlerProvider = Provider<AudioHandler>((ref) => throw UnimplementedError());
 
 AudioHandler? _audioHandlerInstance;
@@ -25,12 +27,18 @@ void main() async {
   await AppVersionService.init();
   
   _audioHandlerInstance ??= await initAudioHandler();
+
+  final container = ProviderContainer(
+    overrides: [
+      audioHandlerProvider.overrideWithValue(_audioHandlerInstance!),
+    ],
+  );
+
+  await VoiceAssistantService.instance.init(container);
   
   runApp(
-    ProviderScope(
-      overrides: [
-        audioHandlerProvider.overrideWithValue(_audioHandlerInstance!),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: const MyApp(),
     ),
   );

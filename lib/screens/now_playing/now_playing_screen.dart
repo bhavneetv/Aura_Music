@@ -14,10 +14,33 @@ import '../../services/ai/song_summary_service.dart';
 import '../../services/lyrics/lyrics_service.dart';
 import '../../widgets/custom_slider_track_shapes.dart';
 import '../../widgets/waveform_seek_bar.dart';
+import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
+import 'dart:io';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
 import 'lyrics_screen.dart';
+
+ImageProvider getArtworkImageProvider(Track track) {
+  String path = track.artworkUrl.trim();
+  final downloadedArt = StorageService.getDownloadedArtworkPath(track.id);
+  if (downloadedArt != null && File(downloadedArt).existsSync()) {
+    path = downloadedArt;
+  }
+  if (path.startsWith('file://')) {
+    path = Uri.parse(path).toFilePath();
+  }
+  if (path.isNotEmpty && !path.startsWith('http://') && !path.startsWith('https://')) {
+    final file = File(path);
+    if (file.existsSync() && file.lengthSync() > 0) {
+      return FileImage(file);
+    }
+  }
+  if (path.isNotEmpty && (path.startsWith('http://') || path.startsWith('https://'))) {
+    return NetworkImage(path);
+  }
+  return const AssetImage('assets/images/default_cover.png');
+}
 
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
@@ -82,7 +105,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     _lastPaletteTrackId = track.id;
 
     PaletteGenerator.fromImageProvider(
-      NetworkImage(track.artworkUrl),
+      getArtworkImageProvider(track),
       size: const Size(100, 100),
     ).then((palette) {
       if (mounted && _lastPaletteTrackId == track.id) {
@@ -626,15 +649,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                             ),
                                             child: Row(
                                               children: [
-                                                ClipRRect(
+                                                AppArtworkImage(
+                                                  artworkUrl: itemTrack.artworkUrl,
+                                                  trackId: itemTrack.id,
+                                                  width: 52,
+                                                  height: 52,
+                                                  fit: BoxFit.cover,
                                                   borderRadius: BorderRadius.circular(12),
-                                                  child: Image.network(
-                                                    itemTrack.artworkUrl,
-                                                    width: 52,
-                                                    height: 52,
-                                                    fit: BoxFit.cover,
-                                                    errorBuilder: (_, __, ___) => Container(width: 52, height: 52, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
-                                                  ),
                                                 ),
                                                 const SizedBox(width: 12),
                                                 Expanded(
@@ -1619,20 +1640,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                   child: Column(
                     children: [
                       // Album Cover Art
-                      ClipRRect(
+                      AppArtworkImage(
+                        artworkUrl: track.artworkUrl,
+                        trackId: track.id,
+                        width: screenW * 0.65,
+                        height: screenW * 0.65,
+                        fit: BoxFit.cover,
                         borderRadius: BorderRadius.circular(20),
-                        child: Image.network(
-                          track.artworkUrl,
-                          width: screenW * 0.65,
-                          height: screenW * 0.65,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: screenW * 0.65,
-                            height: screenW * 0.65,
-                            color: accentColor.withValues(alpha: 0.2),
-                            child: Icon(Icons.music_note_rounded, size: 64, color: accentColor),
-                          ),
-                        ),
                       ),
                       const SizedBox(height: 20),
 
@@ -1873,16 +1887,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       ),
                     ],
                   ),
-                  child: ClipRRect(
+                  child: AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: screenW * 0.72,
+                    height: screenW * 0.72,
+                    fit: BoxFit.cover,
                     borderRadius: BorderRadius.circular(24),
-                    child: Image.network(
-                      track.artworkUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: accentColor.withValues(alpha: 0.2),
-                        child: Icon(Icons.music_note_rounded, size: 72, color: accentColor),
-                      ),
-                    ),
                   ),
                 ),
               ),
@@ -2061,10 +2072,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         children: [
           // Fullscreen Blurred Background Artwork
           Positioned.fill(
-            child: Image.network(
-              track.artworkUrl,
+            child: AppArtworkImage(
+              artworkUrl: track.artworkUrl,
+              trackId: track.id,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(color: const Color(0xFF1C1C1E)),
             ),
           ),
           Positioned.fill(
@@ -2126,16 +2137,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       ),
                     ],
                   ),
-                  child: ClipRRect(
+                  child: AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: screenW * 0.78,
+                    height: screenW * 0.78,
+                    fit: BoxFit.cover,
                     borderRadius: BorderRadius.circular(24),
-                    child: Image.network(
-                      track.artworkUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: Colors.grey.shade900,
-                        child: const Icon(Icons.music_note_rounded, size: 64, color: Colors.white38),
-                      ),
-                    ),
                   ),
                 ),
 
@@ -2468,17 +2476,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               ),
                             ],
                           ),
-                          child: ClipOval(
-                            child: Image.network(
-                              track.artworkUrl,
-                              width: artSize,
-                              height: artSize,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: accentColor.withValues(alpha: 0.3),
-                                child: Icon(Icons.music_note_rounded, color: textColor.withValues(alpha: 0.4), size: artSize * 0.4),
-                              ),
-                            ),
+                          child: AppArtworkImage(
+                            artworkUrl: track.artworkUrl,
+                            trackId: track.id,
+                            width: artSize,
+                            height: artSize,
+                            fit: BoxFit.cover,
+                            borderRadius: BorderRadius.circular(artSize / 2),
                           ),
                         ),
                       ],
@@ -2690,10 +2694,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             height: MediaQuery.of(context).size.width * 0.68,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
-              image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
               boxShadow: [
                 BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))
               ],
+            ),
+            child: AppArtworkImage(
+              artworkUrl: track.artworkUrl,
+              trackId: track.id,
+              fit: BoxFit.cover,
+              borderRadius: BorderRadius.circular(20),
             ),
           ),
         );
@@ -2744,7 +2753,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           height: size * 0.55,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
+            image: DecorationImage(image: getArtworkImageProvider(track), fit: BoxFit.cover),
             border: Border.all(color: Colors.white, width: 2),
           ),
           child: Center(
@@ -2790,13 +2799,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: ClipRRect(
+        child: AppArtworkImage(
+          artworkUrl: track.artworkUrl,
+          trackId: track.id,
+          fit: BoxFit.cover,
           borderRadius: BorderRadius.circular(24),
-          child: Image.network(
-            track.artworkUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: Colors.amber),
-          ),
         ),
       ),
     );
@@ -2830,7 +2837,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           height: size * 0.4,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            image: DecorationImage(image: NetworkImage(track.artworkUrl), fit: BoxFit.cover),
+            image: DecorationImage(image: getArtworkImageProvider(track), fit: BoxFit.cover),
             border: Border.all(color: Colors.white, width: 3),
           ),
           child: Center(
@@ -2880,9 +2887,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     child: const Icon(Icons.brightness_5_rounded, color: Colors.grey, size: 36),
                   ),
                   // Cover Image small in center
-                  ClipRRect(
+                  AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: 36,
+                    height: 36,
+                    fit: BoxFit.cover,
                     borderRadius: BorderRadius.circular(4),
-                    child: Image.network(track.artworkUrl, width: 36, height: 36, fit: BoxFit.cover),
                   ),
                   // Gear 2
                   Transform.rotate(

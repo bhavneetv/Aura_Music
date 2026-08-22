@@ -5,6 +5,7 @@ import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
 
 class RecentlyPlayedScreen extends ConsumerStatefulWidget {
@@ -258,9 +259,13 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      leading: ClipRRect(
+      leading: AppArtworkImage(
+        artworkUrl: track.artworkUrl,
+        trackId: track.id,
+        width: 44,
+        height: 44,
+        fit: BoxFit.cover,
         borderRadius: BorderRadius.circular(8),
-        child: Image.network(track.artworkUrl, width: 44, height: 44, fit: BoxFit.cover),
       ),
       title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
       subtitle: Text('${track.artist} • $formattedTime', style: const TextStyle(fontSize: 11)),

@@ -9,6 +9,7 @@ import '../../providers/music_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../themes/app_theme.dart';
 import '../../widgets/mini_player.dart';
+import '../../widgets/app_artwork_image.dart';
 import '../../widgets/shimmer_placeholders/shimmer_placeholder.dart';
 import '../search/search_screen.dart';
 import '../library/library_screen.dart';
@@ -297,20 +298,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 child: Row(
                   children: [
-                    ClipRRect(
+                    AppArtworkImage(
+                      artworkUrl: track.artworkUrl,
+                      trackId: track.id,
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.cover,
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        track.artworkUrl,
-                        width: 52,
-                        height: 52,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          width: 52,
-                          height: 52,
-                          color: Colors.grey.shade800,
-                          child: const Icon(Icons.music_note_rounded, size: 20),
-                        ),
-                      ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -780,13 +774,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
-                                      Image.network(
-                                        track.artworkUrl,
+                                      AppArtworkImage(
+                                        artworkUrl: track.artworkUrl,
+                                        trackId: track.id,
                                         fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) => Container(
-                                          color: Colors.grey.shade800,
-                                          child: const Icon(Icons.music_note_rounded),
-                                        ),
                                       ),
                                       // Soft bottom scrim so a small play glyph
                                       // always reads clearly over any artwork.

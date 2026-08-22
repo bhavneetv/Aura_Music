@@ -81,6 +81,20 @@ class DownloadService extends ChangeNotifier {
       }
 
       final localPath = '${folder.path}/${track.id}.mp4';
+      final artworkLocalPath = '${folder.path}/${track.id}_cover.jpg';
+
+      // Download cover art image if URL is valid remote HTTP/HTTPS
+      if (track.artworkUrl.isNotEmpty && (track.artworkUrl.startsWith('http://') || track.artworkUrl.startsWith('https://'))) {
+        try {
+          await _dio.download(
+            track.artworkUrl,
+            artworkLocalPath,
+            cancelToken: cancelToken,
+          );
+        } catch (e) {
+          print('[DOWNLOAD] Failed downloading cover art for "${track.title}": $e');
+        }
+      }
 
       // Download audio URL
       String url = track.audioUrl;
@@ -119,9 +133,13 @@ class DownloadService extends ChangeNotifier {
         },
       );
 
-      // Register complete with full track metadata
+      final String? artPath = File(artworkLocalPath).existsSync() && File(artworkLocalPath).lengthSync() > 0
+          ? artworkLocalPath
+          : null;
+
+      // Register complete with full track metadata and local artwork path
       _tasks[track.id] = task.copyWith(status: 'completed', progress: 1.0);
-      await StorageService.registerDownloadTrack(track, localPath);
+      await StorageService.registerDownloadTrack(track, localPath, artworkLocalPath: artPath);
       notifyListeners();
       
       // Remove from active task tracker after a delay
@@ -154,9 +172,16 @@ class DownloadService extends ChangeNotifier {
       if (file.existsSync()) {
         await file.delete();
       }
-      await StorageService.deleteDownloadRecord(trackId);
-      notifyListeners();
     }
+    final artworkPath = StorageService.getDownloadedArtworkPath(trackId);
+    if (artworkPath != null) {
+      final artFile = File(artworkPath);
+      if (artFile.existsSync()) {
+        await artFile.delete();
+      }
+    }
+    await StorageService.deleteDownloadRecord(trackId);
+    notifyListeners();
   }
 
   Future<void> downloadPlaylist(List<Track> tracks, {Function(int completed, int total)? onProgress}) async {

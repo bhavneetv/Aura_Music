@@ -4,6 +4,7 @@ import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../widgets/app_artwork_image.dart';
 
 class AiPlaylistReviewScreen extends ConsumerStatefulWidget {
   final String suggestedName;
@@ -163,15 +164,13 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
                             }
                           });
                         },
-                        secondary: ClipRRect(
+                        secondary: AppArtworkImage(
+                          artworkUrl: track.artworkUrl,
+                          trackId: track.id,
+                          width: 44,
+                          height: 44,
+                          fit: BoxFit.cover,
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            track.artworkUrl,
-                            width: 44,
-                            height: 44,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(width: 44, height: 44, color: Colors.grey),
-                          ),
                         ),
                         title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),

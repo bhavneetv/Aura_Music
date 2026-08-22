@@ -8,6 +8,7 @@ import '../../providers/music_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/ai/ai_service.dart';
 import '../../widgets/ai_search_loading.dart';
+import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
 import 'ai_playlist_review_screen.dart';
 
@@ -550,20 +551,13 @@ Output ONLY valid JSON:
                           final track = sessionTracks[index];
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading: ClipRRect(
+                            leading: AppArtworkImage(
+                              artworkUrl: track.artworkUrl,
+                              trackId: track.id,
+                              width: 44,
+                              height: 44,
+                              fit: BoxFit.cover,
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                track.artworkUrl,
-                                width: 44,
-                                height: 44,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Container(
-                                  width: 44,
-                                  height: 44,
-                                  color: Colors.grey.shade800,
-                                  child: const Icon(Icons.music_note_rounded),
-                                ),
-                              ),
                             ),
                             title: Text(
                               track.title,
@@ -923,20 +917,13 @@ Output ONLY valid JSON:
               ),
               child: ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                leading: ClipRRect(
+                leading: AppArtworkImage(
+                  artworkUrl: track.artworkUrl,
+                  trackId: track.id,
+                  width: 48,
+                  height: 48,
+                  fit: BoxFit.cover,
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    track.artworkUrl,
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      width: 48,
-                      height: 48,
-                      color: Colors.grey.shade800,
-                      child: const Icon(Icons.music_note_rounded),
-                    ),
-                  ),
                 ),
                 title: Text(
                   track.title,

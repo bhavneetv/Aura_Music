@@ -5,6 +5,7 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
+import '../../widgets/app_artwork_image.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -188,9 +189,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           itemBuilder: (context, index) {
             final track = Track.mockTracks[index];
             return ListTile(
-              leading: ClipRRect(
+              leading: AppArtworkImage(
+                artworkUrl: track.artworkUrl,
+                trackId: track.id,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
                 borderRadius: BorderRadius.circular(6),
-                child: Image.network(track.artworkUrl, width: 40, height: 40, fit: BoxFit.cover),
               ),
               title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
@@ -441,9 +446,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                             children: [
                               const Icon(Icons.drag_handle_rounded, color: Colors.grey, size: 18),
                               const SizedBox(width: 8),
-                              ClipRRect(
+                              AppArtworkImage(
+                                artworkUrl: track.artworkUrl,
+                                trackId: track.id,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
                                 borderRadius: BorderRadius.circular(6),
-                                child: Image.network(track.artworkUrl, width: 40, height: 40, fit: BoxFit.cover),
                               ),
                             ],
                           ),

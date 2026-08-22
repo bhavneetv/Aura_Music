@@ -7,6 +7,7 @@ import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../services/import/spotify_import_service.dart';
 import '../../themes/app_theme.dart';
+import '../../widgets/app_artwork_image.dart';
 import 'playlist_detail_screen.dart';
 import 'recently_played_screen.dart';
 import 'spotify_import_preview_screen.dart';
@@ -412,20 +413,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
             
             return ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-              leading: ClipRRect(
+              leading: AppArtworkImage(
+                artworkUrl: track.artworkUrl,
+                trackId: track.id,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  track.artworkUrl,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    width: 48,
-                    height: 48,
-                    color: Colors.grey.shade800,
-                    child: const Icon(Icons.music_note_rounded),
-                  ),
-                ),
               ),
               title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text('${track.artist} • ${track.album}'),
@@ -496,13 +490,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                     ),
                   ],
                 ),
-                child: ClipRRect(
+                child: AppArtworkImage(
+                  artworkUrl: track.artworkUrl,
+                  trackId: track.id,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
                   borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                  child: Image.network(
-                    track.artworkUrl,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                  ),
                 ),
               ),
             ),
@@ -657,18 +650,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                               itemBuilder: (context, index) {
                                 final track = downloadedTracks[index];
                                 return ListTile(
-                                  leading: ClipRRect(
+                                  leading: AppArtworkImage(
+                                    artworkUrl: track.artworkUrl,
+                                    trackId: track.id,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
                                     borderRadius: BorderRadius.circular(6),
-                                    child: Image.network(
-                                      track.artworkUrl,
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        width: 40, height: 40, color: Colors.grey.shade800,
-                                        child: const Icon(Icons.music_note_rounded, size: 20),
-                                      ),
-                                    ),
                                   ),
                                   title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                   subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),

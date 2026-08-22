@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Built-In Intent for Media Playback ("Hey Google, play Shape of You on Aura") -->
+    <capability android:name="actions.intent.PLAY_MEDIA">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.example.music_app"
+            android:targetClass="com.example.music_app.MainActivity">
+            <parameter
+                android:name="media.query"
+                android:key="query" />
+            <parameter
+                android:name="media.name"
+                android:key="media_name" />
+            <parameter
+                android:name="media.type"
+                android:key="media_type" />
+        </intent>
+    </capability>
+</shortcuts>
