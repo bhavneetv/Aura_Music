@@ -69,25 +69,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     final double bottomInset = MediaQuery.of(context).padding.bottom;
+    final double bottomMargin = bottomInset > 0 ? bottomInset + 8.0 : 16.0;
     final double miniPlayerBottom = (customBranding.navBarStyle == 'os_style')
-        ? (PlatformInfo.isIOS ? bottomInset + 88.0 : bottomInset + 84.0)
-        : (bottomInset + 82.0);
+        ? (PlatformInfo.isIOS ? bottomInset + 84.0 : bottomInset + 70.0)
+        : (bottomMargin + 64.0);
 
     return Scaffold(
       extendBody: true,
-      bottomNavigationBar: _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
+      bottomNavigationBar: RepaintBoundary(
+        child: _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
+      ),
       body: SafeArea(
         top: false,
         bottom: false,
         child: NetworkStatusBanner(
           child: Stack(
             children: [
-              tabBody,
+              RepaintBoundary(child: tabBody),
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: miniPlayerBottom,
-                child: const MiniPlayer(),
+                child: const RepaintBoundary(
+                  child: MiniPlayer(),
+                ),
               ),
             ],
           ),

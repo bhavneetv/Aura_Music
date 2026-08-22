@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
+import '../sharing/playlist_link_share_service.dart';
+import '../storage/storage_service.dart';
 import 'voice_search_service.dart';
 
 class VoiceAssistantService {
@@ -26,6 +28,14 @@ class VoiceAssistantService {
           }
           return false;
 
+        case 'onDeepLink':
+          final String? link = call.arguments is Map ? call.arguments['link']?.toString() : call.arguments?.toString();
+          if (link != null && link.isNotEmpty) {
+            await _handleIncomingDeepLink(link);
+            return true;
+          }
+          return false;
+
         case 'getLibraryIndex':
           return getLibraryIndexJson();
 
@@ -36,6 +46,36 @@ class VoiceAssistantService {
 
     // Initial sync of local library index to platform (App Group container for iOS SiriKit)
     await syncLibraryIndexToPlatform();
+  }
+
+  Future<void> _handleIncomingDeepLink(String link) async {
+    try {
+      final decoded = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(link);
+      if (decoded != null && decoded.tracks.isNotEmpty) {
+        final newPl = {
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'name': decoded.title,
+          'description': decoded.description.isNotEmpty ? decoded.description : 'Imported via Link',
+          'trackIds': decoded.tracks.map((t) => t.id).toList(),
+          'tracks': decoded.tracks.map((t) => {
+            'id': t.id,
+            'title': t.title,
+            'artist': t.artist,
+            'album': t.album,
+            'duration': t.duration,
+            'artworkUrl': t.artworkUrl,
+            'audioUrl': t.audioUrl,
+            'genre': t.genre,
+          }).toList(),
+        };
+        final playlists = StorageService.getPlaylists();
+        playlists.insert(0, newPl);
+        await StorageService.savePlaylists(playlists);
+        debugPrint('[DeepLink] Automatically imported playlist: ${decoded.title}');
+      }
+    } catch (e) {
+      debugPrint('[DeepLink] Error handling incoming deep link: $e');
+    }
   }
 
   /// Processes incoming voice query from native platform (Siri / Google Assistant).

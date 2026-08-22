@@ -401,28 +401,55 @@ class RemoteLinkShareModal extends ConsumerWidget {
 
                           const SizedBox(height: 16),
 
-                          // Copy Link Button
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              Clipboard.setData(ClipboardData(text: shareableLink));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Copied short link for "$title"! Share it anywhere.'),
-                                  backgroundColor: accentColor,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
+                          // Copy Link Button with animated checkmark state
+                          StatefulBuilder(
+                            builder: (context, setBtnState) {
+                              bool isCopied = false;
+                              return StatefulBuilder(
+                                builder: (context, setInternalState) {
+                                  return ElevatedButton.icon(
+                                    onPressed: () {
+                                      Clipboard.setData(ClipboardData(text: shareableLink));
+                                      setInternalState(() {
+                                        isCopied = true;
+                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Copied short link for "$title"! Share it anywhere.'),
+                                          backgroundColor: accentColor,
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                      Future.delayed(const Duration(seconds: 2), () {
+                                        if (context.mounted) {
+                                          setInternalState(() {
+                                            isCopied = false;
+                                          });
+                                        }
+                                      });
+                                    },
+                                    icon: Icon(
+                                      isCopied ? Icons.check_circle_rounded : Icons.copy_rounded,
+                                      color: isCopied ? Colors.white : Colors.black,
+                                      size: 20,
+                                    ),
+                                    label: Text(
+                                      isCopied ? 'Link Copied! ✓' : 'Copy Playlist Link',
+                                      style: TextStyle(
+                                        color: isCopied ? Colors.white : Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isCopied ? Colors.green.shade700 : accentColor,
+                                      minimumSize: const Size(double.infinity, 48),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                    ),
+                                  );
+                                },
                               );
                             },
-                            icon: const Icon(Icons.copy_rounded, color: Colors.black, size: 20),
-                            label: const Text(
-                              'Copy Playlist Link',
-                              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: accentColor,
-                              minimumSize: const Size(double.infinity, 48),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
                           ),
 
                           const SizedBox(height: 24),

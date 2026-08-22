@@ -125,7 +125,7 @@ class MultiDeviceDiscoveryService {
     _deviceStreamController.add([]);
   }
 
-  void _broadcastPresence() {
+  Future<void> _broadcastPresence() async {
     if (_udpSocket == null || !_isListening) return;
 
     try {
@@ -139,8 +139,28 @@ class MultiDeviceDiscoveryService {
 
       final bytes = utf8.encode(payload);
 
-      // Send via broadcast to 255.255.255.255
-      _udpSocket?.send(bytes, InternetAddress('255.255.255.255'), udpPort);
+      final Set<String> targetIps = {'255.255.255.255', '224.0.0.1', '10.0.2.255'};
+
+      try {
+        final interfaces = await NetworkInterface.list(
+          includeLoopback: false,
+          type: InternetAddressType.IPv4,
+        );
+        for (final interface in interfaces) {
+          for (final addr in interface.addresses) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              targetIps.add('${parts[0]}.${parts[1]}.${parts[2]}.255');
+            }
+          }
+        }
+      } catch (_) {}
+
+      for (final ip in targetIps) {
+        try {
+          _udpSocket?.send(bytes, InternetAddress(ip), udpPort);
+        } catch (_) {}
+      }
     } catch (e) {
       print('[MULTI-DEVICE-DISCOVERY] Error sending beacon: $e');
     }

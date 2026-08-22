@@ -6,18 +6,27 @@ import Intents
 @objc class AppDelegate: FlutterAppDelegate {
   private let appGroupId = "group.com.example.musicApp"
   private var voiceChannel: FlutterMethodChannel?
+  private var siriChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
-    voiceChannel = FlutterMethodChannel(
+    
+    let mainChannel = FlutterMethodChannel(
+      name: "com.example.music_app/voice_assistant",
+      binaryMessenger: controller.binaryMessenger
+    )
+    voiceChannel = mainChannel
+
+    let secondaryChannel = FlutterMethodChannel(
       name: "com.example.music_app/siri",
       binaryMessenger: controller.binaryMessenger
     )
+    siriChannel = secondaryChannel
 
-    voiceChannel?.setMethodCallHandler({ [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
+    let handler: FlutterMethodCallHandler = { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
       if call.method == "updateLibraryIndex" {
         if let args = call.arguments as? [String: Any], let jsonStr = args["json"] as? String {
@@ -36,7 +45,10 @@ import Intents
       } else {
         result(FlutterMethodNotImplemented)
       }
-    })
+    }
+
+    mainChannel.setMethodCallHandler(handler)
+    secondaryChannel.setMethodCallHandler(handler)
 
     GeneratedPluginRegistrant.register(with: self)
     if let registrar = self.registrar(forPlugin: "AudioRoutingPlugin") {
@@ -55,16 +67,60 @@ import Intents
     restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
   ) -> Bool {
     if let intent = userActivity.interaction?.intent as? INPlayMediaIntent {
-      let query = intent.mediaSearch?.mediaName ?? intent.mediaContainer?.title ?? ""
-      if !query.isEmpty {
-        sendVoiceQueryToFlutter(query: query)
-        return true
+      var query = extractQueryFromMediaIntent(intent)
+      if query.isEmpty {
+        query = "play music"
       }
-    } else if userActivity.activityType == "INPlayMediaIntent", let query = userActivity.userInfo?["query"] as? String {
+      sendVoiceQueryToFlutter(query: query)
+      return true
+    } else if userActivity.activityType == "INPlayMediaIntent" || userActivity.activityType == "INSearchForMediaIntent" {
+      let query = userActivity.userInfo?["query"] as? String ?? "play music"
       sendVoiceQueryToFlutter(query: query)
       return true
     }
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler)
+  }
+
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey : Any] = [:]
+  ) -> Bool {
+    let urlString = url.absoluteString
+    if url.scheme == "aura" || url.scheme == "aura-playlist" || url.scheme == "auramusic" {
+      if let components = URLComponents(url: url, resolvingAgainstBaseURL: true) {
+        if let queryItem = components.queryItems?.first(where: { $0.name == "query" || $0.name == "q" }),
+           let queryValue = queryItem.value, !queryValue.isEmpty {
+          sendVoiceQueryToFlutter(query: queryValue)
+          return true
+        }
+      }
+      voiceChannel?.invokeMethod("onDeepLink", arguments: ["link": urlString])
+      siriChannel?.invokeMethod("onDeepLink", arguments: ["link": urlString])
+      return true
+    }
+    return super.application(app, open: url, options: options)
+  }
+
+  private func extractQueryFromMediaIntent(_ intent: INPlayMediaIntent) -> String {
+    if let mediaSearch = intent.mediaSearch {
+      if let mediaName = mediaSearch.mediaName, !mediaName.isEmpty {
+        return mediaName
+      }
+      if let artistName = mediaSearch.artistName, !artistName.isEmpty {
+        return artistName
+      }
+      if let genre = mediaSearch.genreNames?.first, !genre.isEmpty {
+        return "\(genre) song"
+      }
+      if let albumName = mediaSearch.albumName, !albumName.isEmpty {
+        return albumName
+      }
+    }
+    if let container = intent.mediaContainer, let title = container.title, !title.isEmpty {
+      return title
+    }
+    return ""
   }
 
   private func writeLibraryIndexToAppGroup(jsonStr: String) -> Bool {
@@ -132,6 +188,8 @@ import Intents
   }
 
   private func sendVoiceQueryToFlutter(query: String) {
-    voiceChannel?.invokeMethod("onVoiceQuery", arguments: ["query": query])
+    let args = ["query": query]
+    voiceChannel?.invokeMethod("onVoiceQuery", arguments: args)
+    siriChannel?.invokeMethod("onVoiceQuery", arguments: args)
   }
 }

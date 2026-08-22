@@ -93,8 +93,8 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           transform: Matrix4.translationValues(_miniPlayerDragX, 0, 0),
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          height: 66,
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          height: 58,
           decoration: BoxDecoration(
             color: isDark 
                 ? Colors.black.withOpacity(0.85) 
@@ -142,8 +142,8 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
                     Hero(
                       tag: 'mini_player_artwork',
                       child: Container(
-                        width: 44,
-                        height: 44,
+                        width: 40,
+                        height: 40,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [

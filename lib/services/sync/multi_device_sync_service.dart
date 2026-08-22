@@ -100,7 +100,13 @@ class MultiDeviceSyncService {
     _hostDeviceName = localDeviceName;
 
     try {
-      _hostServer = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+      int actualPort = port;
+      try {
+        _hostServer = await ServerSocket.bind(InternetAddress.anyIPv4, actualPort, shared: true);
+      } catch (_) {
+        actualPort = port + 1;
+        _hostServer = await ServerSocket.bind(InternetAddress.anyIPv4, actualPort, shared: true);
+      }
       _hostServer?.listen(_handleIncomingFollowerConnection);
 
       // Start periodic position beaconing every 1.5 seconds for low-latency sync

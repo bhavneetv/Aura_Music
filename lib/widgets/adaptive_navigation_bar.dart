@@ -101,7 +101,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
   Widget _buildAndroidMaterial3NavigationBar(BuildContext context, bool isDark) {
     return NavigationBarTheme(
       data: NavigationBarThemeData(
-        height: 68,
+        height: 64,
         backgroundColor: isDark ? const Color(0xFF1E1E22) : const Color(0xFFF3F3F7),
         indicatorColor: accentColor.withValues(alpha: 0.22),
         elevation: 3,
@@ -144,16 +144,19 @@ class AdaptiveNavigationBar extends StatelessWidget {
 
   // ── 3. Default App Floating Curved Glass Navigation Bar ──────────────────
   Widget _buildDefaultFloatingGlassBar(BuildContext context, bool isDark) {
+    final double bottomInset = MediaQuery.of(context).padding.bottom;
+    final double bottomMargin = bottomInset > 0 ? bottomInset + 8.0 : 16.0;
+
     return Container(
-      margin: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+      margin: EdgeInsets.only(left: 14, right: 14, bottom: bottomMargin),
       decoration: BoxDecoration(
-        color: (isDark ? const Color(0xFF141416) : Colors.white).withValues(alpha: 0.75),
+        color: (isDark ? const Color(0xFF141416) : Colors.white).withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(32),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
         ],
         border: Border.all(
@@ -164,7 +167,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(32),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
             child: Row(
@@ -222,32 +225,32 @@ class AdaptiveNavigationBar extends StatelessWidget {
     );
   }
 
-  IconData _getIOSIcon(dynamic val, {required bool isSelected, bool isSearch = false}) {
-    if (val is IconData) return val;
-    if (val is String) {
-      if (val.contains('house')) return isSelected ? CupertinoIcons.house_fill : CupertinoIcons.house;
-      if (val.contains('person')) return isSelected ? CupertinoIcons.person_fill : CupertinoIcons.person;
-      if (val.contains('search') || val.contains('magnifyingglass')) return CupertinoIcons.search;
-    }
-    return isSelected ? CupertinoIcons.square_fill : CupertinoIcons.square;
-  }
-
   String _getIOSSFSymbolName(dynamic val, {required bool isSelected, bool isSearch = false}) {
+    if (isSearch) return 'magnifyingglass';
+
+    if (val == Icons.home || val == Icons.home_rounded || val == Icons.home_outlined) {
+      return isSelected ? 'house.fill' : 'house';
+    }
+    if (val == Icons.search || val == Icons.search_rounded || val == Icons.search_outlined) {
+      return 'magnifyingglass';
+    }
+    if (val == Icons.library_music || val == Icons.library_music_rounded || val == Icons.library_music_outlined) {
+      return isSelected ? 'music.note.list' : 'music.note.list';
+    }
+    if (val == Icons.queue_music || val == Icons.queue_music_rounded || val == Icons.queue_music_outlined) {
+      return isSelected ? 'list.bullet.indent' : 'list.bullet.indent';
+    }
+    if (val == Icons.settings || val == Icons.settings_rounded || val == Icons.settings_outlined) {
+      return isSelected ? 'gearshape.fill' : 'gearshape';
+    }
+
     if (val is String) {
       if (val.contains('house')) return isSelected ? 'house.fill' : 'house';
       if (val.contains('person')) return isSelected ? 'person.fill' : 'person';
       if (val.contains('search') || val.contains('magnifyingglass')) return 'magnifyingglass';
     }
-    if (val == Icons.library_music_outlined || val == Icons.library_music_rounded) {
-      return isSelected ? 'music.note.list' : 'music.note.list';
-    }
-    if (val == Icons.queue_music_outlined || val == Icons.queue_music_rounded) {
-      return isSelected ? 'list.bullet.indent' : 'list.bullet.indent';
-    }
-    if (val == Icons.settings_outlined || val == Icons.settings_rounded) {
-      return isSelected ? 'gearshape.fill' : 'gearshape';
-    }
-    return isSelected ? 'circle.fill' : 'circle';
+
+    return isSelected ? 'house.fill' : 'house';
   }
 
   IconData _getAndroidIcon(dynamic val, {required bool isSelected}) {

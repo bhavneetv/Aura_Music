@@ -1,8 +1,10 @@
 package com.example.music_app
 
 import android.app.SearchManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,6 +14,7 @@ class MainActivity : AudioServiceActivity() {
     private val CHANNEL = "com.example.music_app/voice_assistant"
     private var methodChannel: MethodChannel? = null
     private var pendingVoiceQuery: String? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -35,7 +38,26 @@ class MainActivity : AudioServiceActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("AuraMulticastLock")
+            multicastLock?.setReferenceCounted(true)
+            multicastLock?.acquire()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         handleVoiceIntent(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -52,19 +74,21 @@ class MainActivity : AudioServiceActivity() {
 
         if (Intent.ACTION_VIEW == action) {
             val data: Uri? = intent.data
-            if (data != null && "aura" == data.scheme) {
-                query = data.getQueryParameter("query") ?: data.getQueryParameter("q")
+            if (data != null) {
+                val dataStr = data.toString()
+                if (dataStr.contains("dp=") || dataStr.contains("p=") || dataStr.contains("ids=") || dataStr.startsWith("aura")) {
+                    methodChannel?.invokeMethod("onDeepLink", mapOf("link" to dataStr))
+                } else if ("aura" == data.scheme) {
+                    query = data.getQueryParameter("query") ?: data.getQueryParameter("q")
+                }
             } else {
                 query = intent.getStringExtra("query") ?: intent.getStringExtra("media_name")
             }
-        } else if ("android.media.action.MEDIA_PLAYBACK_PREPARE" == action ||
-                   "android.intent.action.MEDIA_SEARCH" == action) {
-            query = intent.getStringExtra(SearchManager.QUERY)
-                ?: intent.getStringExtra("query")
-                ?: intent.getStringExtra("android.intent.extra.focus")
+        } else if (Intent.ACTION_SEARCH == action || "android.media.action.MEDIA_SEARCH" == action) {
+            query = intent.getStringExtra(SearchManager.QUERY) ?: intent.getStringExtra("query")
         }
 
-        if (!query.isNullOrBlank()) {
+        if (!query.isNullOrEmpty()) {
             if (methodChannel != null) {
                 sendVoiceQueryToFlutter(query)
             } else {

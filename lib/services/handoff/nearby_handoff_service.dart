@@ -179,10 +179,14 @@ class NearbyHandoffService {
   }
 
   /// Generate QR Code payload string for camera scanner fallback
-  String getQrConnectionUrl() {
+  String getQrConnectionUrl({String? shortCode}) {
     final ip = _localIp ?? '127.0.0.1';
     final port = serverPort;
-    return 'aura-handoff://$ip:$port/payload';
+    if (shortCode != null && shortCode.isNotEmpty) {
+      final cleanCode = shortCode.replaceAll('https://auramusic.app/share?dp=', '').replaceAll('aura://dp=', '');
+      return 'https://auramusic.app/share?dp=$cleanCode&ip=$ip&port=$port';
+    }
+    return 'https://auramusic.app/share?ip=$ip&port=$port';
   }
 
   /// Fetch handoff payload directly from a sender IP/port

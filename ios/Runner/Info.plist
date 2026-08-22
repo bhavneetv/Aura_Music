@@ -59,9 +59,27 @@
 	</dict>
 	<key>NSSiriUsageDescription</key>
 	<string>Aura uses Siri to let you play songs, artists, and playlists using voice commands.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Aura uses your local network to discover and sync audio playback with nearby devices on your Wi-Fi.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INPlayMediaIntent</string>
+		<string>INSearchForMediaIntent</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.example.musicApp</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>aura</string>
+				<string>aura-playlist</string>
+				<string>auramusic</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
