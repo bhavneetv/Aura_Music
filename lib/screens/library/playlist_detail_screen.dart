@@ -6,7 +6,7 @@ import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../widgets/app_artwork_image.dart';
-import '../handoff/nearby_share_screen.dart';
+import '../sharing/remote_link_share_modal.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -324,12 +324,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ),
           IconButton(
             icon: const Icon(Icons.share_rounded),
-            tooltip: 'Share Playlist via Nearby Share',
+            tooltip: 'Share Playlist',
             onPressed: () {
-              NearbyShareScreen.showHandoffModal(
+              ShareOptionsModal.show(
                 context,
                 tracks: _playlistTracks,
                 title: _playlist['name']?.toString() ?? 'Custom Playlist',
+                description: _playlist['description']?.toString() ?? '',
               );
             },
           ),

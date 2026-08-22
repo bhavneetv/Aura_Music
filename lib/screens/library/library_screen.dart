@@ -11,7 +11,8 @@ import '../../widgets/app_artwork_image.dart';
 import 'playlist_detail_screen.dart';
 import 'recently_played_screen.dart';
 import 'spotify_import_preview_screen.dart';
-import '../handoff/nearby_share_screen.dart';
+import '../../services/sharing/playlist_link_share_service.dart';
+import '../sharing/remote_link_share_modal.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -197,12 +198,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'Import Spotify Playlist 🎧', 
+                    'Import Playlist Link / Code 🎧', 
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Paste a public Spotify playlist link below to fetch its track details.',
+                    'Paste an Aura shared link/code or Spotify playlist link below to import.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 16),
@@ -210,7 +211,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                     controller: _spotifyUrlController,
                     enabled: !isLoading,
                     decoration: InputDecoration(
-                      labelText: 'Spotify Playlist Link',
+                      labelText: 'Aura Shared Link or Spotify URL',
                       errorText: inlineError,
                       filled: true,
                       fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
@@ -250,11 +251,48 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                           ? null 
                           : () async {
                               final url = _spotifyUrlController.text.trim();
+                              
+                              // Check if stateless Aura link or ultra-short relay code
+                              final decodedAura = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(url);
+                              if (decodedAura != null) {
+                                final newPl = {
+                                  'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                                  'name': decodedAura.title,
+                                  'description': decodedAura.description.isNotEmpty ? decodedAura.description : 'Imported via Link',
+                                  'trackIds': decodedAura.tracks.map((t) => t.id).toList(),
+                                  'tracks': decodedAura.tracks.map((t) => {
+                                    'id': t.id,
+                                    'title': t.title,
+                                    'artist': t.artist,
+                                    'album': t.album,
+                                    'duration': t.duration,
+                                    'artworkUrl': t.artworkUrl,
+                                    'audioUrl': t.audioUrl,
+                                    'genre': t.genre,
+                                  }).toList(),
+                                };
+                                final playlists = StorageService.getPlaylists();
+                                playlists.insert(0, newPl);
+                                await StorageService.savePlaylists(playlists);
+
+                                Navigator.pop(context);
+                                _spotifyUrlController.clear();
+                                _loadPlaylists();
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Imported "${decodedAura.title}" with ${decodedAura.tracks.length} tracks! 🎵'),
+                                    backgroundColor: accentColor,
+                                  ),
+                                );
+                                return;
+                              }
+
                               final playlistId = SpotifyImportService.instance.validateAndExtractPlaylistId(url);
                               
                               if (playlistId == null) {
                                 setModalState(() {
-                                  inlineError = 'Please enter a valid Spotify playlist URL.';
+                                  inlineError = 'Please enter a valid Aura shared link or Spotify playlist URL.';
                                 });
                                 return;
                               }
@@ -527,7 +565,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       itemCount: _playlists.length,
       itemBuilder: (context, index) {
         final playlist = _playlists[index];
-        final List trackIds = playlist['trackIds'] ?? [];
+        final List rawTracks = playlist['tracks'] as List? ?? [];
+        final List trackIds = playlist['trackIds'] as List? ?? [];
+        final int songCount = rawTracks.isNotEmpty ? rawTracks.length : trackIds.length;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
@@ -545,7 +585,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               child: Icon(Icons.playlist_play_rounded, color: accentColor, size: 30),
             ),
             title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-            subtitle: Text('${trackIds.length} songs • ${playlist['description'] ?? 'Custom playlist'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            subtitle: Text('$songCount songs • ${playlist['description'] ?? 'Custom playlist'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -571,10 +611,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                         }
                       }
                     }
-                    NearbyShareScreen.showHandoffModal(
+                    ShareOptionsModal.show(
                       context,
                       tracks: playlistTracks,
                       title: playlist['name']?.toString() ?? 'Custom Playlist',
+                      description: playlist['description']?.toString() ?? '',
                     );
                   },
                 ),

@@ -629,6 +629,7 @@ class _NearbyShareScreenState extends ConsumerState<NearbyShareScreen>
                         final playlistMap = {
                           'name': '${payload.title} (${payload.senderName})',
                           'description': 'Received via Nearby Handoff from ${payload.senderName}',
+                          'trackIds': payload.tracks.map((t) => t.id).toList(),
                           'tracks': payload.tracks.map((t) => {
                             'id': t.id,
                             'title': t.title,
