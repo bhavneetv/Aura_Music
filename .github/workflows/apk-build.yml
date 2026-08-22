@@ -53,12 +53,7 @@ jobs:
           if [ -n "$KEY_B64" ] && [ -n "$STORE_PASS" ]; then
             echo "Decoding release keystore from secrets..."
             echo "$KEY_B64" | tr -d '\r\n ' | base64 --decode > android/aura-release-key.jks
-            cat <<EOF > android/key.properties
-storePassword=$STORE_PASS
-keyPassword=${KEY_PASS:-$STORE_PASS}
-keyAlias=${KEY_ALIAS:-aura}
-storeFile=../aura-release-key.jks
-EOF
+            printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=../aura-release-key.jks\n" "$STORE_PASS" "${KEY_PASS:-$STORE_PASS}" "${KEY_ALIAS:-aura}" > android/key.properties
             echo "Release keystore configured successfully."
           else
             echo "No KEYSTORE_BASE64 or ANDROID_STORE_PASSWORD secret found. Building with debug signing fallback."
