@@ -12,6 +12,10 @@ import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../services/ai/song_summary_service.dart';
 import '../../services/lyrics/lyrics_service.dart';
+import '../../widgets/audio_output_picker_modal.dart';
+import '../../providers/multi_device_sync_provider.dart';
+import '../../providers/audio_routing_provider.dart';
+import '../../services/audio/audio_routing_service.dart';
 import '../../widgets/custom_slider_track_shapes.dart';
 import '../../widgets/waveform_seek_bar.dart';
 import '../../widgets/app_artwork_image.dart';
@@ -964,12 +968,73 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
                 const SizedBox(height: 20),
 
-                // Bottom row: Sleep timer, Lyrics, Equalizer, Speed, Queue (G.3 Redesigned)
+                // Multi-Device Group Sync Active Banner
+                Consumer(
+                  builder: (context, ref, child) {
+                    final syncState = ref.watch(multiDeviceSyncProvider);
+                    if (!syncState.session.isInGroup) return const SizedBox.shrink();
+                    return GestureDetector(
+                      onTap: () => showAudioOutputPickerModal(context),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12, left: 24, right: 24),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: customBranding.accentColor.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: customBranding.accentColor.withOpacity(0.5), width: 1.0),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.wifi_tethering_rounded, size: 14, color: customBranding.accentColor),
+                            const SizedBox(width: 8),
+                            Text(
+                              syncState.session.isHost
+                                  ? 'Synced with ${syncState.session.syncedCount} nearby devices 📶'
+                                  : 'Synced to host (${syncState.session.hostDeviceName}) 📶',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                // Bottom row: Output Devices, Sleep timer, Lyrics, Equalizer, Speed, Queue
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
+                      // Audio Output & Multi-Room Sync Button
+                      Consumer(
+                        builder: (context, ref, child) {
+                          final syncSession = ref.watch(multiDeviceSyncProvider).session;
+                          final activeDev = ref.watch(audioRoutingProvider).activeDevice;
+                          final isGroupActive = syncSession.isInGroup;
+
+                          return _buildActionButton(
+                            icon: isGroupActive
+                                ? Icons.speaker_group_rounded
+                                : (activeDev?.type == AudioDeviceType.bluetooth
+                                    ? Icons.bluetooth_audio_rounded
+                                    : (activeDev?.type == AudioDeviceType.wiredHeadset
+                                        ? Icons.headphones_rounded
+                                        : Icons.speaker_rounded)),
+                            label: isGroupActive ? 'Synced (${syncSession.syncedCount})' : 'Output',
+                            isActive: isGroupActive || (activeDev != null && activeDev.type != AudioDeviceType.speaker),
+                            accentColor: customBranding.accentColor,
+                            onTap: () => showAudioOutputPickerModal(context),
+                          );
+                        },
+                      ),
+
                       // Sleep Timer Option
                       _buildActionButton(
                         icon: Icons.timer_rounded,
@@ -2345,7 +2410,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             physics: const BouncingScrollPhysics(),
             child: Column(
               children: [
-                // ── Top Bar Header (Back & Options) ──
+                // ── Top Bar Header (Back & Options & Audio Output) ──
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   child: Row(
@@ -2355,12 +2420,82 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                         icon: Icon(Icons.keyboard_arrow_down_rounded, color: textColor.withValues(alpha: 0.8), size: 28),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
-                      IconButton(
-                        icon: Icon(Icons.more_horiz_rounded, color: textColor.withValues(alpha: 0.8), size: 24),
-                        onPressed: () => _showQueueBottomSheet(state, notifier),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Consumer(
+                            builder: (context, ref, child) {
+                              final syncSession = ref.watch(multiDeviceSyncProvider).session;
+                              final activeDev = ref.watch(audioRoutingProvider).activeDevice;
+                              final isGroupActive = syncSession.isInGroup;
+
+                              return IconButton(
+                                icon: Icon(
+                                  isGroupActive
+                                      ? Icons.speaker_group_rounded
+                                      : (activeDev?.type == AudioDeviceType.bluetooth
+                                          ? Icons.bluetooth_audio_rounded
+                                          : (activeDev?.type == AudioDeviceType.wiredHeadset
+                                              ? Icons.headphones_rounded
+                                              : Icons.speaker_rounded)),
+                                  color: isGroupActive || (activeDev != null && activeDev.type != AudioDeviceType.speaker)
+                                      ? accentColor
+                                      : textColor.withValues(alpha: 0.8),
+                                  size: 22,
+                                ),
+                                tooltip: 'Audio Output & Multi-Room Sync',
+                                onPressed: () => showAudioOutputPickerModal(context),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.more_horiz_rounded, color: textColor.withValues(alpha: 0.8), size: 24),
+                            onPressed: () => _showQueueBottomSheet(state, notifier),
+                          ),
+                        ],
                       ),
                     ],
                   ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Multi-Device Group Sync Active Banner (Minimal Theme)
+                Consumer(
+                  builder: (context, ref, child) {
+                    final syncState = ref.watch(multiDeviceSyncProvider);
+                    if (!syncState.session.isInGroup) return const SizedBox.shrink();
+                    return GestureDetector(
+                      onTap: () => showAudioOutputPickerModal(context),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12, left: 24, right: 24),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: accentColor.withValues(alpha: 0.5), width: 1.0),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.wifi_tethering_rounded, size: 14, color: accentColor),
+                            const SizedBox(width: 8),
+                            Text(
+                              syncState.session.isHost
+                                  ? 'Synced with ${syncState.session.syncedCount} nearby devices 📶'
+                                  : 'Synced to host (${syncState.session.hostDeviceName}) 📶',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
 
                 const SizedBox(height: 12),
@@ -2569,12 +2704,33 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
 
               const SizedBox(height: 20),
 
-              // ── Quick Action Buttons Row: Timer, Lyrics, Playlist, EQ, Queue ──
+              // ── Quick Action Buttons Row: Output, Timer, Lyrics, Playlist, EQ, Queue ──
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    Consumer(
+                      builder: (context, ref, child) {
+                        final syncSession = ref.watch(multiDeviceSyncProvider).session;
+                        final activeDev = ref.watch(audioRoutingProvider).activeDevice;
+                        final isGroupActive = syncSession.isInGroup;
+
+                        return _buildActionButton(
+                          icon: isGroupActive
+                              ? Icons.speaker_group_rounded
+                              : (activeDev?.type == AudioDeviceType.bluetooth
+                                  ? Icons.bluetooth_audio_rounded
+                                  : (activeDev?.type == AudioDeviceType.wiredHeadset
+                                      ? Icons.headphones_rounded
+                                      : Icons.speaker_rounded)),
+                          label: isGroupActive ? 'Synced (${syncSession.syncedCount})' : 'Output',
+                          isActive: isGroupActive || (activeDev != null && activeDev.type != AudioDeviceType.speaker),
+                          accentColor: accentColor,
+                          onTap: () => showAudioOutputPickerModal(context),
+                        );
+                      },
+                    ),
                     _buildActionButton(
                       icon: Icons.timer_rounded,
                       label: 'Timer',

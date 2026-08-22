@@ -45,6 +45,7 @@ import Intents
     })
 
     GeneratedPluginRegistrant.register(with: self)
+    AudioRoutingPlugin.register(with: self)
 
     // Check for pending Siri queries stored in shared App Group defaults
     checkPendingSiriQuery()

@@ -41,6 +41,30 @@ class Track {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'duration': duration,
+        'artworkUrl': artworkUrl,
+        'audioUrl': audioUrl,
+        'genre': genre,
+      };
+
+  factory Track.fromJson(Map<String, dynamic> json) {
+    return Track(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? 'Unknown Title',
+      artist: json['artist'] as String? ?? 'Unknown Artist',
+      album: json['album'] as String? ?? '',
+      duration: json['duration'] as String? ?? '3:30',
+      artworkUrl: json['artworkUrl'] as String? ?? '',
+      audioUrl: json['audioUrl'] as String? ?? '',
+      genre: json['genre'] as String? ?? '',
+    );
+  }
+
   // Mock tracks representing Creative Commons & fallback tracks
   static List<Track> get mockTracks => [
     const Track(

@@ -13,6 +13,7 @@ import '../services/recommendation/recommendation_engine.dart';
 import '../services/music_sources/jamendo_source.dart';
 import '../services/voice/voice_assistant_service.dart';
 import '../services/quick_actions/quick_actions_service.dart';
+import '../services/sync/multi_device_sync_service.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
 
@@ -247,6 +248,23 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         currentPosition: pos,
         progress: progress,
       );
+
+      // Notify multi-device sync host position beacon
+      try {
+        final syncService = MultiDeviceSyncService.instance;
+        if (syncService.role == SyncRole.host) {
+          syncService.notifyHostPosition(
+            position: pos,
+            isPlaying: state.isPlaying,
+            currentTrack: state.currentTrack,
+          );
+        } else if (syncService.role == SyncRole.follower) {
+          syncService.onFollowerPositionBeaconReceived(
+            pos.inMilliseconds,
+            currentFollowerPosMs: pos.inMilliseconds,
+          );
+        }
+      } catch (_) {}
       
       // Save play position periodically in Hive
       if (state.currentTrack != null) {
@@ -1478,10 +1496,25 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
+  Future<void> pause() async {
+    state = state.copyWith(playRequested: false, isPlaying: false);
+    await _handler.pause();
+    if (MultiDeviceSyncService.instance.role == SyncRole.host) {
+      MultiDeviceSyncService.instance.broadcastPause(state.currentPosition);
+    }
+  }
+
   void togglePlay() {
     final playReq = !_handler.player.playing;
     state = state.copyWith(playRequested: playReq);
-    playReq ? _handler.play() : _handler.pause();
+    if (playReq) {
+      _handler.play();
+      if (MultiDeviceSyncService.instance.role == SyncRole.host && state.currentTrack != null) {
+        MultiDeviceSyncService.instance.broadcastPlay(state.currentTrack!, state.currentPosition);
+      }
+    } else {
+      pause();
+    }
   }
 
   void seek(double progress) {
@@ -1491,6 +1524,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final targetPos = Duration(milliseconds: targetMs);
     state = state.copyWith(currentPosition: targetPos, progress: clampedProgress);
     _handler.seek(targetPos);
+    if (MultiDeviceSyncService.instance.role == SyncRole.host) {
+      MultiDeviceSyncService.instance.broadcastSeek(targetPos);
+    }
   }
 
   void seekToDuration(Duration position) {
@@ -1500,6 +1536,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         ? (position.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
     state = state.copyWith(currentPosition: position, progress: progress);
+    if (MultiDeviceSyncService.instance.role == SyncRole.host) {
+      MultiDeviceSyncService.instance.broadcastSeek(position);
+    }
   }
 
   void setPlaybackSpeed(double speed) {

@@ -928,7 +928,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         controller: nameController,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
-                          hintText: 'Enter your name (e.g. Bhavneet)...',
+                          hintText: 'Enter your name ',
                           filled: true,
                           fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),

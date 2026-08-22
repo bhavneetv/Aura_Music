@@ -140,6 +140,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   }
 
   @override
+  Future<void> setSpeed(double speed) async {
+    await _activePlayer.setSpeed(speed);
+    if (_isCrossfadeActive) {
+      await _fadePlayer.setSpeed(speed);
+    }
+    _broadcastState();
+  }
+
+  @override
   Future<void> seek(Duration position) async {
     if (_isCrossfadeActive) {
       cancelCrossfade();
