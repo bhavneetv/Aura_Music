@@ -53,8 +53,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   // the player reports playing=false while setAudioSource() is loading.
   bool _isTrackTransitioning = false;
 
-  // Track active crossfade timer so it can be cancelled
+  // Track active crossfade state and timer so it can be controlled or cancelled
   Timer? _crossfadeTimer;
+  bool _isCrossfadeActive = false;
+  Completer<void>? _crossfadeCompleter;
 
   // Track the currently preloaded next song to allow instant gapless switching
   Track? _preloadedTrack;
@@ -122,17 +124,26 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> play() async {
     await _ensureAudioSessionActive();
     _activePlayer.play(); // don't await, it blocks until song ends
+    if (_isCrossfadeActive) {
+      _fadePlayer.play();
+    }
     _broadcastState();
   }
 
   @override
   Future<void> pause() async {
     await _activePlayer.pause();
+    if (_isCrossfadeActive) {
+      await _fadePlayer.pause();
+    }
     _broadcastState();
   }
 
   @override
   Future<void> seek(Duration position) async {
+    if (_isCrossfadeActive) {
+      cancelCrossfade();
+    }
     _positionController.add(position);
     await _activePlayer.seek(position);
     _broadcastState();
@@ -141,15 +152,17 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   @override
   Future<void> stop() async {
     WidgetsBinding.instance.removeObserver(this);
+    cancelCrossfade();
     await _activePlayer.stop();
     await _fadePlayer.stop();
-    _crossfadeTimer?.cancel();
-    _crossfadeTimer = null;
     _broadcastState();
   }
 
   @override
   Future<void> skipToNext() async {
+    if (_isCrossfadeActive) {
+      cancelCrossfade();
+    }
     if (onNextRequested != null) {
       await onNextRequested!();
     } else {
@@ -159,6 +172,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   @override
   Future<void> skipToPrevious() async {
+    if (_isCrossfadeActive) {
+      cancelCrossfade();
+    }
     if (onPreviousRequested != null) {
       await onPreviousRequested!();
     } else {
@@ -186,10 +202,35 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     'Referer': 'https://www.jiosaavn.com/',
   };
 
+  /// Safely cancels any ongoing crossfade, resets volume levels and stops the fade player.
+  void cancelCrossfade({bool snapActiveVolume = true}) {
+    if (_crossfadeTimer != null) {
+      _crossfadeTimer?.cancel();
+      _crossfadeTimer = null;
+    }
+    _isCrossfadeActive = false;
+    
+    if (_crossfadeCompleter != null && !_crossfadeCompleter!.isCompleted) {
+      _crossfadeCompleter!.complete();
+      _crossfadeCompleter = null;
+    }
+
+    try {
+      _fadePlayer.pause();
+      _fadePlayer.seek(Duration.zero);
+      _fadePlayer.setVolume(1.0);
+    } catch (_) {}
+
+    if (snapActiveVolume) {
+      try {
+        _activePlayer.setVolume(1.0);
+      } catch (_) {}
+    }
+  }
+
   /// Resets fade player and volumes without stopping active player to preserve iOS AVAudioSession in background.
   Future<void> resetForNewTrack() async {
-    _crossfadeTimer?.cancel();
-    _crossfadeTimer = null;
+    cancelCrossfade();
 
     // CRITICAL iOS FIX: Use pause() instead of stop() for the outgoing player.
     // Calling stop() on an AVPlayer in the background can cause iOS to aggressively
@@ -345,16 +386,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     int crossfadeSeconds, {
     void Function()? onSwapped,
   }) async {
-    // Cancel any existing crossfade timer
-    _crossfadeTimer?.cancel();
-    _crossfadeTimer = null;
+    cancelCrossfade();
 
-    // Capture references BEFORE any swap
     final outgoingPlayer = _activePlayer;
     final incomingPlayer = _fadePlayer;
 
     try {
-      // Mark transitioning so iOS keeps us alive during the load
       _isTrackTransitioning = true;
       _broadcastState();
 
@@ -367,24 +404,35 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         overrideAudioSource: url,
       );
 
-      // 1. Load incoming track on the fade player (DON'T swap yet)
-      await incomingPlayer.stop();
-      await incomingPlayer.setVolume(0.0);
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+      // Check if incoming player is already loaded with preloadedTrack
+      if (_preloadedTrack?.id == nextTrack.id) {
+        logPlaybackEvent(
+          eventName: 'CROSSFADE_USING_PRELOADED',
+          currentTrackId: nextTrack.id,
+        );
+        await incomingPlayer.setVolume(0.0);
       } else {
-        await incomingPlayer.setFilePath(url);
+        // Load incoming track on the fade player
+        await incomingPlayer.stop();
+        await incomingPlayer.setVolume(0.0);
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+        } else {
+          await incomingPlayer.setFilePath(url);
+        }
       }
-      
-      // 2. Start playback on the incoming player at volume 0
+
+      // Start playback on incoming player at volume 0
       await _ensureAudioSessionActive();
       incomingPlayer.play(); // DON'T AWAIT
 
-      // 3. NOW swap active players — incoming is loaded and playing
+      // Swap active player references — incoming is now active, outgoing is fade player
       _activePlayer = incomingPlayer;
       _fadePlayer = outgoingPlayer;
+      _preloadedTrack = null;
+      _isCrossfadeActive = true;
 
-      // Broadcast new MediaItem to system notification at exact swap time
+      // Broadcast new MediaItem to system notification & lockscreen at exact swap time
       final mediaItem = MediaItem(
         id: nextTrack.id,
         album: nextTrack.album,
@@ -399,25 +447,30 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       );
       this.mediaItem.add(mediaItem);
 
-      // Notify caller that player swap has completed
       onSwapped?.call();
 
-      // Broadcast updated state with the new active player
-      _isTrackTransitioning = false; // Crossfade swap done, real audio is playing
+      _isTrackTransitioning = false;
       _positionController.add(_activePlayer.position);
       _durationController.add(_activePlayer.duration);
       _playerStateController.add(_activePlayer.playerState);
       _broadcastState();
 
-      // 4. Perform smooth crossfade using Timer.periodic (non-blocking)
-      final completer = Completer<void>();
-      final steps = (crossfadeSeconds * 10).clamp(10, 100);
+      // Equal-power volume automation curve:
+      // vol_out = cos(progress * pi / 2)
+      // vol_in = sin(progress * pi / 2)
+      _crossfadeCompleter = Completer<void>();
+      final steps = (crossfadeSeconds * 20).clamp(20, 200); // 20 updates per sec (50ms interval)
       final stepMs = (crossfadeSeconds * 1000 / steps).round();
       int currentStep = 0;
 
       _crossfadeTimer = Timer.periodic(Duration(milliseconds: stepMs), (timer) {
+        if (!_isCrossfadeActive) {
+          timer.cancel();
+          return;
+        }
+
         currentStep++;
-        final double progress = currentStep / steps;
+        final double progress = (currentStep / steps).clamp(0.0, 1.0);
         final double outVol = math.cos(progress * math.pi / 2);
         final double inVol = math.sin(progress * math.pi / 2);
 
@@ -429,20 +482,23 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         if (currentStep >= steps) {
           timer.cancel();
           _crossfadeTimer = null;
-          completer.complete();
+          _isCrossfadeActive = false;
+          if (_crossfadeCompleter != null && !_crossfadeCompleter!.isCompleted) {
+            _crossfadeCompleter!.complete();
+            _crossfadeCompleter = null;
+          }
         }
       });
 
-      await completer.future;
+      await _crossfadeCompleter!.future;
 
-      // 5. Pause and reset volume of outgoing player instead of hard stop
+      // Clean up outgoing player after crossfade finishes
       try {
         await _fadePlayer.pause();
         await _fadePlayer.seek(Duration.zero);
         await _fadePlayer.setVolume(1.0);
       } catch (_) {}
 
-      // Ensure active player is at full volume
       try {
         await _activePlayer.setVolume(1.0);
       } catch (_) {}
@@ -461,13 +517,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         currentTrackId: nextTrack.id,
         error: e.toString(),
       );
-      _crossfadeTimer?.cancel();
-      _crossfadeTimer = null;
-      // Ensure fade player is paused on failure
-      try {
-        await _fadePlayer.pause();
-        await _fadePlayer.setVolume(1.0);
-      } catch (_) {}
+      cancelCrossfade();
       return false;
     }
   }

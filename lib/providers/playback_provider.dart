@@ -250,18 +250,15 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
       }
 
-      // Preload next track audio 15 seconds before current ends for zero-latency gapless playback
-      if (state.isPlaying && !_isTransitioning && dur.inMilliseconds > 0) {
-        final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
-        if (remainingMs > 0 && remainingMs <= 15000 && !_isNextTrackPreloaded) {
-          final nextIdx = state.currentIndex + 1;
-          if (nextIdx < state.queue.length) {
-            final nextTrack = state.queue[nextIdx];
-            if (nextTrack.audioUrl.isNotEmpty && 
-                (nextTrack.audioUrl.startsWith('http') || File(nextTrack.audioUrl).existsSync())) {
-              _isNextTrackPreloaded = true;
-              _handler.preloadNextTrack(nextTrack);
-            }
+      // Preload next track audio immediately as soon as track starts playing for zero-latency gapless & crossfade playback
+      if (state.isPlaying && !_isTransitioning && pos.inSeconds >= 2 && !_isNextTrackPreloaded) {
+        final nextIdx = state.currentIndex + 1;
+        if (nextIdx < state.queue.length) {
+          final nextTrack = state.queue[nextIdx];
+          if (nextTrack.audioUrl.isNotEmpty && 
+              (nextTrack.audioUrl.startsWith('http') || File(nextTrack.audioUrl).existsSync())) {
+            _isNextTrackPreloaded = true;
+            _handler.preloadNextTrack(nextTrack);
           }
         }
       }
@@ -271,8 +268,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // inside nextTrack(), not via an arbitrary timer.
       if (StorageService.isCrossfadeEnabled() && state.isPlaying && !_isTransitioning && dur.inMilliseconds > 0 && !_isCrossfading) {
         final crossfadeSec = StorageService.getCrossfadeDuration();
+        final durSec = dur.inSeconds;
+        final maxCrossfadeForTrack = math.max(1, (durSec / 2).floor());
+        final effectiveCrossfadeSec = math.min(crossfadeSec, maxCrossfadeForTrack);
+
         final remainingMs = dur.inMilliseconds - pos.inMilliseconds;
-        if (remainingMs > 0 && remainingMs <= (crossfadeSec * 1000)) {
+        if (durSec > 2 && remainingMs > 0 && remainingMs <= (effectiveCrossfadeSec * 1000)) {
           _isCrossfading = true;
           nextTrack(isCrossfade: true);
         }
@@ -1158,9 +1159,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
         if (audioUrl.isNotEmpty) {
           final crossfadeSec = StorageService.getCrossfadeDuration();
+          final durSec = state.totalDuration.inSeconds;
+          final effectiveCrossfadeSec = math.min(crossfadeSec, math.max(1, (durSec / 2).floor()));
+
           final success = await _handler.crossfadeToTrack(
             targetTrack.copyWith(audioUrl: audioUrl),
-            crossfadeSec,
+            effectiveCrossfadeSec,
             onSwapped: () {
               if (myNonce == _playbackNonce) {
                 state = state.copyWith(

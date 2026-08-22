@@ -569,20 +569,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           () => _showProgressBarStyleDialog(),
         ),
         _buildSwitchTile(
-          'Crossfade Audio (Coming Soon)',
-          'Smooth transition between ending and next song',
-          false,
+          'Crossfade Audio',
+          'Smooth equal-power overlap between ending and next song',
+          _crossfadeEnabled,
           customBranding.accentColor,
-          (val) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Crossfade Audio is coming soon! 🚀'),
-                duration: Duration(seconds: 2),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
+          (val) async {
+            setState(() {
+              _crossfadeEnabled = val;
+            });
+            await StorageService.setCrossfadeEnabled(val);
           },
         ),
+        if (_crossfadeEnabled)
+          _buildSelectionTile(
+            'Crossfade Duration',
+            '${_crossfadeDuration.toInt()} seconds',
+            () => _showCrossfadeDurationDialog(),
+          ),
         _buildSelectionTile(
           'Download Stream Quality',
           _audioQuality,
@@ -1271,6 +1274,71 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showCrossfadeDurationDialog() {
+    double tempDuration = _crossfadeDuration;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final customBranding = ref.read(customizationProvider);
+            return AlertDialog(
+              backgroundColor: Theme.of(context).cardColor,
+              title: const Text('Crossfade Duration', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${tempDuration.toInt()} seconds',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: customBranding.accentColor,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Slider(
+                    value: tempDuration,
+                    min: 1,
+                    max: 12,
+                    divisions: 11,
+                    activeColor: customBranding.accentColor,
+                    label: '${tempDuration.toInt()}s',
+                    onChanged: (val) {
+                      setDialogState(() {
+                        tempDuration = val;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    setState(() {
+                      _crossfadeDuration = tempDuration;
+                    });
+                    await StorageService.setCrossfadeDuration(tempDuration.toInt());
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: customBranding.accentColor,
+                    foregroundColor: Colors.black,
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
