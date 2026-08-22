@@ -272,6 +272,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         _fadePlayer = outgoingPlayer;
         
         await _activePlayer.setVolume(1.0);
+
+        // CRITICAL iOS FIX: Re-verify & reactivate audio session AFTER player swap
+        // immediately before calling play() on the new active player.
+        await _ensureAudioSessionActive();
+
         _activePlayer.play(); // DON'T AWAIT: it blocks until song finishes!
         _preloadedTrack = null;
 
@@ -289,12 +294,30 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await resetForNewTrack();
         _preloadedTrack = null;
 
+        logPlaybackEvent(
+          eventName: 'SET_AUDIO_SOURCE_START',
+          currentTrackId: track.id,
+          overrideAudioSource: url,
+        );
+
         if (url.startsWith('http://') || url.startsWith('https://')) {
           await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
         } else {
           await _activePlayer.setFilePath(url);
         }
         await _activePlayer.setVolume(1.0);
+
+        logPlaybackEvent(
+          eventName: 'SET_AUDIO_SOURCE_DONE',
+          currentTrackId: track.id,
+        );
+
+        // CRITICAL iOS FIX: Reactivate audio session IMMEDIATELY BEFORE play(),
+        // AFTER setAudioSource has finished loading/buffering.
+        // During setAudioSource's network load (which can take 500ms-2000ms in background),
+        // iOS CoreAudio deactivates the app's audio session due to the silent gap.
+        await _ensureAudioSessionActive();
+
         _activePlayer.play(); // DON'T AWAIT
         _isTrackTransitioning = false;
         _broadcastState();
@@ -354,6 +377,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       }
       
       // 2. Start playback on the incoming player at volume 0
+      await _ensureAudioSessionActive();
       incomingPlayer.play(); // DON'T AWAIT
 
       // 3. NOW swap active players — incoming is loaded and playing
@@ -472,6 +496,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       
       await _activePlayer.seek(position);
       await _activePlayer.setVolume(1.0);
+      await _ensureAudioSessionActive();
       _activePlayer.play(); // DON'T AWAIT
       _isTrackTransitioning = false;
 
@@ -506,7 +531,21 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> _ensureAudioSessionActive() async {
     try {
       final session = await AudioSession.instance;
-      await session.setActive(true);
+      final success = await session.setActive(true);
+      if (!success) {
+        logPlaybackEvent(
+          eventName: 'AUDIO_SESSION_SET_ACTIVE_RETURNED_FALSE',
+          error: 'session.setActive(true) returned false, retrying after 50ms...',
+        );
+        await Future.delayed(const Duration(milliseconds: 50));
+        final retrySuccess = await session.setActive(true);
+        logPlaybackEvent(
+          eventName: 'AUDIO_SESSION_RETRY_RESULT',
+          error: 'retrySuccess=$retrySuccess',
+        );
+      } else {
+        logPlaybackEvent(eventName: 'AUDIO_SESSION_ACTIVATED_SUCCESS');
+      }
     } catch (e) {
       logPlaybackEvent(eventName: 'AUDIO_SESSION_REACTIVATION_FAILED', error: e.toString());
     }
