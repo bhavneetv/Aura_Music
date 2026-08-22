@@ -8,11 +8,30 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Load key.properties for release signing
+// Load key.properties for release signing with safe fallback
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
+var hasValidKeystore = false
+
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    try {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+        val storePassword = keystoreProperties["storePassword"] as? String
+        val keyPassword = keystoreProperties["keyPassword"] as? String
+        val keyAlias = keystoreProperties["keyAlias"] as? String
+        val storeFileStr = keystoreProperties["storeFile"] as? String
+
+        if (!storePassword.isNullOrBlank() && storePassword != "?" &&
+            !keyPassword.isNullOrBlank() && keyPassword != "?" &&
+            !keyAlias.isNullOrBlank() && !storeFileStr.isNullOrBlank()) {
+            val sFile = file(storeFileStr)
+            if (sFile.exists() && sFile.length() > 0) {
+                hasValidKeystore = true
+            }
+        }
+    } catch (e: Exception) {
+        hasValidKeystore = false
+    }
 }
 
 // Load version.properties for central app versioning
@@ -37,10 +56,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.music_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = if (versionPropertiesFile.exists() && versionProperties.containsKey("VERSION_CODE")) {
@@ -56,7 +72,7 @@ android {
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
+        if (hasValidKeystore) {
             create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
@@ -68,10 +84,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
+            signingConfig = if (hasValidKeystore) {
                 signingConfigs.getByName("release")
             } else {
-                // Fallback to debug signing when key.properties doesn't exist
                 signingConfigs.getByName("debug")
             }
         }

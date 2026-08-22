@@ -42,27 +42,28 @@ jobs:
           echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> .env
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || '?' }}" >> .env
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || '?' }}" >> .env
-          echo "KEYSTORE_BASE64=${{ secrets.KEYSTORE_BASE64 }}" >> .env
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'aura' }}" >> $GITHUB_ENV
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || '?' }}" >> $GITHUB_ENV
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || '?' }}" >> $GITHUB_ENV
 
       - name: Setup Android Release Keystore
         run: |
           KEY_B64="${{ secrets.KEYSTORE_BASE64 }}"
-          if [ -z "$KEY_B64" ]; then
-            KEY_B64=$(grep KEYSTORE_BASE64 .env | cut -d '=' -f2- | tr -d '"')
+          STORE_PASS="${{ secrets.ANDROID_STORE_PASSWORD }}"
+          KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
+          KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+
+          if [ -n "$KEY_B64" ] && [ -n "$STORE_PASS" ]; then
+            echo "Decoding release keystore from secrets..."
+            echo "$KEY_B64" | tr -d '\r\n ' | base64 --decode > android/aura-release-key.jks
+            cat <<EOF > android/key.properties
+storePassword=$STORE_PASS
+keyPassword=${KEY_PASS:-$STORE_PASS}
+keyAlias=${KEY_ALIAS:-aura}
+storeFile=../aura-release-key.jks
+EOF
+            echo "Release keystore configured successfully."
+          else
+            echo "No KEYSTORE_BASE64 or ANDROID_STORE_PASSWORD secret found. Building with debug signing fallback."
+            rm -f android/key.properties android/aura-release-key.jks
           fi
-          echo "$KEY_B64" | base64 --decode > android/aura-release-key.jks
-          cat <<EOF > android/key.properties
-          storePassword=${{ env.ANDROID_STORE_PASSWORD }}
-          keyPassword=${{ env.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ env.ANDROID_KEY_ALIAS }}
-          storeFile=../aura-release-key.jks
-          EOF
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}

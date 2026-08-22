@@ -1,114 +1,135 @@
 # 🎵 Aura Music — Next-Gen AI Music Player
 
 [![Flutter](https://img.shields.io/badge/Flutter-v3.27+-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
-[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-brightgreen)](#-getting-started)
-[![AI Engine](https://img.shields.io/badge/AI%20Powered-Groq%20%7C%20Gemini-orange)](#-ai-intelligence--features)
+[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS%20%7C%20Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)](#-getting-started)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-Groq%20%7C%20Gemini-orange)](#-ai-intelligence--features)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Aura Music** is a sleek, ultra-modern, skeuomorphic Flutter music streaming application built for high-fidelity audio playback, AI-assisted lyric interpretation, synchronized karaoke, and personalized aesthetic customization.
+**Aura Music** is a sleek, ultra-modern cross-platform music application built with Flutter. It combines high-fidelity audio streaming, AI-powered song and lyric interpretation, local multi-device Wi-Fi playback sync, deep link playlist sharing, Siri & Google Assistant integration, and customizable glassmorphic visuals.
 
 ---
 
-## ✨ Features at a Glance
+## ✨ Key Features & Capabilities
 
-### 🚀 High-Fidelity Audio Streaming
-- **Decrypted JioSaavn & Jamendo Integration**: Stream millions of Punjabi, Hindi, Bollywood, English, and global hits at up to **320 kbps HQ**.
-- **Smart Pre-Flight URL Resolver**: Automatic fallback pipeline with direct audio stream health-checks and bitrate negotiation (320kbps → 160kbps → 96kbps).
+### 🔗 Playlist Link Sharing & One-Click Importing
+- **Deep Link Generation**: Generate shareable `aura://` or `aura-playlist://` deep links or web URLs (`auramusic.app`).
+- **One-Click Playlist Import**: Share playlists directly to WhatsApp, Telegram, or Messages. Tapping a shared link automatically imports the full playlist into the recipient's Aura Library.
+- **🟢 Spotify Playlist Importer**: Paste any public Spotify playlist URL into Aura to automatically convert and import all songs into your library.
 
-### 🤖 AI Intelligence & Lyrics Interpretation
-- **Line-by-Line AI Explanations 💡**: Deep-dive into what the song author means for each lyric line, powered by **Groq Llama-3.3 70B** with instant **Gemini 2.5 Flash** fallback.
-- **Real-Time AI Translation 🌐**: Translate lyrics instantly into **Hindi**, **English**, or **Hinglish**.
-- **AI Song Story Summaries 📜**: Get instant AI summaries explaining the song's story, mood, emotional themes, and background in English or Hindi.
+### 🎙️ Native Siri & Google Assistant Voice Commands
+- **iOS Siri Integration**: Speak naturally to Siri (*"Play Punjabi song in Aura"*, *"Play Diljit Dosanjh in Aura"*) to start playback immediately.
+- **Android Media Actions**: Full Google Assistant media intent handling for hands-free voice search and playback.
+
+### 🤖 AI Lyrics Interpretation & Summaries
+- **🔤 Multi-Language Support (English, Hindi, Hinglish)**: Generate AI summaries and line-by-line lyric breakdowns in **English**, **Hindi (हिंदी)**, or casual **Hinglish** (*"Iss song mein artist ne deep feelings express ki hai..."*).
+- **💡 Line-by-Line AI Lyric Explanations**: Understand hidden metaphors, mood, and storytelling behind individual lyric lines.
+- **📜 Full Narrative Summaries**: Comprehensive narrative analysis covering theme, emotional progression, message, and cultural context.
+
+### 📊 Waveform Seeking & 6 Visual Seek Bar Styles
+- **On-Device Waveform Extractor**: Extract audio sample amplitudes to render interactive voice-note style waveform visuals.
+- **6 Visual Progress Bar Styles**:
+  1. 🎙️ **Waveform** *(Voice-Note Style)*
+  2. 🌊 **Android 16 Wave** *(Stock Squiggly)*
+  3. 🔘 **Material Rounded**
+  4. 🐍 **Snake** *(Wavy Sine)*
+  5. ⚡ **Zigzag** *(Sawtooth Wave)*
+  6. 🌟 **Neon Glow** *(Pulse Shader)*
+
+### 🎧 Multi-Device Synced Playback & Audio Routing
+- **Wi-Fi Multi-Room Sync**: Discover and synchronize music playback across multiple nearby devices on the same Wi-Fi network.
+- **Audio Output Routing**: Dynamically switch audio output between Built-in Speaker, Bluetooth Headphones, and AirPlay/Cast routes.
 
 ### 🎤 Synchronized Karaoke Lyrics
-- **Live LRC Karaoke**: Auto-scrolling lyrics synchronized precisely to playback position.
-- **Center Sync Lock 🎯**: Lock active karaoke lines in the exact vertical center of the screen during playback.
+- **Live LRC Karaoke**: Auto-scrolling lyrics synchronized to the track position.
+- **Center Sync Lock 🎯**: Keeps active karaoke lines centered on screen with customizable font scaling.
 
-### 🎨 Skeuomorphic Player Skins & Aesthetic Customization
+### 🎨 Skeuomorphic Player Skins & Dynamic Design System
 - **4 Distinct Player Skins**:
   - 🎨 **Ultra Minimal Artwork** *(Default)*
   - 📀 **Rotating Vinyl Disc**
   - 💿 **Modern Compact CD**
   - 📼 **Classic Retro Cassette Tape**
-- **Personalized RGB Theme Accent**: Pick from curated presets (Aura Gold, Neon Cyan, Emerald, Purple, Sunset, Crimson) or define custom RGB values.
-- **Glassmorphic & Dark Mode UI**: Premium frosted glass aesthetics with full AMOLED Dark Mode support.
+- **Adaptive Navigation Styles**: Switch between **iOS 26 Liquid Glass**, **Android 16 Material 3**, and **Custom Floating Glass Capsule** navigation bars.
+- **Custom RGB Accent Colors**: Choose from presets (Gold, Cyan, Emerald, Purple, Sunset, Crimson) or set custom RGB values.
+- **Transparent Status Bar**: Fully immersive Edge-to-Edge interface with transparent status bar integration.
 
-### 🎛️ Advanced Audio Engine & Controls
-- **Built-In Equalizer**: 5-band graphic EQ with custom presets and Bass Boost.
-- **Volume Normalization**: Equalize audio output to dampen harsh volume spikes.
-- **Gapless Playback & Crossfade**: Smooth transitions between songs.
-- **Haptic Feedback**: Dynamic vibration responses on buttons and sliders.
-
-### 📥 Offline Downloads & Profile
-- **Offline Download Manager**: Save tracks locally for offline listening with full cover art and metadata caching.
-- **First-Launch Personalization**: Personalizes greetings (`Good morning, Bhavneet 🌅`, `Good afternoon ☀️`) based on your display name and time of day.
+### 💾 Smart Offline Mode & Local Cover Art Caching
+- **Offline Listening**: Download songs locally for playback without an active internet connection.
+- **Cover Art Persistence**: Artwork is saved locally during download so song covers display offline.
+- **Offline Queue Filter**: Queue automatically filters to display available downloaded songs when offline.
 
 ---
 
-## 📲 How to Download & Install
+## 📲 Downloads & Releases
 
-### Option A: Download Pre-Built Releases (Easiest)
+Pre-built binaries for all major platforms are available on the [Releases](https://github.com/bhavneetv/Aura_Music/releases) page:
 
-1. Open the [Releases](https://github.com/bhavneetv/Aura_Music/releases) page of this repository.
-2. Download the latest **`app-release.apk`** for Android devices or **`FlutterIpaExport.ipa`** for iOS devices.
-3. Install the APK on your Android device (ensure *Install from Unknown Sources* is enabled).
+| Platform | Format | Status |
+|---|---|---|
+| **Android** | `.apk` | [Download Release](https://github.com/bhavneetv/Aura_Music/releases) |
+| **iOS** | `.ipa` | [Download Release](https://github.com/bhavneetv/Aura_Music/releases) |
+| **Windows** | `.zip` (`.exe`) | [Download Release](https://github.com/bhavneetv/Aura_Music/releases) |
+| **macOS** | `.zip` (`.app`) | [Download Release](https://github.com/bhavneetv/Aura_Music/releases) |
+| **Linux** | `.tar.gz` | [Download Release](https://github.com/bhavneetv/Aura_Music/releases) |
 
 ---
 
-### Option B: Build & Run from Source (GitHub)
+## 🛠️ Build & Run from Source
 
-#### 📋 Prerequisites
-
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) (v3.24.0 or newer)
+### Prerequisites
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (v3.27 or newer)
 - [Dart SDK](https://dart.dev/get-dart)
-- Android Studio / VS Code with Flutter extension
-- Android SDK (for Android build) / Xcode (for iOS build)
 
-#### 🛠️ Step-by-Step Build Instructions
+### 1. Clone & Install
+```bash
+git clone https://github.com/bhavneetv/Aura_Music.git
+cd Aura_Music
+flutter pub get
+```
 
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/bhavneetv/Aura_Music.git
-   cd Aura_Music
-   ```
+### 2. Configure Environment API Keys
+Create a `.env` file in the project root:
+```env
+GROQ_KEY="your_groq_api_key"
+GROQ_KEY_2="your_second_groq_api_key"
+GEMINI_KEY="your_gemini_api_key"
+```
 
-2. **Install Dependencies**
-   ```bash
-   flutter pub get
-   ```
+### 3. Run Locally
+```bash
+flutter run
+```
 
-3. **Configure Environment API Keys**
-   Create a `.env` file in the root directory:
-   ```env
-   GROQ_KEY="your_groq_api_key_here"
-   GROQ_KEY_2="your_second_groq_api_key_here"
-   GEMINI_KEY="your_gemini_api_key_here"
-   ```
-   *(Note: Free API keys can be obtained from [Groq Console](https://console.groq.com/) and [Google AI Studio](https://aistudio.google.com/).)*
-
-4. **Run the App Locally**
-   Connect your physical device or start an emulator/simulator, then run:
-   ```bash
-   flutter run
-   ```
-
-5. **Build Release APK or IPA**
-   - **Android Release APK**:
-     ```bash
-     flutter build apk --release --no-tree-shake-icons --dart-define=GROQ_KEY="your_key" --dart-define=GEMINI_KEY="your_key"
-     ```
-   - **iOS Release Bundle**:
-     ```bash
-     flutter build ios --release --no-codesign
-     ```
+### 4. Build Release Bundles
+- **Android APK**:
+  ```bash
+  flutter build apk --release --no-tree-shake-icons
+  ```
+- **iOS Bundle**:
+  ```bash
+  flutter build ios --release --no-codesign
+  ```
+- **Windows Executable**:
+  ```bash
+  flutter build windows --release
+  ```
+- **macOS App**:
+  ```bash
+  flutter build macos --release --no-codesign
+  ```
+- **Linux Bundle**:
+  ```bash
+  flutter build linux --release
+  ```
 
 ---
 
-## ⚙️ GitHub Actions CI/CD Automated Workflow
+## ⚙️ Automated CI/CD Workflows
 
-This project includes automated GitHub Actions workflows under `.github/workflows/`:
-- **`apk-build.yml`**: Automatically builds Android Release APKs and creates a GitHub Release when triggered.
-- **`dart.yml`**: Automatically builds and archives iOS `.ipa` packages.
+Workflows are configured under `.github/workflows/`:
+- **`apk-build.yml`**: Builds and releases Android `.apk`.
+- **`dart.yml`**: Builds and releases iOS `.ipa`.
+- **`desktop-builds.yml`**: Builds and releases Windows `.exe` (Zip), macOS `.app` (Zip), and Linux bundle (`.tar.gz`).
 
 To enable automated release builds with AI features, add `GROQ_KEY`, `GROQ_KEY_2`, and `GEMINI_KEY` to your repository's **Settings > Secrets and variables > Actions**.
 

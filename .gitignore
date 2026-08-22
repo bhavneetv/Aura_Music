@@ -43,9 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
-# Environment secrets
+
+# Environment secrets & keystores
 .env
 *.env
-pdr.md
+key.properties
+**/key.properties
+*.jks
+*.keystore
 pdr.md
 pdrfix.md
