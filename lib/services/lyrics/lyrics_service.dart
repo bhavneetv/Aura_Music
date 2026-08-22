@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../storage/storage_service.dart';
 import '../ai/ai_service.dart';
 
@@ -315,30 +316,70 @@ class LyricsService {
     required String lyricsText,
     required String targetLanguage,
   }) async {
+    if (lyricsText.trim().isEmpty) return lyricsText;
+
     final cacheKey = 'translated_lyrics_${trackId}_$targetLanguage';
     final cached = StorageService.getSetting(cacheKey, defaultValue: null);
-    if (cached != null && cached.toString().isNotEmpty) {
+    if (cached != null && cached.toString().trim().isNotEmpty) {
       return cached.toString();
     }
 
     final String languageInstruction = targetLanguage.toLowerCase() == 'hinglish'
-        ? 'Romanized Hinglish (Hindi language written using English/Roman alphabet script)'
-        : targetLanguage;
+        ? 'Romanized Hinglish (Hindi language written using English/Roman alphabet script, e.g., "Mera dil ye pukaare aaja...")'
+        : (targetLanguage.toLowerCase() == 'hindi' ? 'Hindi in Devanagari script (हिंदी)' : targetLanguage);
 
-    final prompt = '''
-Translate/transliterate the following song lyrics into $languageInstruction.
-Preserve the line structure and line count exactly. Output ONLY the translated/transliterated lyrics without introductory text, titles, or notes:
+    final prompt = '''You are a professional music lyric translator.
+Translate the following song lyrics into $languageInstruction line by line.
 
-$lyricsText
-''';
+CRITICAL FORMAT REQUIREMENTS:
+- Output EXACTLY one line of translation for each line of input lyrics.
+- Output ONLY the raw translated text lines.
+- DO NOT include markdown code blocks (```), DO NOT include line numbers (1., 2.), DO NOT include introductory text or titles.
+- Maintain empty lines where input has empty lines.
+
+Lyrics to translate:
+$lyricsText''';
 
     try {
-      final (translatedText, _) = await AiService.instance.generate(prompt);
-      if (translatedText.isNotEmpty) {
-        await StorageService.saveSetting(cacheKey, translatedText);
-        return translatedText;
+      final (response, _) = await AiService.instance.generate(prompt);
+      if (response.trim().isNotEmpty) {
+        String clean = response.trim();
+        // Remove markdown code blocks if AI wrapped output in ```
+        if (clean.startsWith('```')) {
+          final lines = clean.split('\n');
+          if (lines.length > 2 && lines.last.trim().startsWith('```')) {
+            clean = lines.sublist(1, lines.length - 1).join('\n');
+          } else if (lines.length > 1) {
+            clean = lines.sublist(1).join('\n');
+          }
+        }
+
+        // Clean any leading introductory header lines
+        final lines = clean.split('\n');
+        final filteredLines = <String>[];
+        for (final line in lines) {
+          final l = line.trim();
+          final lower = l.toLowerCase();
+          if (lower.startsWith('here is') ||
+              lower.startsWith('here are') ||
+              lower.startsWith('translation') ||
+              lower.startsWith('translated lyrics')) {
+            continue;
+          }
+          // Strip accidental line numbering prefixes (e.g. "1. ", "12) ")
+          final unnumbered = l.replaceFirst(RegExp(r'^\d+[\.\)]\s*'), '');
+          filteredLines.add(unnumbered);
+        }
+
+        final resultText = filteredLines.join('\n');
+        if (resultText.trim().isNotEmpty) {
+          await StorageService.saveSetting(cacheKey, resultText);
+          return resultText;
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[LyricsService] Translation failed: $e');
+    }
 
     return lyricsText;
   }

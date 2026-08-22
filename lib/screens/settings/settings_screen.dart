@@ -548,8 +548,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SizedBox(height: 12),
         _buildSectionHeader('AI INTELLIGENCE & SUMMARY', customBranding.accentColor),
         _buildSelectionTile(
-          'AI Song Summary Language',
-          _summaryLanguage == 'hi' ? 'Hindi (हिंदी)' : 'English',
+          'AI Song & Lyrics Summary Language',
+          _getSummaryLanguageLabel(_summaryLanguage),
           () => _showSummaryLanguageDialog(),
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
@@ -1239,18 +1239,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  String _getSummaryLanguageLabel(String code) {
+    switch (code) {
+      case 'hi':
+        return 'Hindi (हिंदी) 🇮🇳';
+      case 'hinglish':
+        return 'Hinglish (Hindi + English) 🔤';
+      case 'en':
+      default:
+        return 'English 🌐';
+    }
+  }
+
   void _showSummaryLanguageDialog() {
     final customBranding = ref.read(customizationProvider);
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('AI Song Summary Language', style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text('AI Lyrics & Summary Language', style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               RadioListTile<String>(
-                title: const Text('English'),
+                title: const Text('English 🌐'),
+                subtitle: const Text('Full English story & lyric analysis'),
                 value: 'en',
                 groupValue: _summaryLanguage,
                 activeColor: customBranding.accentColor,
@@ -1262,8 +1276,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 },
               ),
               RadioListTile<String>(
-                title: const Text('Hindi (हिंदी)'),
+                title: const Text('Hindi (हिंदी) 🇮🇳'),
+                subtitle: const Text('Pure Devanagari Hindi story & analysis'),
                 value: 'hi',
+                groupValue: _summaryLanguage,
+                activeColor: customBranding.accentColor,
+                onChanged: (val) async {
+                  if (val == null) return;
+                  setState(() => _summaryLanguage = val);
+                  await StorageService.saveSetting('summary_language', val);
+                  if (mounted) Navigator.pop(context);
+                },
+              ),
+              RadioListTile<String>(
+                title: const Text('Hinglish (Hindi + English) 🔤'),
+                subtitle: const Text('Casual Hindi written in English script'),
+                value: 'hinglish',
                 groupValue: _summaryLanguage,
                 activeColor: customBranding.accentColor,
                 onChanged: (val) async {

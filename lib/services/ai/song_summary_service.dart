@@ -73,9 +73,16 @@ class SongSummaryService {
     String? lyricsText,
     bool forceRefresh = false,
   }) async {
-    // Read user's summary language preference ('en' -> English, 'hi' -> Hindi)
+    // Read user's summary language preference ('en' -> English, 'hi' -> Hindi, 'hinglish' -> Hinglish)
     final langCode = (StorageService.getSetting('summary_language', defaultValue: 'en') as String).toLowerCase();
-    final summaryLangName = langCode == 'hi' ? 'Hindi' : 'English';
+    
+    String summaryLangName = 'English';
+    if (langCode == 'hi' || langCode == 'hindi') {
+      summaryLangName = 'Hindi';
+    } else if (langCode == 'hinglish' || langCode == 'hi_en') {
+      summaryLangName = 'Hinglish (Casual conversational mix of Hindi and English written in Latin/English script, e.g., "Iss song mein singer apne heartbreak and feelings express kar raha hai...")';
+    }
+
     final cacheKey = '${trackId}_$langCode';
 
     // Check cache first
@@ -142,6 +149,7 @@ CRITICAL INSTRUCTIONS:
 - Explain the FULL story of the song from the opening verses through the middle build-up to the climax and conclusion. Do NOT summarize only half the song or stop mid-way!
 - Provide a detailed 5-8 sentence complete narrative summary covering all parts and emotional shifts of the full lyrics.
 - Explain what the artist/singer is communicating to the listener across the whole track.
+- If language is Hinglish, write the entire response in casual Hinglish (Hindi written in Roman/English script like: "Iss song mein singer apni feelings and journey explain kar raha hai...").
 
 Provide:
 1. **Theme**: Full complete narrative summary covering the entire song's story, verses, chorus, and ending (5-8 detailed sentences).
@@ -217,7 +225,11 @@ CULTURAL: [cultural/cinematic context]''';
     String message = 'Reflects on the personal storytelling and feelings embedded within "$title".';
     String cultural = '';
 
-    if (genreUpper.contains('PUNJABI') || genreUpper.contains('BHANGRA')) {
+    if (language.toLowerCase().contains('hinglish')) {
+      theme = '"$title" ek expressive $genre release hai by $artistClean. Iss song mein artist ne deep emotions and story express ki hai.';
+      emotions = 'Melody, Emotion, Passion, Beats';
+      message = 'Is song ka main message heart-touching emotional experience share karna hai.';
+    } else if (genreUpper.contains('PUNJABI') || genreUpper.contains('BHANGRA')) {
       theme = '"$title" brings vibrant Punjabi folk energy and modern beat production by $artistClean.';
       emotions = 'High Energy, Celebration, Cultural Expression, Passion';
       message = 'Embrace life with upbeat rhythms and festive expression in "$title".';
@@ -269,8 +281,16 @@ CULTURAL: [cultural/cinematic context]''';
     if (lyricLines.isEmpty) return {};
 
     final cleanLines = lyricLines.take(30).toList();
+    final langCode = (StorageService.getSetting('summary_language', defaultValue: 'en') as String).toLowerCase();
+    String outputLang = 'English';
+    if (langCode == 'hi' || langCode == 'hindi') {
+      outputLang = 'Hindi';
+    } else if (langCode == 'hinglish') {
+      outputLang = 'Hinglish (casual Hindi written in Latin/English script)';
+    }
+
     final prompt = '''You are a master music lyricist and cultural translator.
-Analyze the song "$title" by $artist and provide short 1-sentence explanations for each of the following lyric lines.
+Analyze the song "$title" by $artist and provide short 1-sentence explanations for each of the following lyric lines in $outputLang.
 Explain what the author/artist is expressing or implying in each line (hidden meaning, mood, or metaphor).
 
 Lyric lines:
@@ -305,7 +325,6 @@ OUTPUT ONLY JSON:''';
       debugPrint('[SongSummaryService] line-by-line generation error: $e');
     }
 
-    // Fallback line-by-line explanations if AI is offline
     final Map<int, String> fallback = {};
     for (var i = 0; i < lyricLines.length; i++) {
       final line = lyricLines[i].trim();
@@ -316,4 +335,3 @@ OUTPUT ONLY JSON:''';
     return fallback;
   }
 }
-

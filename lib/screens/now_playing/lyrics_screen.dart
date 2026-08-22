@@ -118,52 +118,84 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
     });
   }
 
-  Future<void> _translateLyrics(String targetLang) async {
+  Future<void> _translateLyrics(String targetLang, [VoidCallback? onStateUpdated]) async {
     if (targetLang == 'Original') {
       setState(() {
         _activeLanguage = 'Original';
         _currentSyncedLines = _originalSyncedLines;
+        _currentPlainLyrics = _selectedCandidate.plainLyrics ?? widget.lyricsResult.plain;
+        _isTranslating = false;
       });
+      onStateUpdated?.call();
       return;
     }
 
-    final sourceLines = _originalSyncedLines;
-    if (sourceLines == null || sourceLines.isEmpty) return;
-
     setState(() {
+      _activeLanguage = targetLang;
       _isTranslating = true;
     });
+    onStateUpdated?.call();
 
     try {
-      final textToTranslate = sourceLines.map((l) => l.text).join('\n');
-      final translatedText = await LyricsService.instance.translateLyrics(
-        trackId: widget.track.id,
-        lyricsText: textToTranslate,
-        targetLanguage: targetLang,
-      );
+      if (_originalSyncedLines != null && _originalSyncedLines!.isNotEmpty) {
+        final textToTranslate = _originalSyncedLines!.map((l) => l.text).join('\n');
+        final translatedText = await LyricsService.instance.translateLyrics(
+          trackId: '${widget.track.id}_${_selectedCandidate.id}',
+          lyricsText: textToTranslate,
+          targetLanguage: targetLang,
+        );
 
-      final translatedSplit = translatedText.split('\n');
-      final newSynced = <LyricLine>[];
-      for (int i = 0; i < sourceLines.length; i++) {
-        final originalLine = sourceLines[i];
-        final transText = (i < translatedSplit.length && translatedSplit[i].trim().isNotEmpty)
-            ? translatedSplit[i].trim()
-            : originalLine.text;
-        newSynced.add(LyricLine(originalLine.time, transText));
-      }
+        final translatedSplit = translatedText.split('\n');
+        final newSynced = <LyricLine>[];
+        for (int i = 0; i < _originalSyncedLines!.length; i++) {
+          final originalLine = _originalSyncedLines![i];
+          final transText = (i < translatedSplit.length && translatedSplit[i].trim().isNotEmpty)
+              ? translatedSplit[i].trim()
+              : originalLine.text;
+          newSynced.add(LyricLine(originalLine.time, transText));
+        }
 
-      if (mounted) {
-        setState(() {
-          _activeLanguage = targetLang;
-          _currentSyncedLines = newSynced;
-          _isTranslating = false;
-        });
+        if (mounted) {
+          setState(() {
+            _activeLanguage = targetLang;
+            _currentSyncedLines = newSynced;
+            _isTranslating = false;
+          });
+          onStateUpdated?.call();
+        }
+      } else if (_selectedCandidate.plainLyrics != null || widget.lyricsResult.plain != null) {
+        final plainText = _selectedCandidate.plainLyrics ?? widget.lyricsResult.plain ?? '';
+        if (plainText.isNotEmpty) {
+          final translatedText = await LyricsService.instance.translateLyrics(
+            trackId: '${widget.track.id}_${_selectedCandidate.id}',
+            lyricsText: plainText,
+            targetLanguage: targetLang,
+          );
+
+          if (mounted) {
+            setState(() {
+              _activeLanguage = targetLang;
+              _currentPlainLyrics = translatedText;
+              _isTranslating = false;
+            });
+            onStateUpdated?.call();
+          }
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _isTranslating = false;
+          });
+          onStateUpdated?.call();
+        }
       }
     } catch (_) {
       if (mounted) {
         setState(() {
+          _activeLanguage = 'Original';
           _isTranslating = false;
         });
+        onStateUpdated?.call();
       }
     }
   }
@@ -406,8 +438,9 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
                           final isSel = lang == _activeLanguage;
                           return GestureDetector(
                             onTap: () {
-                              update(() {});
-                              _translateLyrics(lang);
+                              _translateLyrics(lang, () {
+                                sheetSetState(() {});
+                              });
                             },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
