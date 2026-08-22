@@ -11,6 +11,7 @@ import 'services/audio/audio_handler.dart';
 import 'services/version/version_service.dart';
 
 import 'services/voice/voice_assistant_service.dart';
+import 'services/quick_actions/quick_actions_service.dart';
 
 final audioHandlerProvider = Provider<AudioHandler>((ref) => throw UnimplementedError());
 
@@ -35,6 +36,7 @@ void main() async {
   );
 
   await VoiceAssistantService.instance.init(container);
+  await QuickActionsService.instance.init(container);
   
   runApp(
     UncontrolledProviderScope(

@@ -6,7 +6,7 @@ import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../widgets/app_artwork_image.dart';
-import '../../themes/app_theme.dart';
+import '../handoff/nearby_share_screen.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -322,6 +322,17 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
               tooltip: 'Download Playlist',
               onPressed: () => _downloadPlaylist(accentColor),
             ),
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            tooltip: 'Share Playlist via Nearby Share',
+            onPressed: () {
+              NearbyShareScreen.showHandoffModal(
+                context,
+                tracks: _playlistTracks,
+                title: _playlist['name']?.toString() ?? 'Custom Playlist',
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',

@@ -11,6 +11,7 @@ import '../../widgets/app_artwork_image.dart';
 import 'playlist_detail_screen.dart';
 import 'recently_played_screen.dart';
 import 'spotify_import_preview_screen.dart';
+import '../handoff/nearby_share_screen.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -545,7 +546,41 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
             ),
             title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             subtitle: Text('${trackIds.length} songs • ${playlist['description'] ?? 'Custom playlist'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.share_rounded, color: accentColor, size: 20),
+                  tooltip: 'Share Playlist via Nearby Share',
+                  onPressed: () {
+                    final List rawTracks = playlist['tracks'] ?? [];
+                    final List<Track> playlistTracks = [];
+                    if (rawTracks.isNotEmpty) {
+                      for (final item in rawTracks) {
+                        if (item is Map) {
+                          playlistTracks.add(Track(
+                            id: item['id']?.toString() ?? '',
+                            title: item['title']?.toString() ?? 'Track',
+                            artist: item['artist']?.toString() ?? 'Unknown Artist',
+                            album: item['album']?.toString() ?? 'Album',
+                            duration: item['duration']?.toString() ?? '3:30',
+                            artworkUrl: item['artworkUrl']?.toString() ?? '',
+                            audioUrl: item['audioUrl']?.toString() ?? '',
+                            genre: item['genre']?.toString() ?? '',
+                          ));
+                        }
+                      }
+                    }
+                    NearbyShareScreen.showHandoffModal(
+                      context,
+                      tracks: playlistTracks,
+                      title: playlist['name']?.toString() ?? 'Custom Playlist',
+                    );
+                  },
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+              ],
+            ),
             onTap: () {
               Navigator.push(
                 context,

@@ -5,6 +5,7 @@ import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
+import '../handoff/nearby_share_screen.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
@@ -66,6 +67,18 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.share_rounded, color: accentColor, size: 20),
+                    ),
+                    tooltip: 'Nearby Share & Handoff Queue',
+                    onPressed: () => NearbyShareScreen.showHandoffModal(context),
+                  ),
                   IconButton(
                     icon: Container(
                       padding: const EdgeInsets.all(8),

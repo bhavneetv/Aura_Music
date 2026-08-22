@@ -15,6 +15,7 @@ import '../search/search_screen.dart';
 import '../library/library_screen.dart';
 import '../queue/queue_screen.dart';
 import '../settings/settings_screen.dart';
+import '../handoff/nearby_share_screen.dart';
 import '../../services/storage/storage_service.dart';
 import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
@@ -259,6 +260,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
           ),
+          IconButton(
+            onPressed: () {
+              NearbyShareScreen.showHandoffModal(context);
+            },
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.share_rounded, color: accentColor, size: 20),
+            ),
+            tooltip: 'Nearby Share & Handoff',
+          ),
+          const SizedBox(width: 4),
           IconButton(
             onPressed: () {
               setState(() {

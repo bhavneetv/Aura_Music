@@ -54,6 +54,7 @@ dependencies:
   flutter_dotenv: ^5.2.1
   dynamic_color: 1.7.0
   cupertino_native: ^0.1.1
+  quick_actions: ^1.1.0
 
 dev_dependencies:
   flutter_test:

@@ -12,6 +12,7 @@ import '../services/audio/audio_url_resolver.dart';
 import '../services/recommendation/recommendation_engine.dart';
 import '../services/music_sources/jamendo_source.dart';
 import '../services/voice/voice_assistant_service.dart';
+import '../services/quick_actions/quick_actions_service.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
 
@@ -477,6 +478,94 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       isShuffle: state.isShuffle,
       repeatMode: state.repeatMode.index,
     );
+    QuickActionsService.instance.updateShortcuts();
+  }
+
+  void resumePlayback() {
+    if (state.isPlaying) return;
+    if (state.currentTrack != null) {
+      if (state.status == PlaybackStatus.paused || state.status == PlaybackStatus.ready) {
+        _handler.play();
+        state = state.copyWith(isPlaying: true, status: PlaybackStatus.playing);
+      } else {
+        playTrack(state.currentTrack!);
+      }
+    } else if (state.queue.isNotEmpty) {
+      jumpToQueueIndex(state.currentIndex >= 0 ? state.currentIndex : 0);
+    } else {
+      shuffleAll();
+    }
+  }
+
+  void shuffleAll() async {
+    List<Track> pool = StorageService.getFavoriteTracks();
+    if (pool.isEmpty) {
+      pool = StorageService.getFullDownloadedTracks();
+    }
+    if (pool.isEmpty) {
+      try {
+        final source = ref.read(musicSourceProvider);
+        pool = await source.getDynamicRecommendations();
+      } catch (_) {}
+    }
+    if (pool.isEmpty) {
+      pool = List.from(Track.mockTracks);
+    }
+    pool.shuffle();
+    playCustomQueue(pool, initialIndex: 0);
+    if (!state.isShuffle) {
+      state = state.copyWith(isShuffle: true);
+    }
+  }
+
+  void playRecentPlaylist() async {
+    final playlists = StorageService.getPlaylists();
+    if (playlists.isNotEmpty) {
+      final first = playlists.first;
+      final rawTracks = first['tracks'] as List? ?? [];
+      if (rawTracks.isNotEmpty) {
+        final tracks = rawTracks.map((item) => Track(
+          id: item['id']?.toString() ?? '',
+          title: item['title']?.toString() ?? 'Track',
+          artist: item['artist']?.toString() ?? 'Unknown Artist',
+          album: item['album']?.toString() ?? 'Album',
+          duration: item['duration']?.toString() ?? '3:30',
+          artworkUrl: item['artworkUrl']?.toString() ?? '',
+          audioUrl: item['audioUrl']?.toString() ?? '',
+          genre: item['genre']?.toString() ?? '',
+        )).toList();
+        playCustomQueue(tracks, initialIndex: 0);
+        return;
+      }
+    }
+
+    final downloadedPlaylists = StorageService.getDownloadedPlaylists();
+    if (downloadedPlaylists.isNotEmpty) {
+      final first = downloadedPlaylists.first;
+      final rawTracks = first['tracks'] as List? ?? [];
+      if (rawTracks.isNotEmpty) {
+        final tracks = rawTracks.map((item) => Track(
+          id: item['id']?.toString() ?? '',
+          title: item['title']?.toString() ?? 'Track',
+          artist: item['artist']?.toString() ?? 'Unknown Artist',
+          album: item['album']?.toString() ?? 'Album',
+          duration: item['duration']?.toString() ?? '3:30',
+          artworkUrl: item['artworkUrl']?.toString() ?? '',
+          audioUrl: item['audioUrl']?.toString() ?? '',
+          genre: item['genre']?.toString() ?? '',
+        )).toList();
+        playCustomQueue(tracks, initialIndex: 0);
+        return;
+      }
+    }
+
+    final favs = StorageService.getFavoriteTracks();
+    if (favs.isNotEmpty) {
+      playCustomQueue(favs, initialIndex: 0);
+      return;
+    }
+
+    shuffleAll();
   }
 
   bool _isLocalTrack(Track track) {
