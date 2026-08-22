@@ -6,6 +6,7 @@ import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../widgets/app_artwork_image.dart';
+import '../../themes/app_theme.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -26,6 +27,56 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   bool _isDownloadingPlaylist = false;
   double _downloadProgress = 0.0;
   bool _isPlaylistDownloaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlaylistData();
+  }
+
+  void _loadPlaylistData() {
+    final playlists = StorageService.getPlaylists();
+    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+      _playlist = playlists[widget.playlistIndex];
+      final List rawTracks = _playlist['tracks'] ?? [];
+      
+      _playlistTracks = [];
+      if (rawTracks.isNotEmpty) {
+        for (final item in rawTracks) {
+          if (item is Map) {
+            _playlistTracks.add(Track(
+              id: item['id']?.toString() ?? '',
+              title: item['title']?.toString() ?? 'Unknown Track',
+              artist: item['artist']?.toString() ?? 'Unknown Artist',
+              album: item['album']?.toString() ?? 'Single',
+              duration: item['duration']?.toString() ?? '3:30',
+              artworkUrl: item['artworkUrl']?.toString() ?? item['coverUrl']?.toString() ?? '',
+              audioUrl: item['audioUrl']?.toString() ?? item['streamUrl']?.toString() ?? '',
+              genre: item['genre']?.toString() ?? '',
+            ));
+          }
+        }
+      } else {
+        final List rawIds = _playlist['trackIds'] ?? [];
+        for (final id in rawIds) {
+          final track = Track.mockTracks.firstWhere(
+            (t) => t.id == id.toString(),
+            orElse: () => Track(
+              id: id.toString(),
+              title: 'Track $id',
+              artist: 'Unknown Artist',
+              album: 'Unknown Album',
+              duration: '3:00',
+              artworkUrl: '',
+              audioUrl: '',
+              genre: '',
+            ),
+          );
+          _playlistTracks.add(track);
+        }
+      }
+    }
+  }
 
   void _downloadPlaylist(Color accentColor) async {
     if (_playlistTracks.isEmpty || _isDownloadingPlaylist) return;
@@ -66,57 +117,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _loadPlaylistData();
-  }
-
-  void _loadPlaylistData() {
-    final playlists = StorageService.getPlaylists();
-    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      _playlist = playlists[widget.playlistIndex];
-      final List rawTracks = _playlist['tracks'] ?? [];
-      
-      _playlistTracks = [];
-      if (rawTracks.isNotEmpty) {
-        for (final item in rawTracks) {
-          if (item is Map) {
-            _playlistTracks.add(Track(
-              id: item['id']?.toString() ?? '',
-              title: item['title']?.toString() ?? 'Unknown Track',
-              artist: item['artist']?.toString() ?? 'Unknown Artist',
-              album: item['album']?.toString() ?? 'Single',
-              duration: item['duration']?.toString() ?? '3:30',
-              artworkUrl: item['artworkUrl']?.toString() ?? item['coverUrl']?.toString() ?? '',
-              audioUrl: item['audioUrl']?.toString() ?? item['streamUrl']?.toString() ?? '',
-              genre: item['genre']?.toString() ?? '',
-            ));
-          }
-        }
-      } else {
-        // Fallback for old playlists using trackIds
-        final List rawIds = _playlist['trackIds'] ?? [];
-        for (final id in rawIds) {
-          final track = Track.mockTracks.firstWhere(
-            (t) => t.id == id.toString(),
-            orElse: () => Track(
-              id: id.toString(),
-              title: 'Track $id',
-              artist: 'Unknown Artist',
-              album: 'Unknown Album',
-              duration: '3:00',
-              artworkUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=150',
-              audioUrl: '',
-              genre: '',
-            ),
-          );
-          _playlistTracks.add(track);
-        }
-      }
-    }
-  }
-
   void _addSongToPlaylist(Track track) async {
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
@@ -132,7 +132,6 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         'genre': track.genre,
       };
       
-      // Prevent duplicates by track ID
       if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
         rawTracks.add(trackMap);
         playlists[widget.playlistIndex]['tracks'] = rawTracks;
@@ -180,32 +179,54 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
-      backgroundColor: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24))),
+      backgroundColor: isDark ? const Color(0xFF1B1B1E) : Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
       builder: (context) {
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: Track.mockTracks.length,
-          itemBuilder: (context, index) {
-            final track = Track.mockTracks[index];
-            return ListTile(
-              leading: AppArtworkImage(
-                artworkUrl: track.artworkUrl,
-                trackId: track.id,
-                width: 40,
-                height: 40,
-                fit: BoxFit.cover,
-                borderRadius: BorderRadius.circular(6),
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-              title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
-              onTap: () {
-                _addSongToPlaylist(track);
-                Navigator.pop(context);
-              },
-            );
-          },
+              const SizedBox(height: 16),
+              const Text('Add Songs to Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: Track.mockTracks.length,
+                  itemBuilder: (context, index) {
+                    final track = Track.mockTracks[index];
+                    return ListTile(
+                      leading: AppArtworkImage(
+                        artworkUrl: track.artworkUrl,
+                        trackId: track.id,
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text(track.artist, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      trailing: const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
+                      onTap: () {
+                        _addSongToPlaylist(track);
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -217,9 +238,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF161616) : const Color(0xFFFAF8F5),
+          backgroundColor: isDark ? const Color(0xFF1B1B1E) : Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Delete Playlist', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          title: const Text('Delete Playlist?', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
           content: Text('Are you sure you want to delete "${_playlist['name']}"? This action cannot be undone.'),
           actions: [
             TextButton(
@@ -234,13 +255,13 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   await StorageService.savePlaylists(playlists);
                 }
                 if (mounted) {
-                  Navigator.pop(context); // Close dialog
-                  Navigator.pop(context); // Pop detail screen back to library
+                  Navigator.pop(context);
+                  Navigator.pop(context);
                 }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
@@ -254,14 +275,16 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final customBranding = ref.watch(customizationProvider);
+    final accentColor = customBranding.accentColor;
     final playbackNotifier = ref.read(playbackProvider.notifier);
 
-    // Apply search filter if active
     final filteredTracks = _playlistTracks.where((track) {
       final query = _searchQuery.toLowerCase();
       return track.title.toLowerCase().contains(query) ||
              track.artist.toLowerCase().contains(query);
     }).toList();
+
+    final firstTrack = _playlistTracks.isNotEmpty ? _playlistTracks.first : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -271,7 +294,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(_playlist['name'] ?? 'Playlist Detail', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        title: Text(_playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit')),
         actions: [
           if (_isPlaylistDownloaded)
             const Padding(
@@ -288,7 +311,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                   child: CircularProgressIndicator(
                     value: _downloadProgress > 0 ? _downloadProgress : null,
                     strokeWidth: 2.5,
-                    color: customBranding.accentColor,
+                    color: accentColor,
                   ),
                 ),
               ),
@@ -297,58 +320,89 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             IconButton(
               icon: const Icon(Icons.download_for_offline_rounded),
               tooltip: 'Download Playlist',
-              onPressed: () => _downloadPlaylist(customBranding.accentColor),
+              onPressed: () => _downloadPlaylist(accentColor),
             ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-            tooltip: 'Delete Playlist',
-            onPressed: () => _showDeletePlaylistDialog(customBranding.accentColor),
-          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',
             onPressed: _showAddSongsBottomSheet,
           ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+            tooltip: 'Delete Playlist',
+            onPressed: () => _showDeletePlaylistDialog(accentColor),
+          ),
         ],
       ),
       body: Column(
         children: [
-          // Cover Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          // Dynamic Hero Header Card
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [accentColor.withValues(alpha: 0.25), const Color(0xFF1E1E22)]
+                    : [accentColor.withValues(alpha: 0.15), Colors.white],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, 4))
+              ],
+            ),
             child: Row(
               children: [
-                // Playlist Cover
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: customBranding.accentColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))
-                    ],
-                  ),
-                  child: Icon(Icons.playlist_play_rounded, color: customBranding.accentColor, size: 48),
-                ),
-                const SizedBox(width: 20),
+                firstTrack != null && firstTrack.artworkUrl.isNotEmpty
+                    ? AppArtworkImage(
+                        artworkUrl: firstTrack.artworkUrl,
+                        trackId: firstTrack.id,
+                        width: 90,
+                        height: 90,
+                        fit: BoxFit.cover,
+                        borderRadius: BorderRadius.circular(18),
+                      )
+                    : Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Icon(Icons.playlist_play_rounded, color: accentColor, size: 48),
+                      ),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         _playlist['name'] ?? 'Custom Playlist',
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, fontFamily: 'Outfit'),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
-                        _playlist['description'] ?? 'No description provided.',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.4),
+                        _playlist['description'] ?? 'Personalized collection',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.3),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        '${_playlistTracks.length} Songs',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: customBranding.accentColor),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${_playlistTracks.length} Songs',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: accentColor),
+                        ),
                       ),
                     ],
                   ),
@@ -357,9 +411,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ),
           ),
 
-          // Search Field inside playlist
+          // In-playlist Search Box
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             child: TextField(
               onChanged: (val) {
                 setState(() {
@@ -367,20 +421,20 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search songs in playlist...',
+                hintText: 'Filter songs in playlist...',
                 hintStyle: const TextStyle(fontSize: 13),
                 prefixIcon: const Icon(Icons.search_rounded, size: 20, color: Colors.grey),
                 filled: true,
-                fillColor: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.04),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
               ),
             ),
           ),
 
-          // Actions: Play & Shuffle
+          // Action Buttons: Play All & Shuffle
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
                 Expanded(
@@ -390,18 +444,17 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         playbackNotifier.playCustomQueue(_playlistTracks, initialIndex: 0);
                       }
                     },
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Play'),
+                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
+                    label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: customBranding.accentColor,
-                      foregroundColor: isDark ? Colors.black : Colors.white,
-                      elevation: 0,
+                      backgroundColor: accentColor,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () {
@@ -413,8 +466,8 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     icon: const Icon(Icons.shuffle_rounded),
                     label: const Text('Shuffle'),
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: customBranding.accentColor),
-                      foregroundColor: customBranding.accentColor,
+                      side: BorderSide(color: accentColor),
+                      foregroundColor: accentColor,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
@@ -424,23 +477,25 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ),
           ),
 
-          // Songs List (Reorderable)
+          // Reorderable Track List
           Expanded(
             child: filteredTracks.isEmpty
                 ? Center(
                     child: Text(
-                      _searchQuery.isEmpty ? 'No songs in this playlist.' : 'No matching songs found.',
+                      _searchQuery.isEmpty ? 'No songs in this playlist yet.' : 'No matching songs found.',
                       style: const TextStyle(color: Colors.grey),
                     ),
                   )
                 : ReorderableListView.builder(
+                    padding: const EdgeInsets.only(bottom: 120),
                     itemCount: filteredTracks.length,
                     onReorder: _reorderPlaylistSongs,
                     itemBuilder: (context, index) {
                       final track = filteredTracks[index];
                       return KeyedSubtree(
-                        key: ValueKey(track.id),
+                        key: ValueKey('pl_track_${track.id}_$index'),
                         child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
                           leading: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -449,18 +504,27 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                               AppArtworkImage(
                                 artworkUrl: track.artworkUrl,
                                 trackId: track.id,
-                                width: 40,
-                                height: 40,
+                                width: 44,
+                                height: 44,
                                 fit: BoxFit.cover,
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(8),
                               ),
                             ],
                           ),
-                          title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text(track.artist, style: const TextStyle(fontSize: 11)),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.remove_circle_outline_rounded, size: 18, color: Colors.grey),
-                            onPressed: () => _removeSongFromPlaylist(index),
+                          title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(Icons.play_circle_fill_rounded, color: accentColor, size: 28),
+                                onPressed: () => playbackNotifier.playTrack(track),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle_outline_rounded, size: 18, color: Colors.grey),
+                                onPressed: () => _removeSongFromPlaylist(index),
+                              ),
+                            ],
                           ),
                           onTap: () {
                             playbackNotifier.playTrack(track);

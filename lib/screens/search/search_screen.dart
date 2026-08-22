@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/music_provider.dart';
+import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/ai/ai_service.dart';
 import '../../widgets/ai_search_loading.dart';
@@ -32,6 +33,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   bool _isAiLoading = false;
   String _aiLoadingText = 'AI is curating your personalized music experience...';
   String _currentAiPlaylistName = '';
+  String _selectedSortFilter = 'Popularity';
 
   // Typewriter placeholder animation state
   int _typewriterPromptIndex = 0;
@@ -44,6 +46,68 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     'chill lo-fi beats for late night',
     'old romantic hindi classics',
     'upbeat workout gym tracks',
+  ];
+
+  static const List<Map<String, dynamic>> _genreCards = [
+    {
+      'title': 'Punjabi Hits',
+      'query': 'Punjabi Hits',
+      'colors': [Color(0xFFFF512F), Color(0xFFDD2476)],
+      'icon': Icons.whatshot_rounded,
+    },
+    {
+      'title': 'Bollywood Romance',
+      'query': 'Hindi Romantic',
+      'colors': [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+      'icon': Icons.favorite_rounded,
+    },
+    {
+      'title': 'Lo-Fi Chill',
+      'query': 'Lo-Fi Beats',
+      'colors': [Color(0xFF00B4DB), Color(0xFF0083B0)],
+      'icon': Icons.nightlife_rounded,
+    },
+    {
+      'title': 'Gym & Workout',
+      'query': 'Workout Gym',
+      'colors': [Color(0xFFF857A6), Color(0xFFFF5858)],
+      'icon': Icons.fitness_center_rounded,
+    },
+    {
+      'title': 'Haryanvi Mix',
+      'query': 'Haryanvi Hits',
+      'colors': [Color(0xFF11998E), Color(0xFF38EF7D)],
+      'icon': Icons.graphic_eq_rounded,
+    },
+    {
+      'title': 'Retro 90s',
+      'query': '90s Hindi Classics',
+      'colors': [Color(0xFFFF9900), Color(0xFFFF5500)],
+      'icon': Icons.album_rounded,
+    },
+    {
+      'title': 'Pop & Party',
+      'query': 'Pop Dance Hits',
+      'colors': [Color(0xFFB92B27), Color(0xFF1565C0)],
+      'icon': Icons.celebration_rounded,
+    },
+    {
+      'title': 'Acoustic Vibes',
+      'query': 'Acoustic Unplugged',
+      'colors': [Color(0xFF4776E6), Color(0xFF8E54E9)],
+      'icon': Icons.music_note_rounded,
+    },
+  ];
+
+  static const List<String> _trendingArtists = [
+    'Sidhu Moose Wala',
+    'Diljit Dosanjh',
+    'Karan Aujla',
+    'Arijit Singh',
+    'AP Dhillon',
+    'Shubh',
+    'Badshah',
+    'Taylor Swift',
   ];
 
   @override
@@ -133,6 +197,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   void _showAiTutorialOverlay() {
     int currentStep = 0;
     Timer? autoAdvanceTimer;
+    final accentColor = ref.read(customizationProvider).accentColor;
 
     void startAutoAdvance(StateSetter modalSetState, BuildContext dialogContext) {
       autoAdvanceTimer?.cancel();
@@ -172,8 +237,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
               'Customize tracks, edit playlist titles, and play or save your curated collections with one tap.',
             ];
 
-            const goldColor = Color(0xFFFFC72C);
-
             return Dialog(
               backgroundColor: Colors.transparent,
               insetPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -182,7 +245,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1B1B1E) : Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: goldColor, width: 1.5),
+                  border: Border.all(color: accentColor, width: 1.5),
                   boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 20)],
                 ),
                 child: Column(
@@ -195,7 +258,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                         width: i == currentStep ? 24 : 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: i == currentStep ? goldColor : Colors.grey.withValues(alpha: 0.3),
+                          color: i == currentStep ? accentColor : Colors.grey.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(4),
                         ),
                       )),
@@ -227,7 +290,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: goldColor,
+                        backgroundColor: accentColor,
                         foregroundColor: Colors.black,
                         minimumSize: const Size(double.infinity, 46),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -246,10 +309,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     });
   }
 
-
-
   void _onSearchChanged() {
-    if (_isAiMode) return; // In AI mode, search runs on submission or enter key
+    if (_isAiMode) return;
     _debounceTimer?.cancel();
     final query = _searchController.text.trim();
     if (query.isEmpty) {
@@ -285,6 +346,38 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
         }
       }
     });
+  }
+
+  Future<void> _executeSearchQuery(String query) async {
+    if (query.trim().isEmpty) return;
+    _searchController.text = query;
+    _tabController.animateTo(0);
+
+    if (_isAiMode) {
+      await _executeAiSearch(query);
+    } else {
+      await StorageService.addSearchQuery(query);
+      setState(() {
+        _isSearching = true;
+        _filteredTracks = [];
+        _recentSearches = StorageService.getRecentSearches();
+      });
+      try {
+        final results = await ref.read(musicSourceProvider).searchTracks(query);
+        if (mounted && _searchController.text.trim() == query) {
+          setState(() {
+            _filteredTracks = results;
+            _isSearching = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _isSearching = false;
+          });
+        }
+      }
+    }
   }
 
   Future<void> _executeAiSearch(String query) async {
@@ -327,21 +420,17 @@ Output ONLY valid JSON:
       } catch (_) {}
 
       List<String> searchQueries = [query];
-      String intent = 'playlist';
       String playlistName = '$query Playlist';
 
       if (parsedJson != null) {
-        intent = parsedJson['intent']?.toString() ?? 'playlist';
         playlistName = parsedJson['playlist_name_suggestion']?.toString() ?? playlistName;
         if (parsedJson['queries'] is List && (parsedJson['queries'] as List).isNotEmpty) {
           searchQueries = (parsedJson['queries'] as List).map((q) => q.toString()).toList();
         }
       }
 
-      // Handle multi-genre/language prompt fallback if AI queries missed any part
       final lowerQuery = query.toLowerCase();
       if (lowerQuery.contains('punjabi') && (lowerQuery.contains('haryanvi') || lowerQuery.contains('haryanavi'))) {
-        intent = 'playlist';
         if (!searchQueries.any((q) => q.toLowerCase().contains('haryanv') || q.toLowerCase().contains('haryanav'))) {
           searchQueries.add('Top Haryanvi Songs');
         }
@@ -422,7 +511,7 @@ Output ONLY valid JSON:
 
   void _showGroupSongsSheet(String tag) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    const goldColor = Color(0xFFFFC72C);
+    final accentColor = ref.read(customizationProvider).accentColor;
 
     List<Track> sessionTracks = StorageService.getGroupedSessionTracks(tag);
 
@@ -463,7 +552,7 @@ Output ONLY valid JSON:
               const SizedBox(height: 16),
               Row(
                 children: [
-                  const Icon(Icons.star_rounded, color: goldColor, size: 22),
+                  Icon(Icons.star_rounded, color: accentColor, size: 22),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -490,7 +579,7 @@ Output ONLY valid JSON:
                           icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
                           label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: goldColor,
+                            backgroundColor: accentColor,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           ),
@@ -532,8 +621,8 @@ Output ONLY valid JSON:
                           icon: const Icon(Icons.bookmark_add_rounded, size: 18),
                           label: const Text('Save Playlist'),
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: goldColor),
-                            foregroundColor: goldColor,
+                            side: BorderSide(color: accentColor),
+                            foregroundColor: accentColor,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           ),
@@ -589,99 +678,91 @@ Output ONLY valid JSON:
 
   void _showFilterBottomSheet(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = ref.read(customizationProvider).accentColor;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF171717) : const Color(0xFFFAF8F5),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(28),
-              topRight: Radius.circular(28),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF171717) : const Color(0xFFFAF8F5),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'Filter & Sort',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              const Text('Sort By', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildFilterChip('Popularity', true),
-                  _buildFilterChip('Release Date', false),
-                  _buildFilterChip('Title A-Z', false),
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('Filter & Sort Results', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+                  const SizedBox(height: 16),
+                  const Text('Sort By', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: ['Popularity', 'Title A-Z', 'Artist A-Z'].map((filter) {
+                      final isSelected = _selectedSortFilter == filter;
+                      return ChoiceChip(
+                        label: Text(filter),
+                        selected: isSelected,
+                        selectedColor: accentColor.withValues(alpha: 0.2),
+                        checkmarkColor: accentColor,
+                        labelStyle: TextStyle(
+                          color: isSelected ? accentColor : Colors.grey,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        onSelected: (val) {
+                          setModalState(() => _selectedSortFilter = filter);
+                          setState(() {
+                            _selectedSortFilter = filter;
+                            if (filter == 'Title A-Z') {
+                              _filteredTracks.sort((a, b) => a.title.compareTo(b.title));
+                            } else if (filter == 'Artist A-Z') {
+                              _filteredTracks.sort((a, b) => a.artist.compareTo(b.artist));
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentColor,
+                      foregroundColor: isDark ? Colors.black : Colors.white,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text('Apply Filters', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              const Text('Duration', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  _buildFilterChip('Any', true),
-                  _buildFilterChip('< 3 min', false),
-                  _buildFilterChip('3-5 min', false),
-                  _buildFilterChip('> 5 min', false),
-                ],
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.goldAccent,
-                  foregroundColor: isDark ? Colors.black : Colors.white,
-                  minimumSize: const Size(double.infinity, 50),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-                  ),
-                ),
-                child: const Text('Apply Filters', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildFilterChip(String label, bool isSelected) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: isSelected,
-      onSelected: (val) {},
-      selectedColor: AppTheme.goldAccent.withValues(alpha: 0.2),
-      checkmarkColor: AppTheme.goldAccent,
-      labelStyle: TextStyle(
-        color: isSelected ? AppTheme.goldAccent : Colors.grey,
-        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final customBranding = ref.watch(customizationProvider);
+    final accentColor = customBranding.accentColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    const goldColor = Color(0xFFFFC72C);
 
     if (_isAiLoading) {
       return Scaffold(
@@ -693,114 +774,171 @@ Output ONLY valid JSON:
 
     return Column(
       children: [
-        // Search & Filter Header
+        // Premium Header & Search Bar Container
         Padding(
-          padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 4),
-          child: Row(
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 8),
+          child: Column(
             children: [
-              // Search Back Button to return to recent searches & played music home page
-              if (showBackButton) ...[
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded, size: 22),
-                  tooltip: 'Back to Recent Searches & Played Music',
-                  onPressed: () {
-                    FocusScope.of(context).unfocus();
-                    _resetSearch();
-                  },
-                ),
-                const SizedBox(width: 4),
-              ],
-              Expanded(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: _isAiMode
-                        ? goldColor.withValues(alpha: 0.12)
-                        : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.05)),
-                    borderRadius: BorderRadius.circular(AppTheme.pillRadius),
-                    border: _isAiMode ? Border.all(color: goldColor, width: 1.5) : null,
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    focusNode: _searchFocusNode,
-                    style: const TextStyle(fontSize: 14),
-                    onSubmitted: (query) async {
-                      if (_isAiMode) {
-                        await _executeAiSearch(query);
-                      } else {
-                        await StorageService.addSearchQuery(query);
-                        setState(() {
-                          _recentSearches = StorageService.getRecentSearches();
-                        });
-                      }
-                    },
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: _isAiMode
-                          ? (_searchController.text.isEmpty && _typewriterText.isNotEmpty ? 'Try "$_typewriterText"' : 'Ask AI for songs or playlist...')
-                          : 'Search songs, albums, artists...',
-                      hintStyle: TextStyle(
-                        fontSize: 13,
-                        color: _isAiMode ? goldColor.withValues(alpha: 0.8) : Colors.grey,
+              Row(
+                children: [
+                  if (showBackButton) ...[
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                      tooltip: 'Back to Discovery',
+                      onPressed: () {
+                        FocusScope.of(context).unfocus();
+                        _resetSearch();
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: _isAiMode
+                            ? accentColor.withValues(alpha: 0.12)
+                            : (isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.04)),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: _isAiMode ? accentColor : (_searchFocusNode.hasFocus ? accentColor.withValues(alpha: 0.5) : Colors.transparent),
+                          width: 1.5,
+                        ),
+                        boxShadow: _isAiMode
+                            ? [BoxShadow(color: accentColor.withValues(alpha: 0.25), blurRadius: 12, spreadRadius: 1)]
+                            : null,
                       ),
-                      prefixIcon: Icon(
-                        _isAiMode ? Icons.auto_awesome_rounded : Icons.search_rounded,
-                        size: 20,
-                        color: _isAiMode ? goldColor : Colors.grey,
-                      ),
-                      suffixIcon: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_searchController.text.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(Icons.clear_rounded, size: 18),
-                              onPressed: () => _searchController.clear(),
-                            ),
-                          IconButton(
-                            icon: Icon(
-                              _isAiMode ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
-                              color: _isAiMode ? goldColor : Colors.grey,
-                              size: 20,
-                            ),
-                            tooltip: 'Toggle AI Music Curator Mode',
-                            onPressed: _toggleAiMode,
+                      child: TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        onSubmitted: (query) async {
+                          if (_isAiMode) {
+                            await _executeAiSearch(query);
+                          } else {
+                            await StorageService.addSearchQuery(query);
+                            setState(() {
+                              _recentSearches = StorageService.getRecentSearches();
+                            });
+                          }
+                        },
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          hintText: _isAiMode
+                              ? (_searchController.text.isEmpty && _typewriterText.isNotEmpty ? 'Try "$_typewriterText"' : 'Ask AI for songs or playlist...')
+                              : 'Search songs, albums, artists...',
+                          hintStyle: TextStyle(
+                            fontSize: 13,
+                            color: _isAiMode ? accentColor.withValues(alpha: 0.8) : Colors.grey,
                           ),
-                        ],
+                          prefixIcon: Icon(
+                            _isAiMode ? Icons.auto_awesome_rounded : Icons.search_rounded,
+                            size: 20,
+                            color: _isAiMode ? accentColor : Colors.grey,
+                          ),
+                          suffixIcon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_searchController.text.isNotEmpty)
+                                IconButton(
+                                  icon: const Icon(Icons.clear_rounded, size: 18),
+                                  onPressed: () => _searchController.clear(),
+                                ),
+                              if (_filteredTracks.isNotEmpty)
+                                IconButton(
+                                  icon: const Icon(Icons.tune_rounded, size: 18),
+                                  tooltip: 'Filter & Sort',
+                                  onPressed: () => _showFilterBottomSheet(context),
+                                ),
+                              IconButton(
+                                icon: Icon(
+                                  _isAiMode ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+                                  color: _isAiMode ? accentColor : Colors.grey,
+                                  size: 20,
+                                ),
+                                tooltip: 'Toggle AI Music Curator Mode',
+                                onPressed: _toggleAiMode,
+                              ),
+                            ],
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        ),
                       ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                   ),
-                ),
+                ],
               ),
+              const SizedBox(height: 8),
+
+              // AI Mode Pill Banner
+              if (_isAiMode)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: accentColor.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome_rounded, color: accentColor, size: 14),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'AI Curator Mode • Enter any prompt or mood to generate instant playlists',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _toggleAiMode,
+                        child: Icon(Icons.close_rounded, size: 14, color: accentColor),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
 
-        // Segmented Tabs
-        TabBar(
-          controller: _tabController,
-          indicatorColor: AppTheme.goldAccent,
-          labelColor: AppTheme.goldAccent,
-          unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
-          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-          tabs: const [
-            Tab(text: 'Songs'),
-            Tab(text: 'Albums'),
-            Tab(text: 'Artists'),
-            Tab(text: 'Playlists'),
-          ],
+        // Floating Segmented Tab Selector
+        Container(
+          height: 38,
+          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            labelColor: Colors.black,
+            unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
+            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+            dividerColor: Colors.transparent,
+            tabs: const [
+              Tab(text: 'Songs'),
+              Tab(text: 'Albums'),
+              Tab(text: 'Artists'),
+              Tab(text: 'Playlists'),
+            ],
+          ),
         ),
 
-        // Body Content
+        // Main Tab Content Area
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
-              _buildSongsTab(),
-              _buildDummyTab('Albums Grid View'),
-              _buildDummyTab('Artists List View'),
-              _buildDummyTab('Playlists Grid View'),
+              _buildSongsTab(accentColor),
+              _buildAlbumsTab(accentColor),
+              _buildArtistsTab(accentColor),
+              _buildPlaylistsTab(accentColor),
             ],
           ),
         ),
@@ -808,39 +946,39 @@ Output ONLY valid JSON:
     );
   }
 
-  Widget _buildSongsTab() {
+  Widget _buildSongsTab(Color accentColor) {
     if (_searchController.text.isEmpty && _filteredTracks.isEmpty) {
       final isFocused = _searchFocusNode.hasFocus;
 
       if (isFocused) {
-        // FOCUSED STATE: Show ONLY Search History query chips
         return ListView(
-          padding: const EdgeInsets.only(bottom: 150, top: 16),
+          padding: const EdgeInsets.only(bottom: 150, top: 12),
           children: [
             _buildChipSection(
-              _isAiMode ? 'AI Recent Searches' : 'Search History',
+              _isAiMode ? 'AI Recent Prompts' : 'Recent Searches',
               _recentSearches,
               true,
+              accentColor,
             ),
+            const SizedBox(height: 20),
+            _buildTrendingSection(accentColor),
           ],
         );
       }
 
-      // DEFAULT / UN-FOCUSED LANDING INDEX STATE: Show ONLY AI Playlists & Played Songs
       final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
       final historyTracks = _getHistoryTracksList();
 
       return ListView(
-        padding: const EdgeInsets.only(bottom: 150, top: 16),
+        padding: const EdgeInsets.only(bottom: 150, top: 12),
         children: [
-          // 1. AI Playlist Groups Section
           if (aiSessionsMap.isNotEmpty) ...[
-            _buildAiPlaylistGroupsSection(aiSessionsMap),
-            const SizedBox(height: 20),
+            _buildAiPlaylistGroupsSection(aiSessionsMap, accentColor),
+            const SizedBox(height: 24),
           ],
-
-          // 2. Recently Played Songs Section
-          _buildRecentlyPlayedSongsSection(historyTracks),
+          _buildTrendingArtistsCarousel(accentColor),
+          const SizedBox(height: 24),
+          _buildRecentlyPlayedSongsSection(historyTracks, accentColor),
         ],
       );
     }
@@ -850,9 +988,9 @@ Output ONLY valid JSON:
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary)),
+            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
             const SizedBox(height: 16),
-            const Text('Searching live catalog...', style: TextStyle(color: Colors.grey)),
+            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
           ],
         ),
       );
@@ -863,11 +1001,13 @@ Output ONLY valid JSON:
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.music_off_rounded, size: 64, color: Colors.grey.withOpacity(0.5)),
+            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey.withValues(alpha: 0.5)),
             const SizedBox(height: 16),
-            const Text(
-              'No results found',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
+            const Text('No tracks found for query', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _resetSearch,
+              child: Text('Back to Music Discovery', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -884,7 +1024,7 @@ Output ONLY valid JSON:
           itemCount: _filteredTracks.length + (showAiBanner ? 1 : 0),
           itemBuilder: (context, index) {
             if (showAiBanner && index == 0) {
-              return _buildAiPlaylistBannerCard(context, notifier);
+              return _buildAiPlaylistBannerCard(context, notifier, accentColor);
             }
             final trackIndex = showAiBanner ? index - 1 : index;
             final track = _filteredTracks[trackIndex];
@@ -906,7 +1046,7 @@ Output ONLY valid JSON:
               background: Container(
                 alignment: Alignment.centerLeft,
                 padding: const EdgeInsets.only(left: 24),
-                color: AppTheme.goldAccent.withOpacity(0.8),
+                color: accentColor.withValues(alpha: 0.85),
                 child: const Row(
                   children: [
                     Icon(Icons.queue_music_rounded, color: Colors.black),
@@ -923,20 +1063,27 @@ Output ONLY valid JSON:
                   width: 48,
                   height: 48,
                   fit: BoxFit.cover,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 title: Text(
                   track.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 subtitle: Text(
                   '${track.artist} • ${track.genre}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
+                trailing: IconButton(
+                  icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
+                  onPressed: () async {
+                    await StorageService.addSearchedAndPlayedTrack(track);
+                    notifier.playTrack(track);
+                  },
+                ),
                 onTap: () async {
                   await StorageService.addSearchedAndPlayedTrack(track);
                   notifier.playTrack(track);
@@ -949,9 +1096,418 @@ Output ONLY valid JSON:
     );
   }
 
-  Widget _buildAiPlaylistBannerCard(BuildContext context, PlaybackNotifier notifier) {
+  Widget _buildAlbumsTab(Color accentColor) {
+    if (_isSearching) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
+            const SizedBox(height: 16),
+            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    const goldColor = Color(0xFFFFC72C);
+
+    final Map<String, List<Track>> albumsMap = {};
+    for (final track in _filteredTracks) {
+      final albumName = track.album.trim().isNotEmpty ? track.album.trim() : 'Singles';
+      albumsMap.putIfAbsent(albumName, () => []).add(track);
+    }
+
+    if (albumsMap.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        children: [
+          const Text('Top Albums & Collections', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          const SizedBox(height: 12),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.85,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: _genreCards.length,
+            itemBuilder: (context, index) {
+              final card = _genreCards[index];
+              return GestureDetector(
+                onTap: () => _executeSearchQuery(card['query'] as String),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: card['colors'] as List<Color>,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Icon(card['icon'] as IconData, size: 28, color: Colors.white),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(card['title'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                          const SizedBox(height: 2),
+                          const Text('Top Album Mix', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text('Found ${albumsMap.keys.length} Albums', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 12),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 0.82,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+          ),
+          itemCount: albumsMap.keys.length,
+          itemBuilder: (context, index) {
+            final albumName = albumsMap.keys.elementAt(index);
+            final tracks = albumsMap[albumName]!;
+            final firstTrack = tracks.first;
+
+            return GestureDetector(
+              onTap: () => _executeSearchQuery(albumName),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1F) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: AppArtworkImage(
+                          artworkUrl: firstTrack.artworkUrl,
+                          trackId: firstTrack.id,
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(albumName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('${firstTrack.artist} • ${tracks.length} songs', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildArtistsTab(Color accentColor) {
+    if (_isSearching) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
+            const SizedBox(height: 16),
+            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final Map<String, List<Track>> artistsMap = {};
+    for (final track in _filteredTracks) {
+      final artistName = track.artist.split(',').first.trim();
+      if (artistName.isNotEmpty) {
+        artistsMap.putIfAbsent(artistName, () => []).add(track);
+      }
+    }
+
+    if (artistsMap.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text('Popular Artists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          const SizedBox(height: 14),
+          ..._trendingArtists.map((artist) {
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              leading: CircleAvatar(
+                radius: 24,
+                backgroundColor: accentColor.withValues(alpha: 0.2),
+                child: Text(
+                  artist.substring(0, 1),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 18),
+                ),
+              ),
+              title: Text(artist, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              subtitle: const Text('Artist • Top Hits Available', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+              onTap: () => _executeSearchQuery(artist),
+            );
+          }),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text('Found ${artistsMap.keys.length} Artists', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 12),
+        ...artistsMap.keys.map((artistName) {
+          final tracks = artistsMap[artistName]!;
+          final sampleTrack = tracks.first;
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            color: isDark ? const Color(0xFF1E1E22) : Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              leading: CircleAvatar(
+                radius: 26,
+                backgroundColor: Colors.grey.shade800,
+                child: AppArtworkImage(
+                  artworkUrl: sampleTrack.artworkUrl,
+                  trackId: sampleTrack.id,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                  borderRadius: BorderRadius.circular(26),
+                ),
+              ),
+              title: Text(artistName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              subtitle: Text('${tracks.length} Tracks in search result', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              trailing: IconButton(
+                icon: Icon(Icons.play_circle_fill_rounded, color: accentColor, size: 32),
+                onPressed: () {
+                  ref.read(playbackProvider.notifier).playCustomQueue(tracks, initialIndex: 0);
+                },
+              ),
+              onTap: () => _executeSearchQuery(artistName),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildPlaylistsTab(Color accentColor) {
+    if (_isSearching) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
+            const SizedBox(height: 16),
+            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
+    final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: accentColor, size: 20),
+            const SizedBox(width: 8),
+            const Text('AI Curated Playlists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (aiSessionsMap.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1C1C1F) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.auto_awesome_outlined, size: 36, color: accentColor),
+                const SizedBox(height: 8),
+                const Text('No AI Playlists Yet', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Text('Switch to AI Curator mode and type any mood or genre to create custom playlists!', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: _toggleAiMode,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                  label: const Text('Try AI Curator'),
+                  style: ElevatedButton.styleFrom(backgroundColor: accentColor, foregroundColor: Colors.black),
+                ),
+              ],
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.9,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: aiSessionsMap.keys.length,
+            itemBuilder: (context, index) {
+              final key = aiSessionsMap.keys.elementAt(index);
+              final rawTracks = aiSessionsMap[key] as List?;
+              final count = rawTracks?.length ?? 0;
+              final titleCapitalized = key.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+
+              return GestureDetector(
+                onTap: () => _showGroupSongsSheet(key),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF24221E) : const Color(0xFFFFF9EE),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+                    boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Icon(Icons.auto_awesome_rounded, color: accentColor, size: 24),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(color: accentColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                            child: Text('$count songs', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: accentColor)),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(titleCapitalized, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          const SizedBox(height: 2),
+                          const Text('AI Playlist', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTrendingSection(Color accentColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Trending Searches', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _trendingArtists.map((artist) {
+              return ActionChip(
+                label: Text(artist),
+                backgroundColor: accentColor.withValues(alpha: 0.12),
+                labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: accentColor),
+                avatar: Icon(Icons.trending_up_rounded, size: 14, color: accentColor),
+                onPressed: () => _executeSearchQuery(artist),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrendingArtistsCarousel(Color accentColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Trending Artists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 90,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _trendingArtists.length,
+              itemBuilder: (context, index) {
+                final artist = _trendingArtists[index];
+                return GestureDetector(
+                  onTap: () => _executeSearchQuery(artist),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 14),
+                    child: Column(
+                      children: [
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: accentColor.withValues(alpha: 0.2),
+                          child: Text(
+                            artist.substring(0, 1),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 20),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(artist, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiPlaylistBannerCard(BuildContext context, PlaybackNotifier notifier, Color accentColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final playlistTitle = _currentAiPlaylistName.isEmpty
         ? '${_searchController.text.trim()} Playlist'
         : _currentAiPlaylistName;
@@ -960,16 +1516,12 @@ Output ONLY valid JSON:
       margin: const EdgeInsets.fromLTRB(20, 4, 20, 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF282417), const Color(0xFF19181B)]
-              : [const Color(0xFFFFF9E6), const Color(0xFFF3EFE7)],
-        ),
+        color: isDark ? const Color(0xFF24221E) : const Color(0xFFFFF9EE),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: goldColor.withOpacity(0.4), width: 1.5),
+        border: Border.all(color: accentColor.withValues(alpha: 0.4), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.12),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -980,7 +1532,7 @@ Output ONLY valid JSON:
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, color: goldColor, size: 20),
+              Icon(Icons.auto_awesome_rounded, color: accentColor, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -993,12 +1545,12 @@ Output ONLY valid JSON:
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: goldColor.withOpacity(0.2),
+                  color: accentColor.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   '${_filteredTracks.length} Tracks',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: goldColor),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
                 ),
               ),
             ],
@@ -1014,7 +1566,7 @@ Output ONLY valid JSON:
                   icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
                   label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: goldColor,
+                    backgroundColor: accentColor,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
@@ -1037,8 +1589,8 @@ Output ONLY valid JSON:
                   icon: const Icon(Icons.bookmark_add_rounded, size: 18),
                   label: const Text('Save / Edit'),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: goldColor),
-                    foregroundColor: goldColor,
+                    side: BorderSide(color: accentColor),
+                    foregroundColor: accentColor,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
@@ -1051,19 +1603,18 @@ Output ONLY valid JSON:
     );
   }
 
-  Widget _buildChipSection(String title, List<String> items, bool isRecent) {
+  Widget _buildChipSection(String title, List<String> items, bool isRecent, Color accentColor) {
     if (items.isEmpty) return const SizedBox.shrink();
-    const goldColor = Color(0xFFFFC72C);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
               if (isRecent)
                 TextButton(
                   onPressed: () async {
@@ -1076,7 +1627,7 @@ Output ONLY valid JSON:
                       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
                     });
                   },
-                  child: const Text('Clear All', style: TextStyle(color: AppTheme.goldAccent, fontSize: 12)),
+                  child: Text('Clear All', style: TextStyle(color: accentColor, fontSize: 12)),
                 ),
             ],
           ),
@@ -1098,22 +1649,11 @@ Output ONLY valid JSON:
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     GestureDetector(
-                      onTap: () async {
-                        _searchController.text = tag;
-                        if (_isAiMode) {
-                          await _executeAiSearch(tag);
-                        } else {
-                          await StorageService.addSearchQuery(tag);
-                          setState(() {
-                            _recentSearches = StorageService.getRecentSearches();
-                          });
-                          _onSearchChanged();
-                        }
-                      },
+                      onTap: () => _executeSearchQuery(tag),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(_isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded, size: 14, color: _isAiMode ? goldColor : Colors.grey),
+                          Icon(_isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded, size: 14, color: _isAiMode ? accentColor : Colors.grey),
                           const SizedBox(width: 6),
                           ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: maxTextWidth),
@@ -1153,22 +1693,21 @@ Output ONLY valid JSON:
     );
   }
 
-  Widget _buildAiPlaylistGroupsSection(Map<String, dynamic> aiSessionsMap) {
-    const goldColor = Color(0xFFFFC72C);
+  Widget _buildAiPlaylistGroupsSection(Map<String, dynamic> aiSessionsMap, Color accentColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.auto_awesome_rounded, size: 18, color: goldColor),
-              SizedBox(width: 8),
-              Text(
+            children: [
+              Icon(Icons.auto_awesome_rounded, size: 18, color: accentColor),
+              const SizedBox(width: 8),
+              const Text(
                 'AI Playlist Groups',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
               ),
             ],
           ),
@@ -1184,6 +1723,7 @@ Output ONLY valid JSON:
                 final count = rawTracks?.length ?? 0;
                 final firstTrackMap = (rawTracks != null && rawTracks.isNotEmpty) ? Map<String, dynamic>.from(rawTracks.first as Map) : null;
                 final artUrl = firstTrackMap?['artworkUrl']?.toString() ?? '';
+                final trackId = firstTrackMap?['id']?.toString() ?? '';
 
                 final titleCapitalized = key.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
 
@@ -1194,10 +1734,10 @@ Output ONLY valid JSON:
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF1F1F23) : Colors.white,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: goldColor.withOpacity(0.3), width: 1),
+                    border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 8,
                         offset: const Offset(0, 4),
                       ),
@@ -1206,17 +1746,13 @@ Output ONLY valid JSON:
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
+                      AppArtworkImage(
+                        artworkUrl: artUrl,
+                        trackId: trackId,
+                        width: double.infinity,
+                        height: 70,
+                        fit: BoxFit.cover,
                         borderRadius: BorderRadius.circular(12),
-                        child: artUrl.isNotEmpty
-                            ? Image.network(
-                                artUrl,
-                                width: double.infinity,
-                                height: 70,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(width: double.infinity, height: 70, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
-                              )
-                            : Container(width: double.infinity, height: 70, color: Colors.grey.shade800, child: const Icon(Icons.music_note_rounded)),
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -1234,10 +1770,10 @@ Output ONLY valid JSON:
                           ),
                           GestureDetector(
                             onTap: () => _showGroupSongsSheet(key),
-                            child: const CircleAvatar(
+                            child: CircleAvatar(
                               radius: 12,
-                              backgroundColor: goldColor,
-                              child: Icon(Icons.play_arrow_rounded, size: 16, color: Colors.black),
+                              backgroundColor: accentColor,
+                              child: const Icon(Icons.play_arrow_rounded, size: 16, color: Colors.black),
                             ),
                           ),
                         ],
@@ -1275,14 +1811,14 @@ Output ONLY valid JSON:
     return historyTracks;
   }
 
-  Widget _buildRecentlyPlayedSongsSection(List<Track> historyTracks) {
+  Widget _buildRecentlyPlayedSongsSection(List<Track> historyTracks, Color accentColor) {
     if (historyTracks.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             children: [
-              Icon(Icons.search_rounded, size: 48, color: Colors.grey.withOpacity(0.4)),
+              Icon(Icons.search_rounded, size: 48, color: Colors.grey.withValues(alpha: 0.4)),
               const SizedBox(height: 12),
               const Text(
                 'Search for your favorite songs & artists',
@@ -1301,7 +1837,7 @@ Output ONLY valid JSON:
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               child: Text(
                 'Recently Played Songs',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -1330,7 +1866,7 @@ Output ONLY valid JSON:
                 background: Container(
                   alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.only(left: 24),
-                  color: AppTheme.goldAccent.withOpacity(0.85),
+                  color: accentColor.withValues(alpha: 0.85),
                   child: const Row(
                     children: [
                       Icon(Icons.queue_music_rounded, color: Colors.black),
@@ -1340,21 +1876,14 @@ Output ONLY valid JSON:
                   ),
                 ),
                 child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                  leading: ClipRRect(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  leading: AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.network(
-                      track.artworkUrl,
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        width: 48,
-                        height: 48,
-                        color: Colors.grey.shade800,
-                        child: const Icon(Icons.music_note_rounded),
-                      ),
-                    ),
                   ),
                   title: Text(
                     track.title,
@@ -1368,7 +1897,12 @@ Output ONLY valid JSON:
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                  trailing: const Icon(Icons.play_circle_fill_rounded, size: 28, color: AppTheme.goldAccent),
+                  trailing: IconButton(
+                    icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
+                    onPressed: () {
+                      notifier.playTrack(track);
+                    },
+                  ),
                   onTap: () {
                     notifier.playTrack(track);
                   },
@@ -1378,19 +1912,6 @@ Output ONLY valid JSON:
           ],
         );
       },
-    );
-  }
-
-  Widget _buildDummyTab(String placeholderText) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.library_music_rounded, size: 48, color: Colors.grey.withOpacity(0.5)),
-          const SizedBox(height: 12),
-          Text(placeholderText, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
     );
   }
 }

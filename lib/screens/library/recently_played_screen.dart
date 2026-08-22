@@ -31,24 +31,31 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
   }
 
   void _clearHistory() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Clear History?', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('Are you sure you want to clear your entire listening history and statistics?'),
+          backgroundColor: isDark ? const Color(0xFF1B1B1E) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Clear Listening History?', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
+          content: const Text('Are you sure you want to clear your entire listening history and insights statistics?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
             ),
-            TextButton(
+            ElevatedButton(
               onPressed: () async {
                 await StorageService.clearListeningHistory();
                 _loadHistory();
-                Navigator.pop(context);
+                if (mounted) Navigator.pop(context);
               },
-              child: const Text('Clear All', style: TextStyle(color: Colors.redAccent)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Clear All', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -59,9 +66,9 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
   @override
   Widget build(BuildContext context) {
     final customBranding = ref.watch(customizationProvider);
+    final accentColor = customBranding.accentColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Build categories
     final List<Map<String, dynamic>> todayItems = [];
     final List<Map<String, dynamic>> yesterdayItems = [];
     final List<Map<String, dynamic>> olderItems = [];
@@ -86,22 +93,20 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
       }
     }
 
-    // Dynamic stats calculations
     final totalPlayedSeconds = _history.fold<double>(0.0, (prev, element) {
       final double duration = double.tryParse(element['durationPlayed']?.toString() ?? '0') ?? 0.0;
       return prev + duration;
     });
     final totalMins = (totalPlayedSeconds / 60).toStringAsFixed(1);
-    
-    // Group genres
+
     final Map<String, int> genreCounts = {};
     for (final item in _history) {
-      final genre = item['genre']?.toString() ?? 'Unknown';
+      final genre = item['genre']?.toString() ?? 'Pop';
       if (genre.isNotEmpty) {
         genreCounts[genre] = (genreCounts[genre] ?? 0) + 1;
       }
     }
-    String topGenre = 'None';
+    String topGenre = 'Pop & Party';
     int maxCount = 0;
     genreCounts.forEach((k, v) {
       if (v > maxCount) {
@@ -110,7 +115,7 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
       }
     });
 
-    final int streakDays = _history.isEmpty ? 0 : 3; // Mocking dynamic streak
+    final int streakDays = _history.isEmpty ? 0 : 3;
 
     return Scaffold(
       appBar: AppBar(
@@ -120,50 +125,53 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Insights & History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        title: const Text('Music Insights & History 📊', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit')),
         actions: [
           if (_history.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.delete_sweep_rounded),
+              icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
               tooltip: 'Clear History',
               onPressed: _clearHistory,
             ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 96),
+        padding: const EdgeInsets.only(bottom: 120, top: 8),
         children: [
-          // Stats Row
+          // Stat Cards Grid
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
-                _buildStatCard('LISTENING STREAK', '$streakDays Days', Icons.local_fire_department_rounded, customBranding.accentColor),
-                const SizedBox(width: 12),
-                _buildStatCard('MINUTES PLAYED', '$totalMins Min', Icons.query_builder_rounded, customBranding.accentColor),
+                _buildStatCard('LISTENING STREAK', '$streakDays Days', Icons.local_fire_department_rounded, accentColor),
+                const SizedBox(width: 10),
+                _buildStatCard('MINUTES PLAYED', '$totalMins Min', Icons.query_builder_rounded, accentColor),
               ],
             ),
           ),
-          
+
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
             child: Row(
               children: [
-                _buildStatCard('FAVORITE GENRE', topGenre, Icons.album_rounded, customBranding.accentColor),
-                const SizedBox(width: 12),
-                _buildStatCard('SONGS STREAMED', '${_history.length}', Icons.music_note_rounded, customBranding.accentColor),
+                _buildStatCard('TOP GENRE', topGenre, Icons.album_rounded, accentColor),
+                const SizedBox(width: 10),
+                _buildStatCard('SONGS STREAMED', '${_history.length}', Icons.music_note_rounded, accentColor),
               ],
             ),
           ),
 
           const SizedBox(height: 24),
 
-          // Listening List Title
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(
-              'Listening History',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+              'Listening Timeline',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontFamily: 'Outfit',
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
             ),
           ),
 
@@ -171,27 +179,33 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
             const Padding(
               padding: EdgeInsets.all(48.0),
               child: Center(
-                child: Text(
-                  'No history matches found. Start listening!',
-                  style: TextStyle(color: Colors.grey),
+                child: Column(
+                  children: [
+                    Icon(Icons.history_toggle_off_rounded, size: 48, color: Colors.grey),
+                    SizedBox(height: 12),
+                    Text(
+                      'No listening history matches found.\nStart listening to your favorite songs!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey, fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
             ),
 
-          // Render sections
           if (todayItems.isNotEmpty) ...[
             _buildSectionHeader('TODAY'),
-            ...todayItems.map((item) => _buildHistoryTile(item)),
+            ...todayItems.map((item) => _buildHistoryTile(item, accentColor)),
           ],
 
           if (yesterdayItems.isNotEmpty) ...[
             _buildSectionHeader('YESTERDAY'),
-            ...yesterdayItems.map((item) => _buildHistoryTile(item)),
+            ...yesterdayItems.map((item) => _buildHistoryTile(item, accentColor)),
           ],
 
           if (olderItems.isNotEmpty) ...[
             _buildSectionHeader('OLDER'),
-            ...olderItems.map((item) => _buildHistoryTile(item)),
+            ...olderItems.map((item) => _buildHistoryTile(item, accentColor)),
           ],
         ],
       ),
@@ -202,11 +216,11 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: AppTheme.glassDecoration(
-          context: context,
-          opacity: isDark ? 0.05 : 0.04,
-          radius: 16,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: accentColor.withValues(alpha: 0.2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,12 +228,24 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2)),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.0),
+                  ),
+                ),
                 Icon(icon, size: 18, color: accentColor),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 10),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, fontFamily: 'Outfit'),
+            ),
           ],
         ),
       ),
@@ -228,7 +254,7 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
 
   Widget _buildSectionHeader(String label) {
     return Padding(
-      padding: const EdgeInsets.only(left: 24, top: 20, bottom: 8),
+      padding: const EdgeInsets.only(left: 20, top: 20, bottom: 8),
       child: Text(
         label,
         style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5),
@@ -236,10 +262,9 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
     );
   }
 
-  Widget _buildHistoryTile(Map<String, dynamic> item) {
+  Widget _buildHistoryTile(Map<String, dynamic> item, Color accentColor) {
     final playbackNotifier = ref.read(playbackProvider.notifier);
-    
-    // Parse time
+
     String formattedTime = '';
     try {
       final time = DateTime.parse(item['timestamp'].toString());
@@ -248,33 +273,42 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
 
     final track = Track(
       id: item['track_id']?.toString() ?? '',
-      title: item['title']?.toString() ?? '',
-      artist: item['artist']?.toString() ?? '',
-      album: item['album']?.toString() ?? '',
-      duration: item['duration']?.toString() ?? '',
+      title: item['title']?.toString() ?? 'Track',
+      artist: item['artist']?.toString() ?? 'Unknown Artist',
+      album: item['album']?.toString() ?? 'Single',
+      duration: item['duration']?.toString() ?? '3:30',
       artworkUrl: item['artworkUrl']?.toString() ?? '',
       audioUrl: item['audioUrl']?.toString() ?? '',
       genre: item['genre']?.toString() ?? '',
     );
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       leading: AppArtworkImage(
         artworkUrl: track.artworkUrl,
         trackId: track.id,
         width: 44,
         height: 44,
         fit: BoxFit.cover,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
       ),
-      title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-      subtitle: Text('${track.artist} • $formattedTime', style: const TextStyle(fontSize: 11)),
-      trailing: IconButton(
-        icon: const Icon(Icons.close_rounded, size: 16, color: Colors.grey),
-        onPressed: () async {
-          await StorageService.deleteHistoryItem(item['timestamp'].toString());
-          _loadHistory();
-        },
+      title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+      subtitle: Text('${track.artist}${formattedTime.isNotEmpty ? " • $formattedTime" : ""}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: Icon(Icons.play_circle_fill_rounded, size: 28, color: accentColor),
+            onPressed: () => playbackNotifier.playTrack(track),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+            onPressed: () async {
+              await StorageService.deleteHistoryItem(item['timestamp'].toString());
+              _loadHistory();
+            },
+          ),
+        ],
       ),
       onTap: () {
         playbackNotifier.playTrack(track);

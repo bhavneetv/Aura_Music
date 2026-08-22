@@ -29,7 +29,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadPlaylists();
   }
 
@@ -56,7 +56,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       final newPl = {
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'name': name,
-        'description': desc.isNotEmpty ? desc : 'A premium custom playlist',
+        'description': desc.isNotEmpty ? desc : 'A custom playlist',
         'trackIds': <String>[],
       };
       playlists.add(newPl);
@@ -71,6 +71,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
 
   void _showCreatePlaylistBottomSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = ref.read(customizationProvider).accentColor;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -84,31 +86,48 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
             bottom: MediaQuery.of(context).viewInsets.bottom + 24
           ),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
-            borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+            color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Create Playlist', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Create Custom Playlist 🎵', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
               const SizedBox(height: 16),
               TextField(
                 controller: _playlistNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Playlist Name',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: 'Playlist Title',
+                  filled: true,
+                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _playlistDescController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Description (Optional)',
-                  border: OutlineInputBorder(),
+                  filled: true,
+                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -119,8 +138,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _createPlaylist,
-                    style: ElevatedButton.styleFrom(backgroundColor: ref.watch(customizationProvider).accentColor),
-                    child: const Text('Create', style: TextStyle(color: Colors.black)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentColor,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text('Create Playlist', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -153,20 +177,31 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                 bottom: MediaQuery.of(context).viewInsets.bottom + 24
               ),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+                color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   const Text(
-                    'Import Spotify Playlist', 
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Outfit')
+                    'Import Spotify Playlist 🎧', 
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Paste a public Spotify playlist link below to fetch its tracks. Due to public scraping constraints, only the first 100 tracks can be imported.',
+                    'Paste a public Spotify playlist link below to fetch its track details.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 16),
@@ -176,7 +211,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                     decoration: InputDecoration(
                       labelText: 'Spotify Playlist Link',
                       errorText: inlineError,
-                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
                       suffixIcon: _spotifyUrlController.text.isNotEmpty 
                         ? IconButton(
                             icon: const Icon(Icons.clear_rounded),
@@ -197,7 +235,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                       }
                     },
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -227,10 +265,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
 
                               try {
                                 final preview = await SpotifyImportService.instance.fetchPlaylistPreview(url);
-                                Navigator.pop(context); // Close bottom sheet
+                                Navigator.pop(context);
                                 _spotifyUrlController.clear();
                                 
-                                // Navigate to the preview screen
                                 if (context.mounted) {
                                   Navigator.push(
                                     context,
@@ -248,9 +285,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                             },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: accentColor,
-                          disabledBackgroundColor: accentColor.withOpacity(0.3),
+                          disabledBackgroundColor: accentColor.withValues(alpha: 0.3),
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
                         child: isLoading
                           ? const SizedBox(
@@ -275,71 +312,147 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final customBranding = ref.watch(customizationProvider);
+    final accentColor = customBranding.accentColor;
+
+    final favTracks = StorageService.getFavoriteTracks();
+    final downloadedTracks = DownloadService.instance.getDownloadedTracksList();
+    final historyList = StorageService.getListeningHistory();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Page Title
+        // 1. Header & Title Bar
         Padding(
-          padding: const EdgeInsets.only(left: 24, top: 16, bottom: 8),
-          child: Text(
-            'Your Library',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontFamily: 'Outfit',
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-        ),
-
-        // Shortcuts Row
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildShortcutButton(context, 'Favorites', Icons.favorite_rounded, () {
-                // Instantly navigate or select favorites filter
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Songs favorited can be viewed below. Enjoy!'))
-                );
-              }),
-              _buildShortcutButton(context, 'Downloads', Icons.download_done_rounded, () {
-                // Open downloaded lists modal/screen
-                _showDownloadsDialog();
-              }),
-              _buildShortcutButton(context, 'History', Icons.history_rounded, () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const RecentlyPlayedScreen()),
-                ).then((_) => _loadPlaylists());
-              }),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Your Library 📚',
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_playlists.length} Playlists • ${favTracks.length} Liked • ${downloadedTracks.length} Offline',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.add_rounded, color: accentColor, size: 20),
+                    ),
+                    tooltip: 'Create Playlist',
+                    onPressed: _showCreatePlaylistBottomSheet,
+                  ),
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.04),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.import_export_rounded, color: accentColor, size: 20),
+                    ),
+                    tooltip: 'Import Spotify Playlist',
+                    onPressed: _showImportPlaylistBottomSheet,
+                  ),
+                ],
+              ),
             ],
           ),
         ),
 
-        // Library Section Tabs
-        TabBar(
-          controller: _tabController,
-          indicatorColor: customBranding.accentColor,
-          labelColor: customBranding.accentColor,
-          unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
-          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-          tabs: const [
-            Tab(text: 'Songs'),
-            Tab(text: 'Albums'),
-            Tab(text: 'Playlists'),
-          ],
+        // 2. Quick Action Cards Bar
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(
+            children: [
+              _buildLibraryShortcutCard(
+                context,
+                'Favorites',
+                '${favTracks.length} Tracks',
+                Icons.favorite_rounded,
+                accentColor,
+                () => _tabController.animateTo(1),
+              ),
+              _buildLibraryShortcutCard(
+                context,
+                'Offline',
+                '${downloadedTracks.length} Saved',
+                Icons.download_done_rounded,
+                accentColor,
+                () => _tabController.animateTo(3),
+              ),
+              _buildLibraryShortcutCard(
+                context,
+                'History',
+                '${historyList.length} Played',
+                Icons.history_rounded,
+                accentColor,
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const RecentlyPlayedScreen()),
+                  ).then((_) => _loadPlaylists());
+                },
+              ),
+            ],
+          ),
         ),
 
-        // Library List View
+        // 3. Floating Segmented Tab Selector
+        Container(
+          height: 38,
+          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            labelColor: Colors.black,
+            unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
+            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
+            dividerColor: Colors.transparent,
+            tabs: const [
+              Tab(text: 'Playlists'),
+              Tab(text: 'Liked Songs'),
+              Tab(text: 'Albums'),
+              Tab(text: 'Downloaded'),
+            ],
+          ),
+        ),
+
+        // 4. Main Tab Content Area
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
-              _buildSongsList(customBranding.accentColor),
-              _buildAlbumsGrid(),
-              _buildPlaylistsList(customBranding.accentColor),
+              _buildPlaylistsTab(accentColor),
+              _buildLikedSongsTab(favTracks, accentColor),
+              _buildAlbumsTab(favTracks, accentColor),
+              _buildDownloadedTab(downloadedTracks, accentColor),
             ],
           ),
         ),
@@ -347,29 +460,34 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     );
   }
 
-  Widget _buildShortcutButton(BuildContext context, String label, IconData icon, VoidCallback onTap) {
+  Widget _buildLibraryShortcutCard(
+    BuildContext context,
+    String title,
+    String subtitle,
+    IconData icon,
+    Color accentColor,
+    VoidCallback onTap,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final customBranding = ref.watch(customizationProvider);
 
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: AppTheme.glassDecoration(
-            context: context,
-            opacity: isDark ? 0.05 : 0.04,
-            radius: 16,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: accentColor.withValues(alpha: 0.2)),
           ),
           child: Column(
             children: [
-              Icon(icon, color: customBranding.accentColor, size: 24),
+              Icon(icon, color: accentColor, size: 22),
               const SizedBox(height: 6),
-              Text(
-                label,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-              ),
+              Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.grey)),
             ],
           ),
         ),
@@ -377,9 +495,73 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     );
   }
 
-  Widget _buildSongsList(Color accentColor) {
-    final tracks = StorageService.getFavoriteTracks();
+  // Playlists Tab
+  Widget _buildPlaylistsTab(Color accentColor) {
+    if (_playlists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.playlist_add_rounded, size: 56, color: accentColor.withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            const Text('No custom playlists created yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 6),
+            const Text('Tap "+" in top right or import from Spotify!', style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _showCreatePlaylistBottomSheet,
+              icon: const Icon(Icons.add_rounded, color: Colors.black, size: 18),
+              label: const Text('Create Playlist', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: accentColor),
+            ),
+          ],
+        ),
+      );
+    }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 150, top: 10, left: 20, right: 20),
+      itemCount: _playlists.length,
+      itemBuilder: (context, index) {
+        final playlist = _playlists[index];
+        final List trackIds = playlist['trackIds'] ?? [];
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          color: isDark ? const Color(0xFF1E1E22) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            leading: Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(Icons.playlist_play_rounded, color: accentColor, size: 30),
+            ),
+            title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            subtitle: Text('${trackIds.length} songs • ${playlist['description'] ?? 'Custom playlist'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PlaylistDetailScreen(playlistIndex: index),
+                ),
+              ).then((_) => _loadPlaylists());
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // Liked Songs Tab
+  Widget _buildLikedSongsTab(List<Track> tracks, Color accentColor) {
     if (tracks.isEmpty) {
       return Center(
         child: Column(
@@ -387,15 +569,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
           children: [
             Icon(Icons.favorite_border_rounded, size: 56, color: accentColor.withValues(alpha: 0.4)),
             const SizedBox(height: 12),
-            const Text(
-              'No favorited songs yet',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
+            const Text('No favorited songs yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             const SizedBox(height: 6),
-            const Text(
-              'Double-tap any playing song to add it here!',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
-            ),
+            const Text('Heart any playing song to save it here!', style: TextStyle(color: Colors.grey, fontSize: 13)),
           ],
         ),
       );
@@ -405,34 +581,43 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 150, top: 12),
+          padding: const EdgeInsets.only(bottom: 150, top: 8),
           itemCount: tracks.length,
           itemBuilder: (context, index) {
             final track = tracks[index];
             final isFav = StorageService.isFavorite('trackIds', track.id);
             
             return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               leading: AppArtworkImage(
                 artworkUrl: track.artworkUrl,
                 trackId: track.id,
                 width: 48,
                 height: 48,
                 fit: BoxFit.cover,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
               ),
-              title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('${track.artist} • ${track.album}'),
-              trailing: IconButton(
-                icon: Icon(
-                  isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  color: isFav ? Colors.redAccent : Colors.grey,
-                  size: 20,
-                ),
-                onPressed: () async {
-                  await StorageService.toggleFavoriteTrack(track);
-                  setState(() {});
-                },
+              title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              subtitle: Text('${track.artist} • ${track.album}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                      color: isFav ? Colors.redAccent : Colors.grey,
+                      size: 20,
+                    ),
+                    onPressed: () async {
+                      await StorageService.toggleFavoriteTrack(track);
+                      setState(() {});
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
+                    onPressed: () => notifier.playTrack(track),
+                  ),
+                ],
               ),
               onTap: () {
                 notifier.playTrack(track);
@@ -444,305 +629,187 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     );
   }
 
-  Widget _buildAlbumsGrid() {
-    final tracks = StorageService.getFavoriteTracks();
+  // Albums Tab
+  Widget _buildAlbumsTab(List<Track> tracks, Color accentColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (tracks.isEmpty) {
+    final Map<String, List<Track>> albumsMap = {};
+    for (final track in tracks) {
+      final albumName = track.album.trim().isNotEmpty ? track.album.trim() : 'Singles';
+      albumsMap.putIfAbsent(albumName, () => []).add(track);
+    }
+
+    if (albumsMap.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.album_rounded, size: 56, color: Colors.grey.withValues(alpha: 0.4)),
+            Icon(Icons.album_rounded, size: 56, color: accentColor.withValues(alpha: 0.4)),
             const SizedBox(height: 12),
-            const Text(
-              'No albums saved',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey),
-            ),
+            const Text('No saved albums found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.grey)),
           ],
         ),
       );
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 150),
+      padding: const EdgeInsets.only(left: 20, right: 20, top: 14, bottom: 150),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 0.8,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+        childAspectRatio: 0.82,
       ),
-      itemCount: 4,
+      itemCount: albumsMap.keys.length,
       itemBuilder: (context, index) {
-        final track = tracks[index % tracks.length];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
+        final albumName = albumsMap.keys.elementAt(index);
+        final albumTracks = albumsMap[albumName]!;
+        final firstTrack = albumTracks.first;
+
+        return Consumer(
+          builder: (context, ref, child) {
+            return GestureDetector(
+              onTap: () {
+                ref.read(playbackProvider.notifier).playCustomQueue(albumTracks, initialIndex: 0);
+              },
               child: Container(
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(isDark ? 0.3 : 0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
+                  color: isDark ? const Color(0xFF1C1C1F) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: AppArtworkImage(
+                          artworkUrl: firstTrack.artworkUrl,
+                          trackId: firstTrack.id,
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
+                    const SizedBox(height: 10),
+                    Text(albumName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('${firstTrack.artist} • ${albumTracks.length} tracks', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
                   ],
                 ),
-                child: AppArtworkImage(
-                  artworkUrl: track.artworkUrl,
-                  trackId: track.id,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              track.album,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
-            ),
-          ],
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildPlaylistsList(Color accentColor) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Your Playlists', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey)),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _showImportPlaylistBottomSheet,
-                    icon: Icon(Icons.import_export_rounded, size: 16, color: accentColor),
-                    label: Text('Import', style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(width: 4),
-                  TextButton.icon(
-                    onPressed: _showCreatePlaylistBottomSheet,
-                    icon: Icon(Icons.add_rounded, size: 16, color: accentColor),
-                    label: Text('Create', style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _playlists.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.playlist_add_rounded, size: 48, color: accentColor.withOpacity(0.4)),
-                      const SizedBox(height: 8),
-                      const Text('No custom playlists yet.', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 150),
-                  itemCount: _playlists.length,
-                  itemBuilder: (context, index) {
-                    final playlist = _playlists[index];
-                    final List trackIds = playlist['trackIds'] ?? [];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                      leading: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: accentColor.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(Icons.playlist_play_rounded, color: accentColor, size: 28),
-                      ),
-                      title: Text(playlist['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('${trackIds.length} songs'),
-                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => PlaylistDetailScreen(playlistIndex: index),
-                          ),
-                        ).then((_) => _loadPlaylists());
-                      },
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  void _showDownloadsDialog() {
-    final downloadedTracks = DownloadService.instance.getDownloadedTracksList();
+  // Downloaded Offline Tab
+  Widget _buildDownloadedTab(List<Track> downloadedTracks, Color accentColor) {
     final downloadedPlaylists = StorageService.getDownloadedPlaylists();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accentColor = ref.read(customizationProvider).accentColor;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: isDark ? const Color(0xFF141414) : const Color(0xFFFAF8F5),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return DefaultTabController(
-          length: 2,
-          child: Container(
-            height: MediaQuery.of(context).size.height * 0.75,
-            padding: const EdgeInsets.only(top: 16, left: 16, right: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Downloads (Offline)',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit'),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
+    if (downloadedTracks.isEmpty && downloadedPlaylists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.download_done_rounded, size: 56, color: accentColor.withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            const Text('No offline downloads yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 6),
+            const Text('Download songs to listen offline anytime!', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 150, top: 12, left: 20, right: 20),
+      children: [
+        if (downloadedPlaylists.isNotEmpty) ...[
+          const Text('Downloaded Playlists', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, fontFamily: 'Outfit')),
+          const SizedBox(height: 10),
+          ...downloadedPlaylists.map((pl) {
+            final List rawTracks = pl['tracks'] ?? [];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              color: isDark ? const Color(0xFF1E1E22) : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              child: ListTile(
+                leading: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.download_done_rounded, color: accentColor, size: 24),
                 ),
-                TabBar(
-                  indicatorColor: accentColor,
-                  labelColor: accentColor,
-                  unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  tabs: [
-                    Tab(text: 'Tracks (${downloadedTracks.length})'),
-                    Tab(text: 'Playlists (${downloadedPlaylists.length})'),
-                  ],
+                title: Text(pl['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: Text('${rawTracks.length} songs saved offline'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                  onPressed: () async {
+                    await StorageService.deleteDownloadedPlaylist(pl['name']);
+                    setState(() {});
+                  },
                 ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: TabBarView(
+              ),
+            );
+          }),
+          const SizedBox(height: 16),
+        ],
+
+        if (downloadedTracks.isNotEmpty) ...[
+          Text('Downloaded Tracks (${downloadedTracks.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, fontFamily: 'Outfit')),
+          const SizedBox(height: 10),
+          ...downloadedTracks.map((track) {
+            return Consumer(
+              builder: (context, ref, child) {
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // ── Tab 1: Offline Tracks ──
-                      downloadedTracks.isEmpty
-                          ? const Center(child: Text('No downloaded tracks yet.', style: TextStyle(color: Colors.grey)))
-                          : ListView.builder(
-                              itemCount: downloadedTracks.length,
-                              itemBuilder: (context, index) {
-                                final track = downloadedTracks[index];
-                                return ListTile(
-                                  leading: AppArtworkImage(
-                                    artworkUrl: track.artworkUrl,
-                                    trackId: track.id,
-                                    width: 40,
-                                    height: 40,
-                                    fit: BoxFit.cover,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
-                                    onPressed: () async {
-                                      await DownloadService.instance.deleteDownload(track.id);
-                                      Navigator.pop(context);
-                                      _showDownloadsDialog();
-                                    },
-                                  ),
-                                  onTap: () {
-                                    ref.read(playbackProvider.notifier).playTrack(track);
-                                    Navigator.pop(context);
-                                  },
-                                );
-                              },
-                            ),
-
-                      // ── Tab 2: Offline Playlists ──
-                      downloadedPlaylists.isEmpty
-                          ? const Center(child: Text('No downloaded playlists yet.', style: TextStyle(color: Colors.grey)))
-                          : ListView.builder(
-                              itemCount: downloadedPlaylists.length,
-                              itemBuilder: (context, index) {
-                                final playlist = downloadedPlaylists[index];
-                                final List rawTracks = playlist['tracks'] ?? [];
-                                final List<Track> playlistTracks = rawTracks.map((item) {
-                                  final m = Map<String, dynamic>.from(item as Map);
-                                  return Track(
-                                    id: m['id']?.toString() ?? '',
-                                    title: m['title']?.toString() ?? 'Track',
-                                    artist: m['artist']?.toString() ?? 'Unknown Artist',
-                                    album: m['album']?.toString() ?? 'Offline',
-                                    duration: m['duration']?.toString() ?? '3:30',
-                                    artworkUrl: m['artworkUrl']?.toString() ?? '',
-                                    audioUrl: m['audioUrl']?.toString() ?? '',
-                                    genre: m['genre']?.toString() ?? '',
-                                  );
-                                }).toList();
-
-                                return ListTile(
-                                  leading: Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: accentColor.withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(Icons.download_done_rounded, color: accentColor, size: 24),
-                                  ),
-                                  title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  subtitle: Text('${playlistTracks.length} songs downloaded offline'),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: Icon(Icons.play_circle_fill_rounded, color: accentColor, size: 30),
-                                        onPressed: () {
-                                          if (playlistTracks.isNotEmpty) {
-                                            ref.read(playbackProvider.notifier).playCustomQueue(playlistTracks, initialIndex: 0);
-                                            Navigator.pop(context);
-                                          }
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
-                                        onPressed: () async {
-                                          await StorageService.deleteDownloadedPlaylist(playlist['name']);
-                                          Navigator.pop(context);
-                                          _showDownloadsDialog();
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
+                      IconButton(
+                        icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
+                        onPressed: () {
+                          ref.read(playbackProvider.notifier).playTrack(track);
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                        onPressed: () async {
+                          await DownloadService.instance.deleteDownload(track.id);
+                          setState(() {});
+                        },
+                      ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+                  onTap: () {
+                    ref.read(playbackProvider.notifier).playTrack(track);
+                  },
+                );
+              },
+            );
+          }),
+        ],
+      ],
     );
   }
 }
