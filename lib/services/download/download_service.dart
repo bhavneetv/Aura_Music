@@ -90,6 +90,11 @@ class DownloadService extends ChangeNotifier {
             track.artworkUrl,
             artworkLocalPath,
             cancelToken: cancelToken,
+            options: Options(
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            ),
           );
         } catch (e) {
           print('[DOWNLOAD] Failed downloading cover art for "${track.title}": $e');

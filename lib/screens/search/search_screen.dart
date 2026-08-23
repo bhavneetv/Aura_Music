@@ -330,7 +330,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
         final results = await ref.read(musicSourceProvider).searchTracks(query);
         if (mounted && _searchController.text.trim() == query) {
           setState(() {
-            _filteredTracks = results;
+            _filteredTracks = _deduplicateTracks(results);
             _isSearching = false;
           });
           await StorageService.addSearchQuery(query);
@@ -366,7 +366,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
         final results = await ref.read(musicSourceProvider).searchTracks(query);
         if (mounted && _searchController.text.trim() == query) {
           setState(() {
-            _filteredTracks = results;
+            _filteredTracks = _deduplicateTracks(results);
             _isSearching = false;
           });
         }
@@ -378,6 +378,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
         }
       }
     }
+  }
+
+  List<Track> _deduplicateTracks(List<Track> tracks) {
+    final Map<String, Track> uniqueMap = {};
+    for (final track in tracks) {
+      final key = track.id.isNotEmpty
+          ? track.id
+          : '${track.title.toLowerCase().trim()}_${track.artist.toLowerCase().trim()}';
+      if (!uniqueMap.containsKey(key)) {
+        uniqueMap[key] = track;
+      }
+    }
+    return uniqueMap.values.toList();
   }
 
   Future<void> _executeAiSearch(String query) async {

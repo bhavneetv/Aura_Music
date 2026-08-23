@@ -38,7 +38,9 @@ jobs:
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
       - name: Build Windows Release
+        shell: powershell
         run: |
+          $env:CL = "/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
           flutter build windows --release --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
       - name: Package Windows Bundle (.zip)
@@ -83,9 +85,9 @@ jobs:
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
-      - name: Build macOS Release (Unsigned)
+      - name: Build macOS Release
         run: |
-          flutter build macos --release --no-codesign --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+          flutter build macos --release --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
       - name: Package macOS App (.zip)
         run: |
@@ -113,7 +115,7 @@ jobs:
       - name: Install Linux Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++6
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libjsoncpp-dev libstdc++6
 
       - uses: subosito/flutter-action@v2
         with:

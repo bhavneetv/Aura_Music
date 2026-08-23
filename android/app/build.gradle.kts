@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.security.KeyStore
 
 plugins {
     id("com.android.application")
@@ -27,7 +28,7 @@ if (keystorePropertiesFile.exists()) {
             val sFile = file(storeFileStr)
             if (sFile.exists() && sFile.length() > 0) {
                 // Verify password and alias using Java KeyStore API
-                val ks = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType())
+                val ks = KeyStore.getInstance(KeyStore.getDefaultType())
                 FileInputStream(sFile).use { fis ->
                     ks.load(fis, storePassword.toCharArray())
                 }

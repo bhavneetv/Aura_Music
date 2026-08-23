@@ -475,10 +475,10 @@ class StorageService {
             final localArt = val['localArtworkPath']?.toString() ?? '';
             final remoteArt = val['artworkUrl']?.toString() ?? '';
 
-            String finalArt = remoteArt;
-            if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
-              finalArt = localArt;
-            }
+            // Keep remote HTTP URL as primary artworkUrl so online mode always loads network image
+            String finalArt = (remoteArt.startsWith('http://') || remoteArt.startsWith('https://'))
+                ? remoteArt
+                : (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0 ? localArt : remoteArt);
 
             tracks.add(
               Track(
@@ -495,7 +495,13 @@ class StorageService {
           }
         }
       });
-      return tracks;
+      final Map<String, Track> uniqueTracks = {};
+      for (final t in tracks) {
+        if (!uniqueTracks.containsKey(t.id)) {
+          uniqueTracks[t.id] = t;
+        }
+      }
+      return uniqueTracks.values.toList();
     } catch (_) {
       return [];
     }
@@ -504,6 +510,24 @@ class StorageService {
   static String? getDownloadedTrackPath(String trackId) {
     final downloads = getDownloadedTracks();
     return downloads[trackId];
+  }
+
+  static String? getRemoteArtworkUrl(String trackId) {
+    if (!Hive.isBoxOpen(_downloadsBox)) return null;
+    final box = Hive.box(_downloadsBox);
+    final raw = box.get('downloaded_tracks');
+    if (raw == null) return null;
+    try {
+      final Map decoded = jsonDecode(raw.toString()) as Map;
+      final val = decoded[trackId];
+      if (val is Map) {
+        final remote = val['artworkUrl']?.toString() ?? '';
+        if (remote.startsWith('http://') || remote.startsWith('https://')) {
+          return remote;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   static String? getDownloadedArtworkPath(String trackId) {

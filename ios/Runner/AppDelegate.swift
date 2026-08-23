@@ -3,7 +3,7 @@ import Flutter
 import Intents
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, INPlayMediaIntentHandling, INSearchForMediaIntentHandling {
   private let appGroupId = "group.com.example.musicApp"
   private var voiceChannel: FlutterMethodChannel?
   private var siriChannel: FlutterMethodChannel?
@@ -55,10 +55,71 @@ import Intents
       AudioRoutingPlugin.register(with: registrar)
     }
 
+    // Request Siri permission with system
+    INPreferences.requestSiriAuthorization { status in
+      print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
+    }
+
     // Check for pending Siri queries stored in shared App Group defaults
     checkPendingSiriQuery()
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  // ── Handle Siri Media Intents Directly ──────────────────────────────────────
+
+  override func application(
+    _ application: UIApplication,
+    handle intent: INIntent,
+    completionHandler: @escaping (INIntentResponse) -> Void
+  ) {
+    if let playIntent = intent as? INPlayMediaIntent {
+      var query = extractQueryFromMediaIntent(playIntent)
+      if query.isEmpty {
+        query = "play music"
+      }
+      sendVoiceQueryToFlutter(query: query)
+      let response = INPlayMediaIntentResponse(code: .success, userActivity: nil)
+      completionHandler(response)
+    } else if let searchIntent = intent as? INSearchForMediaIntent {
+      var query = ""
+      if let mediaName = searchIntent.mediaName, !mediaName.isEmpty {
+        query = mediaName
+      } else if let artist = searchIntent.artistName, !artist.isEmpty {
+        query = artist
+      } else if let genre = searchIntent.genreNames?.first, !genre.isEmpty {
+        query = "\(genre) song"
+      }
+      if query.isEmpty { query = "play music" }
+      sendVoiceQueryToFlutter(query: query)
+      let response = INSearchForMediaIntentResponse(code: .success, userActivity: nil)
+      completionHandler(response)
+    } else {
+      completionHandler(INIntentResponse(code: .unspecified, userActivity: nil))
+    }
+  }
+
+  // Protocol conformance: INPlayMediaIntentHandling
+  func handle(intent: INPlayMediaIntent, completion: @escaping (INPlayMediaIntentResponse) -> Void) {
+    var query = extractQueryFromMediaIntent(intent)
+    if query.isEmpty { query = "play music" }
+    sendVoiceQueryToFlutter(query: query)
+    completion(INPlayMediaIntentResponse(code: .success, userActivity: nil))
+  }
+
+  // Protocol conformance: INSearchForMediaIntentHandling
+  func handle(intent: INSearchForMediaIntent, completion: @escaping (INSearchForMediaIntentResponse) -> Void) {
+    var query = ""
+    if let mediaName = intent.mediaName, !mediaName.isEmpty {
+      query = mediaName
+    } else if let artist = intent.artistName, !artist.isEmpty {
+      query = artist
+    } else if let genre = intent.genreNames?.first, !genre.isEmpty {
+      query = "\(genre) song"
+    }
+    if query.isEmpty { query = "play music" }
+    sendVoiceQueryToFlutter(query: query)
+    completion(INSearchForMediaIntentResponse(code: .success, userActivity: nil))
   }
 
   override func application(

@@ -324,7 +324,8 @@ class JamendoSource implements MusicSource {
         final id = item['id']?.toString() ?? '';
         if (id.isEmpty) continue;
 
-        final title = item['name']?.toString() ?? item['title']?.toString() ?? 'Unknown Track';
+        final rawTitle = item['name']?.toString() ?? item['title']?.toString() ?? 'Unknown Track';
+        final title = _cleanText(rawTitle);
         
         String artist = 'Unknown Artist';
         if (item['artists'] != null) {
@@ -339,6 +340,7 @@ class JamendoSource implements MusicSource {
         } else if (item['primaryArtists'] != null) {
           artist = item['primaryArtists'].toString();
         }
+        artist = _cleanText(artist);
 
         String album = 'Single';
         if (item['album'] != null) {
@@ -348,6 +350,7 @@ class JamendoSource implements MusicSource {
             album = item['album'].toString();
           }
         }
+        album = _cleanText(album);
 
         final durationSec = int.tryParse(item['duration']?.toString() ?? '180') ?? 180;
         final duration = _formatDuration(durationSec);
@@ -463,6 +466,17 @@ class JamendoSource implements MusicSource {
 
   List<Track> _getMockFallback() {
     return Track.mockTracks;
+  }
+
+  String _cleanText(String text) {
+    return text
+        .replaceAll('&quot;', '"')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&nbsp;', ' ');
   }
 
   List<Track> _filterMockTracks(String query) {
