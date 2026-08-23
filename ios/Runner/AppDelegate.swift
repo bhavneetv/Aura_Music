@@ -82,20 +82,13 @@ import Intents
       let response = INPlayMediaIntentResponse(code: .success, userActivity: nil)
       completionHandler(response)
     } else if let searchIntent = intent as? INSearchForMediaIntent {
-      var query = ""
-      if let mediaName = searchIntent.mediaName, !mediaName.isEmpty {
-        query = mediaName
-      } else if let artist = searchIntent.artistName, !artist.isEmpty {
-        query = artist
-      } else if let genre = searchIntent.genreNames?.first, !genre.isEmpty {
-        query = "\(genre) song"
-      }
+      var query = extractQueryFromSearchIntent(searchIntent)
       if query.isEmpty { query = "play music" }
       sendVoiceQueryToFlutter(query: query)
       let response = INSearchForMediaIntentResponse(code: .success, userActivity: nil)
       completionHandler(response)
     } else {
-      completionHandler(INIntentResponse(code: .unspecified, userActivity: nil))
+      completionHandler(INPlayMediaIntentResponse(code: .success, userActivity: nil))
     }
   }
 
@@ -109,14 +102,7 @@ import Intents
 
   // Protocol conformance: INSearchForMediaIntentHandling
   func handle(intent: INSearchForMediaIntent, completion: @escaping (INSearchForMediaIntentResponse) -> Void) {
-    var query = ""
-    if let mediaName = intent.mediaName, !mediaName.isEmpty {
-      query = mediaName
-    } else if let artist = intent.artistName, !artist.isEmpty {
-      query = artist
-    } else if let genre = intent.genreNames?.first, !genre.isEmpty {
-      query = "\(genre) song"
-    }
+    var query = extractQueryFromSearchIntent(intent)
     if query.isEmpty { query = "play music" }
     sendVoiceQueryToFlutter(query: query)
     completion(INSearchForMediaIntentResponse(code: .success, userActivity: nil))
@@ -163,22 +149,36 @@ import Intents
     return super.application(app, open: url, options: options)
   }
 
-  private func extractQueryFromMediaIntent(_ intent: INPlayMediaIntent) -> String {
-    if let mediaSearch = intent.mediaSearch {
-      if let mediaName = mediaSearch.mediaName, !mediaName.isEmpty {
-        return mediaName
-      }
-      if let artistName = mediaSearch.artistName, !artistName.isEmpty {
-        return artistName
-      }
-      if let genre = mediaSearch.genreNames?.first, !genre.isEmpty {
-        return "\(genre) song"
-      }
-      if let albumName = mediaSearch.albumName, !albumName.isEmpty {
-        return albumName
-      }
+  private func extractQueryFromMediaSearch(_ mediaSearch: INMediaSearch?) -> String {
+    guard let mediaSearch = mediaSearch else { return "" }
+    if let mediaName = mediaSearch.mediaName, !mediaName.isEmpty {
+      return mediaName
     }
+    if let artistName = mediaSearch.artistName, !artistName.isEmpty {
+      return artistName
+    }
+    if let genre = mediaSearch.genreNames?.first, !genre.isEmpty {
+      return "\(genre) song"
+    }
+    if let albumName = mediaSearch.albumName, !albumName.isEmpty {
+      return albumName
+    }
+    return ""
+  }
+
+  private func extractQueryFromMediaIntent(_ intent: INPlayMediaIntent) -> String {
+    let query = extractQueryFromMediaSearch(intent.mediaSearch)
+    if !query.isEmpty { return query }
     if let container = intent.mediaContainer, let title = container.title, !title.isEmpty {
+      return title
+    }
+    return ""
+  }
+
+  private func extractQueryFromSearchIntent(_ intent: INSearchForMediaIntent) -> String {
+    let query = extractQueryFromMediaSearch(intent.mediaSearch)
+    if !query.isEmpty { return query }
+    if let item = intent.mediaItems?.first, let title = item.title, !title.isEmpty {
       return title
     }
     return ""
