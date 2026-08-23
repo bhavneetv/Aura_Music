@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -70,11 +69,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         tabBody = Container();
     }
 
+    final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final bool isKeyboardOpen = keyboardHeight > 0;
+
     final double bottomInset = MediaQuery.of(context).padding.bottom;
     final double bottomMargin = bottomInset > 0 ? bottomInset + 8.0 : 16.0;
-    final double miniPlayerBottom = (customBranding.navBarStyle == 'os_style')
-        ? (PlatformInfo.isIOS ? bottomInset + 70.0 : (bottomInset > 0 ? bottomInset + 70.0 : 70.0))
-        : (bottomMargin + 60.0);
+    final double miniPlayerBottom = isKeyboardOpen
+        ? 6.0
+        : ((customBranding.navBarStyle == 'os_style')
+            ? (PlatformInfo.isIOS ? bottomInset + 70.0 : (bottomInset > 0 ? bottomInset + 70.0 : 70.0))
+            : (bottomMargin + 60.0));
 
     return Scaffold(
       extendBody: true,
@@ -88,7 +92,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           child: Stack(
             children: [
               RepaintBoundary(child: tabBody),
-              Positioned(
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
                 left: 0,
                 right: 0,
                 bottom: miniPlayerBottom,

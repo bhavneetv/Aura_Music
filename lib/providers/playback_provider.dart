@@ -459,6 +459,10 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           status: PlaybackStatus.idle,
           playRequested: false,
         );
+        _handler.syncQueue(tracks);
+        if (curr != null) {
+          _handler.updateTrackMediaItem(curr);
+        }
         ensureUpcomingRecommendations();
       } catch (e) {
         print('Failed to restore saved queue: $e');
@@ -482,6 +486,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
               status: PlaybackStatus.idle,
               playRequested: false,
             );
+            _handler.syncQueue(recs);
+            _handler.updateTrackMediaItem(seedTrack);
             _saveQueue();
           }
         } catch (_) {}
@@ -496,12 +502,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       isShuffle: state.isShuffle,
       repeatMode: state.repeatMode.index,
     );
+    _handler.syncQueue(state.queue);
+    if (state.currentTrack != null) {
+      _handler.updateTrackMediaItem(state.currentTrack!);
+    }
     QuickActionsService.instance.updateShortcuts();
   }
 
   void resumePlayback() {
     if (state.isPlaying) return;
     if (state.currentTrack != null) {
+      _handler.updateTrackMediaItem(state.currentTrack!);
+      _handler.syncQueue(state.queue);
       if (state.status == PlaybackStatus.paused || state.status == PlaybackStatus.ready) {
         _handler.play();
         state = state.copyWith(isPlaying: true, status: PlaybackStatus.playing);
@@ -797,6 +809,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     final resolvedTrack = _resolveSingleTrackWithLocalDownload(track);
     track = resolvedTrack;
+    _handler.updateTrackMediaItem(track);
+    _handler.syncQueue(state.queue);
     String audioUrl = track.audioUrl;
     if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
       audioUrl = audioUrl.replaceAll('_320.', '_160.');

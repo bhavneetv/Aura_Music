@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:audio_service/audio_service.dart';
@@ -277,8 +276,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     }
   }
 
-  Future<void> playTrack(Track track) async {
-    final mediaItem = MediaItem(
+  MediaItem _trackToMediaItem(Track track) {
+    return MediaItem(
       id: track.id,
       album: track.album,
       title: track.title,
@@ -290,8 +289,28 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         'genre': track.genre,
       },
     );
-    
-    this.mediaItem.add(mediaItem);
+  }
+
+  void updateTrackMediaItem(Track track) {
+    final item = _trackToMediaItem(track);
+    final cur = mediaItem.value;
+    if (cur?.id != item.id ||
+        cur?.title != item.title ||
+        cur?.artist != item.artist ||
+        cur?.album != item.album ||
+        cur?.duration != item.duration ||
+        cur?.artUri != item.artUri) {
+      mediaItem.add(item);
+    }
+  }
+
+  void syncQueue(List<Track> tracks) {
+    final items = tracks.map(_trackToMediaItem).toList();
+    queue.add(items);
+  }
+
+  Future<void> playTrack(Track track) async {
+    updateTrackMediaItem(track);
     
     try {
       // CRITICAL: Mark transition BEFORE any async work so _broadcastState()
@@ -442,19 +461,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       _isCrossfadeActive = true;
 
       // Broadcast new MediaItem to system notification & lockscreen at exact swap time
-      final mediaItem = MediaItem(
-        id: nextTrack.id,
-        album: nextTrack.album,
-        title: nextTrack.title,
-        artist: nextTrack.artist,
-        duration: _parseDuration(nextTrack.duration),
-        artUri: Uri.tryParse(nextTrack.artworkUrl),
-        extras: {
-          'audioUrl': nextTrack.audioUrl,
-          'genre': nextTrack.genre,
-        },
-      );
-      this.mediaItem.add(mediaItem);
+      updateTrackMediaItem(nextTrack);
 
       onSwapped?.call();
 
