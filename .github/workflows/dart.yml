@@ -34,12 +34,6 @@ jobs:
           echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || '?' }}" >> $GITHUB_ENV
           echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD || '?' }}" >> $GITHUB_ENV
 
-      - name: Install CocoaPods
-        run: |
-          cd ios
-          pod install
-          cd ..
-
       - name: Build iOS Release App (Unsigned)
         run: |
           flutter build ios --release --no-codesign --no-tree-shake-icons \
@@ -53,8 +47,6 @@ jobs:
         run: |
           mkdir -p Payload
           cp -RL "build/ios/iphoneos/Runner.app" Payload/
-          echo "--- Ad-hoc Code Signing Payload for Sideload Compatibility ---"
-          codesign --force --deep --sign - Payload/Runner.app || true
           echo "--- Payload size after copy ---"
           du -sh Payload
           ditto -c -k --keepParent Payload FlutterIpaExport.ipa

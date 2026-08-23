@@ -3,7 +3,7 @@ import Flutter
 import Intents
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, INPlayMediaIntentHandling, INSearchForMediaIntentHandling {
+@objc class AppDelegate: FlutterAppDelegate {
   private let appGroupId = "group.com.example.musicApp"
   private var voiceChannel: FlutterMethodChannel?
   private var siriChannel: FlutterMethodChannel?
@@ -13,9 +13,7 @@ import Intents
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    guard let controller = window?.rootViewController as? FlutterViewController else {
-      return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    }
+    let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
 
     if let launchUrl = launchOptions?[.url] as? URL {
       pendingDeepLink = launchUrl.absoluteString
@@ -65,21 +63,6 @@ import Intents
       AudioRoutingPlugin.register(with: registrar)
     }
 
-    // Request Siri permission safely — wrapped in do/catch because sideloaded
-    // builds without proper Siri entitlement will crash if this is called directly.
-    DispatchQueue.global(qos: .utility).async {
-      do {
-        // Verify Intents framework availability before calling
-        if NSClassFromString("INPreferences") != nil {
-          INPreferences.requestSiriAuthorization { status in
-            print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
-          }
-        } else {
-          print("[AURA-SIRI] Intents framework unavailable, skipping Siri authorization")
-        }
-      }
-    }
-
     // Check for pending Siri queries stored in shared App Group defaults
     checkPendingSiriQuery()
 
@@ -112,21 +95,6 @@ import Intents
     }
   }
 
-  // Protocol conformance: INPlayMediaIntentHandling
-  func handle(intent: INPlayMediaIntent, completion: @escaping (INPlayMediaIntentResponse) -> Void) {
-    var query = extractQueryFromMediaIntent(intent)
-    if query.isEmpty { query = "play music" }
-    sendVoiceQueryToFlutter(query: query)
-    completion(INPlayMediaIntentResponse(code: .success, userActivity: nil))
-  }
-
-  // Protocol conformance: INSearchForMediaIntentHandling
-  func handle(intent: INSearchForMediaIntent, completion: @escaping (INSearchForMediaIntentResponse) -> Void) {
-    var query = extractQueryFromSearchIntent(intent)
-    if query.isEmpty { query = "play music" }
-    sendVoiceQueryToFlutter(query: query)
-    completion(INSearchForMediaIntentResponse(code: .success, userActivity: nil))
-  }
 
   override func application(
     _ application: UIApplication,

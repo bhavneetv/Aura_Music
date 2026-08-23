@@ -61,20 +61,6 @@
 	<string>Aura uses Siri to let you play songs, artists, and playlists using voice commands.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Aura uses your local network to discover and sync audio playback with nearby devices on your Wi-Fi.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Aura requires microphone access for voice assistant commands.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Aura requires speech recognition to understand your voice commands.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Aura uses Bluetooth to connect to external speakers and audio devices.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Aura uses Bluetooth to stream music to external audio devices.</string>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>Aura accesses your media library for playback and recommendations.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Aura accesses your photos to let you choose custom playlist artwork.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Aura saves artwork and audio share cards to your photo library.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INPlayMediaIntent</string>
@@ -94,13 +80,6 @@
 				<string>auramusic</string>
 			</array>
 		</dict>
-	</array>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_http._tcp</string>
-		<string>_http._udp</string>
-		<string>_aura._tcp</string>
-		<string>_aura._udp</string>
 	</array>
 </dict>
 </plist>
