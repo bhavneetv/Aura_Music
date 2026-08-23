@@ -110,9 +110,18 @@ class RecommendationEngine {
 
     final targetAlbum = currentTrack?.album.trim().toLowerCase() ?? '';
 
-    // ── 1. COOLDOWN PENALTY ──────────────────────────────────────
+    // ── 1. COOLDOWN & YEAR-SPAM PENALTY ─────────────────────────
     if (cooldownTitles.contains(candidateTitle)) {
       score -= 500.0;
+    }
+
+    if (candidateTitle.contains('happy new year') ||
+        candidateTitle.contains('new year 202') ||
+        candidateTitle.contains('2026 dj') ||
+        candidateTitle.contains('2025 dj') ||
+        candidateTitle.contains('nonstop dj 202') ||
+        candidateTitle.contains('wishing you')) {
+      score -= 1000.0; // Heavily penalize year-spam / event-spam tracks
     }
 
     // ── 2. PREFERRED LANGUAGE & GENRE CONTINUITY (HIGHEST PRIORITY) ──────────
@@ -137,7 +146,7 @@ class RecommendationEngine {
     // ── 3. ARTIST CONTINUITY ─────────────────────────────────────
     if (targetArtist.isNotEmpty) {
       if (_artistMatches(candidateArtist, targetArtist)) {
-        score += 120.0; // Same singer boost
+        score += 25.0; // Mild same singer preference (prevents artist flooding)
       }
     }
 
@@ -179,9 +188,9 @@ class RecommendationEngine {
       score += 15.0;
     }
 
-    // ── 9. ARTIST DIVERSITY (prevent 3+ consecutive same artist) ─
+    // ── 9. ARTIST DIVERSITY (penalize excessive same artist) ──────
     if (currentTrack != null && candidateArtist == currentTrack.artist.split(',').first.trim().toLowerCase()) {
-      score -= 60.0; // Mild penalty to encourage variety within same genre
+      score -= 40.0; // Encourage variety within same genre
     }
 
     // ── 10. EXPLORATION NOISE ────────────────────────────────────
@@ -212,8 +221,8 @@ class RecommendationEngine {
     return genre.contains('ACOUSTIC') || genre.contains('POP') || genre.contains('BOLLYWOOD') || genre.contains('DEVOTIONAL');
   }
 
-  /// Rank candidate tracks using Temperature Softmax sampling
-  List<Track> rankRecommendations(List<Track> candidates, {Track? currentTrack, Set<String>? excludeIds}) {
+  /// Rank candidate tracks using Temperature Softmax sampling and strict Artist Diversity capping
+  List<Track> rankRecommendations(List<Track> candidates, {Track? currentTrack, Set<String>? excludeIds, int maxPerArtist = 2}) {
     // Deduplicate by title
     final Map<String, Track> uniqueByTitle = {};
     for (final track in candidates) {
@@ -241,7 +250,45 @@ class RecommendationEngine {
 
     // Temperature Softmax Sampling
     final temperature = _isColdStart ? _coldStartTemperature : _sessionTemperature;
-    return _temperatureSample(scoredEntries, temperature);
+    final sampled = _temperatureSample(scoredEntries, temperature);
+
+    // Apply strict Artist Diversity Cap (max 1 additional track for current artist, max 2 for other artists)
+    return _applyArtistDiversityCap(sampled, currentTrack: currentTrack, maxPerArtist: maxPerArtist);
+  }
+
+  /// Ensures queue diversity by limiting same artist to 1-2 tracks at top of upcoming queue, putting overflow at end
+  List<Track> _applyArtistDiversityCap(List<Track> tracks, {Track? currentTrack, int maxPerArtist = 2}) {
+    final List<Track> result = [];
+    final List<Track> overflow = [];
+    final Map<String, int> artistCounts = {};
+
+    final currentArtistKey = currentTrack != null
+        ? currentTrack.artist.split(',').first.trim().toLowerCase()
+        : '';
+
+    // If current track is playing, count 1 for that artist
+    if (currentArtistKey.isNotEmpty) {
+      artistCounts[currentArtistKey] = 1;
+    }
+
+    for (final track in tracks) {
+      final artistKey = track.artist.split(',').first.trim().toLowerCase();
+      final count = artistCounts[artistKey] ?? 0;
+
+      // Allow max 1 additional song for currently playing artist, max 2 for other artists
+      final limit = (currentArtistKey.isNotEmpty && artistKey == currentArtistKey) ? 1 : maxPerArtist;
+
+      if (count < limit) {
+        result.add(track);
+        artistCounts[artistKey] = count + 1;
+      } else {
+        overflow.add(track);
+      }
+    }
+
+    // Append overflow tracks at the end of queue
+    result.addAll(overflow);
+    return result;
   }
 
   /// Re-score existing upcoming queue tracks against current context and filter low-scoring ones

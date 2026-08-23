@@ -122,13 +122,14 @@ class JamendoSource implements MusicSource {
     final lowerGenre = cleanGenre.toLowerCase();
     print('[AURA-GENRE] getTracksByGenre requested for: "$cleanGenre"');
 
-    // 1. Ask AI for LATEST 2025/2026 TOP HITS search queries specific to this language
+    // 1. Ask AI for TOP CHARTING HITS search queries specific to this language
     List<String> targetQueries = [];
     try {
       final aiPrompt = '''
-You are an expert music curator. Provide a JSON array of 4 search queries to find the LATEST 2025/2026 TOP CHARTING hits exclusively for language/genre "$cleanGenre".
+You are an expert music curator. Provide a JSON array of 4 search queries to find TOP CHARTING authentic hit songs exclusively for language/genre "$cleanGenre".
 Rules:
-- Each query MUST specify "$cleanGenre" and "latest 2025 2026" (e.g. "latest $cleanGenre songs 2026", "top $cleanGenre hits 2025 2026", "new $cleanGenre chartbusters 2026").
+- Each query MUST specify "$cleanGenre" (e.g. "top $cleanGenre hits", "$cleanGenre trending songs", "popular $cleanGenre chartbusters").
+- DO NOT include year numbers like 2026 or 2025, or phrases like "new year" or "dj remix" in the queries.
 - Output ONLY valid JSON array of strings.
 ''';
       final (aiResult, provider) = await AiService.instance.generate(aiPrompt);
@@ -144,37 +145,37 @@ Rules:
     if (targetQueries.isEmpty) {
       if (lowerGenre.contains('punjabi')) {
         targetQueries = [
-          'latest punjabi songs 2025 2026',
-          'top punjabi hits 2026',
-          'new punjabi chartbusters 2025',
-          'Karan Aujla latest songs 2025',
+          'top punjabi hits',
+          'popular punjabi songs',
+          'punjabi chartbusters',
+          'Karan Aujla hits',
         ];
       } else if (lowerGenre.contains('hindi') || lowerGenre.contains('bollywood')) {
         targetQueries = [
-          'latest hindi songs 2025 2026',
-          'top bollywood romantic hits 2026',
-          'new hindi chartbusters 2025',
-          'Arijit Singh latest songs 2025',
+          'top bollywood romantic hits',
+          'popular hindi songs',
+          'hindi chartbusters',
+          'Arijit Singh hits',
         ];
       } else if (lowerGenre.contains('english') || lowerGenre.contains('pop')) {
         targetQueries = [
-          'latest english pop songs 2025 2026',
-          'top global billboard hits 2026',
-          'new english pop chartbusters 2025',
-          'Taylor Swift The Weeknd latest 2025',
+          'top english pop hits',
+          'popular billboard songs',
+          'global pop chartbusters',
+          'Taylor Swift hits',
         ];
       } else if (lowerGenre.contains('haryanvi')) {
         targetQueries = [
-          'latest haryanvi songs 2025 2026',
-          'top haryanvi hits 2026',
-          'new haryanvi chartbusters 2025',
-          'Gulzaar Chhaniwala MC Square latest 2025',
+          'top haryanvi hits',
+          'popular haryanvi songs',
+          'haryanvi chartbusters',
+          'MC Square hits',
         ];
       } else {
         targetQueries = [
-          'latest $cleanGenre songs 2025 2026',
-          'top $cleanGenre hits 2026',
-          'new $cleanGenre chartbusters 2025',
+          'top $cleanGenre hits',
+          'popular $cleanGenre songs',
+          '$cleanGenre chartbusters',
         ];
       }
     }
@@ -435,6 +436,16 @@ Rules:
 
         final rawTitle = item['name']?.toString() ?? item['title']?.toString() ?? 'Unknown Track';
         final title = _cleanText(rawTitle);
+        
+        final titleLower = title.toLowerCase();
+        if (titleLower.contains('happy new year') ||
+            titleLower.contains('new year 202') ||
+            titleLower.contains('2026 dj') ||
+            titleLower.contains('2025 dj') ||
+            titleLower.contains('wishing you') ||
+            titleLower.contains('nonstop dj 202')) {
+          continue; // Skip year-spam tracks
+        }
         
         String artist = 'Unknown Artist';
         if (item['artists'] != null) {
