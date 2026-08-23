@@ -40,9 +40,11 @@ class AiService {
     'gemini-1.5-flash',
   ];
 
-  /// Cleans raw output text by stripping reasoning (`<think>...</think>`) tags if present.
+  /// Cleans raw output text by stripping reasoning (`<think>...</think>`) tags.
   String _cleanResponseText(String rawText) {
-    return rawText.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '').trim();
+    String text = rawText.replaceAll(RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false), '');
+    text = text.replaceAll(RegExp(r'<thought>[\s\S]*?</thought>', caseSensitive: false), '');
+    return text.trim();
   }
 
   /// Generates AI text, trying Groq Key 1 first, Groq Key 2 second,

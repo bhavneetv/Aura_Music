@@ -19,6 +19,8 @@ import '../../services/storage/storage_service.dart';
 import '../../widgets/network_status_banner.dart';
 import '../../widgets/vinyl_refresh_indicator.dart';
 import '../../widgets/adaptive_navigation_bar.dart';
+import '../../widgets/audio_output_picker_modal.dart';
+import '../../providers/multi_device_sync_provider.dart';
 import '../../services/update/update_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -247,6 +249,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildHomeHeader(BuildContext context, Color accentColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final customBranding = ref.watch(customizationProvider);
+    final syncState = ref.watch(multiDeviceSyncProvider);
+    final isInGroup = syncState.session.isInGroup;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -273,20 +277,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       accentColor,
                     ],
                   ).createShader(bounds),
-                  child: Text(
-                    customBranding.appName,
-                    style: const TextStyle(
-                      fontFamily: 'Outfit',
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                      color: Colors.white,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      customBranding.appName,
+                      style: const TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
           ),
+          IconButton(
+            onPressed: () {
+              showAudioOutputPickerModal(context);
+            },
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isInGroup ? accentColor : accentColor.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+                boxShadow: isInGroup
+                    ? [BoxShadow(color: accentColor.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1)]
+                    : null,
+              ),
+              child: Icon(
+                Icons.speaker_group_rounded,
+                color: isInGroup ? (isDark ? Colors.black : Colors.white) : accentColor,
+                size: 20,
+              ),
+            ),
+            tooltip: 'Sync Audio & Multi-Device',
+          ),
+          const SizedBox(width: 4),
           IconButton(
             onPressed: () {
               NearbyShareScreen.showHandoffModal(context);
@@ -448,11 +478,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Quick Action Pill Bar
   Widget _buildQuickActionGrid(BuildContext context, Color accentColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final syncSession = ref.watch(multiDeviceSyncProvider).session;
 
     final actions = [
+      {'title': 'Sync Audio', 'icon': Icons.speaker_group_rounded, 'action': 'sync', 'isGroup': syncSession.isInGroup},
       {'title': 'Favorites', 'icon': Icons.favorite_rounded, 'tab': 2},
       {'title': 'Downloads', 'icon': Icons.download_done_rounded, 'tab': 2},
-      {'title': 'History', 'icon': Icons.history_rounded, 'tab': 2},
       {'title': 'AI Curator', 'icon': Icons.auto_awesome_rounded, 'tab': 1},
     ];
 
@@ -461,28 +492,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: actions.map((act) {
+          final isGroupActive = act['isGroup'] == true;
           return Expanded(
             child: GestureDetector(
               onTap: () {
-                setState(() {
-                  _currentTab = act['tab'] as int;
-                });
+                if (act['action'] == 'sync') {
+                  showAudioOutputPickerModal(context);
+                } else if (act['tab'] != null) {
+                  setState(() {
+                    _currentTab = act['tab'] as int;
+                  });
+                }
               },
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
+                  color: isGroupActive
+                      ? accentColor.withValues(alpha: 0.2)
+                      : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04)),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+                  border: Border.all(color: isGroupActive ? accentColor : accentColor.withValues(alpha: 0.2)),
                 ),
                 child: Column(
                   children: [
-                    Icon(act['icon'] as IconData, size: 20, color: accentColor),
+                    Icon(act['icon'] as IconData, size: 20, color: isGroupActive ? accentColor : accentColor),
                     const SizedBox(height: 6),
-                    Text(
-                      act['title'] as String,
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        act['title'] as String,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: isGroupActive ? FontWeight.w800 : FontWeight.bold,
+                          color: isGroupActive ? accentColor : null,
+                        ),
+                      ),
                     ),
                   ],
                 ),

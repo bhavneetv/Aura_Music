@@ -125,6 +125,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
         _currentSyncedLines = _originalSyncedLines;
         _currentPlainLyrics = _selectedCandidate.plainLyrics ?? widget.lyricsResult.plain;
         _isTranslating = false;
+        _showExplanations = false;
       });
       onStateUpdated?.call();
       return;
@@ -133,6 +134,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
     setState(() {
       _activeLanguage = targetLang;
       _isTranslating = true;
+      _showExplanations = false; // Hide summary/explanations when changing lyric language
     });
     onStateUpdated?.call();
 
@@ -145,13 +147,27 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
           targetLanguage: targetLang,
         );
 
-        final translatedSplit = translatedText.split('\n');
+        final rawSplit = translatedText.split('\n');
+        final translatedSplit = rawSplit.where((l) {
+          final lower = l.toLowerCase().trim();
+          return !lower.contains('understand the source') &&
+              !lower.contains('gurmukhi script') &&
+              !lower.contains('typical punjabi rap') &&
+              !lower.contains('i need to translate') &&
+              !lower.contains('i must maintain') &&
+              !lower.startsWith('**understand');
+        }).toList();
+
         final newSynced = <LyricLine>[];
         for (int i = 0; i < _originalSyncedLines!.length; i++) {
           final originalLine = _originalSyncedLines![i];
-          final transText = (i < translatedSplit.length && translatedSplit[i].trim().isNotEmpty)
+          var transText = (i < translatedSplit.length && translatedSplit[i].trim().isNotEmpty)
               ? translatedSplit[i].trim()
               : originalLine.text;
+          
+          if (transText.toLowerCase().contains('understand the source') || transText.startsWith('**understand')) {
+            transText = originalLine.text;
+          }
           newSynced.add(LyricLine(originalLine.time, transText));
         }
 
@@ -160,6 +176,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
             _activeLanguage = targetLang;
             _currentSyncedLines = newSynced;
             _isTranslating = false;
+            _showExplanations = false;
           });
           onStateUpdated?.call();
         }
@@ -177,6 +194,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
               _activeLanguage = targetLang;
               _currentPlainLyrics = translatedText;
               _isTranslating = false;
+              _showExplanations = false;
             });
             onStateUpdated?.call();
           }
@@ -185,6 +203,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
         if (mounted) {
           setState(() {
             _isTranslating = false;
+            _showExplanations = false;
           });
           onStateUpdated?.call();
         }
@@ -194,6 +213,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
         setState(() {
           _activeLanguage = 'Original';
           _isTranslating = false;
+          _showExplanations = false;
         });
         onStateUpdated?.call();
       }

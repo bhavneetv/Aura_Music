@@ -259,10 +259,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             currentTrack: state.currentTrack,
           );
         } else if (syncService.role == SyncRole.follower) {
-          syncService.onFollowerPositionBeaconReceived(
-            pos.inMilliseconds,
-            currentFollowerPosMs: pos.inMilliseconds,
-          );
+          syncService.updateFollowerLocalPosition(pos.inMilliseconds);
         }
       } catch (_) {}
       

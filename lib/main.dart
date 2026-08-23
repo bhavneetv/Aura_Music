@@ -90,6 +90,17 @@ class MyApp extends ConsumerWidget {
         theme: AppTheme.buildLightTheme(customBranding.accentColor),
         darkTheme: AppTheme.buildDarkTheme(customBranding.accentColor),
         routerConfig: appRouter,
+        builder: (context, child) {
+          final mediaQuery = MediaQuery.of(context);
+          final clampedScaler = mediaQuery.textScaler.clamp(
+            minScaleFactor: 0.85,
+            maxScaleFactor: 1.15,
+          );
+          return MediaQuery(
+            data: mediaQuery.copyWith(textScaler: clampedScaler),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
       ),
     );
   }

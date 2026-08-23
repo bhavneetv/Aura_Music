@@ -109,20 +109,45 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                 am.communicationDevice
             } else null
 
-            for (dev in devices) {
+            // Filter out earpiece, telephony, and internal line output nodes for media audio
+            val validDevices = devices.filter { dev ->
+                val type = dev.type
+                type != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE &&
+                type != AudioDeviceInfo.TYPE_TELEPHONY &&
+                type != AudioDeviceInfo.TYPE_AUX_LINE &&
+                type != AudioDeviceInfo.TYPE_LINE_ANALOG &&
+                type != AudioDeviceInfo.TYPE_LINE_DIGITAL &&
+                getDeviceTypeName(type) != "unknown"
+            }
+
+            val hasExternalHeadsetOrBt = validDevices.any { 
+                it.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER 
+            }
+
+            for (dev in validDevices) {
                 val typeName = getDeviceTypeName(dev.type)
                 val isSpeaker = dev.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+
                 val isCurrent = if (currentCommunicationDevice != null) {
                     dev.id == currentCommunicationDevice.id
+                } else if (am.isSpeakerphoneOn && am.mode == AudioManager.MODE_IN_COMMUNICATION) {
+                    isSpeaker
                 } else {
-                    if (isSpeaker && am.isSpeakerphoneOn) true
-                    else if (!isSpeaker && !am.isSpeakerphoneOn) true
-                    else false
+                    if (hasExternalHeadsetOrBt) {
+                        !isSpeaker
+                    } else {
+                        isSpeaker
+                    }
                 }
 
                 var name = dev.productName.toString()
-                if (name.isBlank()) {
-                    name = typeName
+                if (name.isBlank() || name.lowercase().contains("builtin") || name.lowercase().contains("built-in")) {
+                    name = when (dev.type) {
+                        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Built-in Speaker"
+                        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Headphones / Headset"
+                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Audio"
+                        else -> typeName.replaceFirstChar { it.uppercase() }
+                    }
                 }
 
                 list.add(mapOf(
@@ -142,12 +167,6 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                 "type" to "speaker",
                 "isActive" to isSpeaker
             ))
-            list.add(mapOf(
-                "id" to 2,
-                "name" to "Earphones / Headset",
-                "type" to "headset",
-                "isActive" to !isSpeaker
-            ))
         }
 
         return list
@@ -156,41 +175,65 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
     private fun setAudioOutput(deviceId: Int?, typeStr: String?): Boolean {
         val am = audioManager ?: return false
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && deviceId != null) {
-            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            val target = devices.firstOrNull { it.id == deviceId }
-            if (target != null) {
-                return am.setCommunicationDevice(target)
+        try {
+            if (typeStr == "speaker") {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    val target = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (target != null) {
+                        am.setCommunicationDevice(target)
+                    }
+                }
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                am.isSpeakerphoneOn = true
+                if (am.isBluetoothScoOn) {
+                    am.stopBluetoothSco()
+                    am.isBluetoothScoOn = false
+                }
+                return true
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (deviceId != null) {
+                        val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                        val target = devices.firstOrNull { it.id == deviceId }
+                        if (target != null && target.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                            am.setCommunicationDevice(target)
+                        } else {
+                            am.clearCommunicationDevice()
+                        }
+                    } else {
+                        am.clearCommunicationDevice()
+                    }
+                }
+                am.isSpeakerphoneOn = false
+                am.mode = AudioManager.MODE_NORMAL
+                if (am.isBluetoothScoOn) {
+                    am.stopBluetoothSco()
+                    am.isBluetoothScoOn = false
+                }
+                return true
             }
+        } catch (e: Exception) {
+            return false
         }
+    }
 
-        // Fallback or explicit speaker toggle
-        if (typeStr == "speaker") {
-            am.isSpeakerphoneOn = true
+    private fun resetRoute(): Boolean {
+        val am = audioManager ?: return false
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.clearCommunicationDevice()
+            }
+            am.isSpeakerphoneOn = false
+            am.mode = AudioManager.MODE_NORMAL
             if (am.isBluetoothScoOn) {
                 am.stopBluetoothSco()
                 am.isBluetoothScoOn = false
             }
             return true
-        } else if (typeStr == "headset" || typeStr == "bluetooth") {
-            am.isSpeakerphoneOn = false
-            return true
+        } catch (e: Exception) {
+            return false
         }
-
-        return false
-    }
-
-    private fun resetRoute(): Boolean {
-        val am = audioManager ?: return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            am.clearCommunicationDevice()
-        }
-        am.isSpeakerphoneOn = false
-        if (am.isBluetoothScoOn) {
-            am.stopBluetoothSco()
-            am.isBluetoothScoOn = false
-        }
-        return true
     }
 
     private fun sendRouteUpdate() {

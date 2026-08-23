@@ -60,8 +60,22 @@ class MultiDeviceSyncNotifier extends Notifier<MultiDeviceSyncState> {
     // Wire up follower callbacks to PlaybackProvider
     _syncService.onFollowerPlayRequested = (track, position) async {
       final notifier = ref.read(playbackProvider.notifier);
-      notifier.playTrack(track);
-      notifier.seekToDuration(position);
+      final currentState = ref.read(playbackProvider);
+
+      if (currentState.currentTrack?.id == track.id) {
+        final diff = (currentState.currentPosition - position).inMilliseconds.abs();
+        if (diff > 2500) {
+          notifier.seekToDuration(position);
+        }
+        if (!currentState.isPlaying) {
+          notifier.resumePlayback();
+        }
+      } else {
+        notifier.playTrack(track);
+        Future.delayed(const Duration(milliseconds: 300), () {
+          notifier.seekToDuration(position);
+        });
+      }
     };
 
     _syncService.onFollowerPauseRequested = () async {
@@ -69,7 +83,11 @@ class MultiDeviceSyncNotifier extends Notifier<MultiDeviceSyncState> {
     };
 
     _syncService.onFollowerSeekRequested = (position) async {
-      ref.read(playbackProvider.notifier).seekToDuration(position);
+      final currentState = ref.read(playbackProvider);
+      final diff = (currentState.currentPosition - position).inMilliseconds.abs();
+      if (diff > 1500) {
+        ref.read(playbackProvider.notifier).seekToDuration(position);
+      }
     };
 
     _syncService.onFollowerSpeedNudgeRequested = (speed) async {

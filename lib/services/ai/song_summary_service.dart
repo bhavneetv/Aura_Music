@@ -313,7 +313,16 @@ OUTPUT ONLY JSON:''';
         for (final item in decoded) {
           if (item is Map) {
             final idx = (int.tryParse(item['index']?.toString() ?? '') ?? 0) - 1;
-            final exp = item['explanation']?.toString().trim() ?? '';
+            var exp = item['explanation']?.toString().trim() ?? '';
+            final expLower = exp.toLowerCase();
+            if (expLower.contains('understand the source') ||
+                expLower.contains('gurmukhi script') ||
+                expLower.contains('typical punjabi rap') ||
+                expLower.contains('i need to translate') ||
+                expLower.contains('i must maintain') ||
+                expLower.startsWith('**understand')) {
+              continue;
+            }
             if (idx >= 0 && idx < lyricLines.length && exp.isNotEmpty) {
               map[idx] = exp;
             }

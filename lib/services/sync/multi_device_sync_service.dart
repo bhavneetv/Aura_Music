@@ -68,8 +68,13 @@ class MultiDeviceSyncService {
   // Follower drift state
   double _currentSpeedFactor = 1.0;
   int _lastDriftMs = 0;
+  int _followerLocalPosMs = 0;
   String _hostDeviceId = '';
   String _hostDeviceName = '';
+
+  void updateFollowerLocalPosition(int posMs) {
+    _followerLocalPosMs = posMs;
+  }
 
   // Callbacks injected by playback handler / provider
   Future<void> Function(Track track, Duration position)? onFollowerPlayRequested;
@@ -353,30 +358,31 @@ class MultiDeviceSyncService {
     final latency = (localNow - hostTimestamp).clamp(0, 300);
     final estimatedHostPos = hostPosMs + latency;
 
-    // Call drift calculator logic
-    onFollowerPositionBeaconReceived(estimatedHostPos);
+    // Call drift calculator logic passing actual follower local position
+    onFollowerPositionBeaconReceived(estimatedHostPos, currentFollowerPosMs: _followerLocalPosMs);
   }
 
   void onFollowerPositionBeaconReceived(int estimatedHostPosMs, {int currentFollowerPosMs = 0}) {
     if (_role != SyncRole.follower) return;
 
-    final driftMs = estimatedHostPosMs - currentFollowerPosMs;
+    final followerPos = currentFollowerPosMs > 0 ? currentFollowerPosMs : _followerLocalPosMs;
+    final driftMs = estimatedHostPosMs - followerPos;
     _lastDriftMs = driftMs;
 
     double targetSpeed = 1.0;
 
-    if (driftMs.abs() > 1500) {
-      // Large drift: Hard seek to host position
+    if (driftMs.abs() > 3500) {
+      // Large drift (> 3.5 seconds): Hard seek to host position
       onFollowerSeekRequested?.call(Duration(milliseconds: estimatedHostPosMs));
       targetSpeed = 1.0;
-    } else if (driftMs > 80) {
+    } else if (driftMs > 150) {
       // Follower is behind: micro speed up (1.02x)
       targetSpeed = 1.02;
-    } else if (driftMs < -80) {
+    } else if (driftMs < -150) {
       // Follower is ahead: micro slow down (0.98x)
       targetSpeed = 0.98;
     } else {
-      // In tight sync (< 80ms difference)
+      // In tight sync (< 150ms difference)
       targetSpeed = 1.0;
     }
 

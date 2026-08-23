@@ -41,7 +41,8 @@ class AudioRoutingNotifier extends Notifier<AudioRoutingState> {
   }
 
   Future<void> _init() async {
-    final devices = await AudioRoutingService.instance.getAvailableAudioOutputs();
+    final rawDevices = await AudioRoutingService.instance.getAvailableAudioOutputs();
+    final devices = rawDevices.where((d) => d.type != AudioDeviceType.earpiece && d.type != AudioDeviceType.unknown).toList();
     final active = devices.firstWhere(
       (d) => d.isActive,
       orElse: () => devices.isNotEmpty
@@ -60,24 +61,26 @@ class AudioRoutingNotifier extends Notifier<AudioRoutingState> {
       isLoading: false,
     );
 
-    _routeSubscription = AudioRoutingService.instance.onRouteChanged.listen((devices) {
-      final activeDev = devices.firstWhere(
+    _routeSubscription = AudioRoutingService.instance.onRouteChanged.listen((rawList) {
+      final devicesList = rawList.where((d) => d.type != AudioDeviceType.earpiece && d.type != AudioDeviceType.unknown).toList();
+      final activeDev = devicesList.firstWhere(
         (d) => d.isActive,
-        orElse: () => devices.isNotEmpty ? devices.first : active,
+        orElse: () => devicesList.isNotEmpty ? devicesList.first : active,
       );
 
       state = state.copyWith(
-        availableDevices: devices,
+        availableDevices: devicesList,
         activeDevice: activeDev,
       );
     });
   }
 
   Future<void> refreshDevices() async {
-    final devices = await AudioRoutingService.instance.getAvailableAudioOutputs();
+    final rawDevices = await AudioRoutingService.instance.getAvailableAudioOutputs();
+    final devices = rawDevices.where((d) => d.type != AudioDeviceType.earpiece && d.type != AudioDeviceType.unknown).toList();
     final active = devices.firstWhere(
       (d) => d.isActive,
-      orElse: () => state.activeDevice ?? devices.first,
+      orElse: () => state.activeDevice ?? (devices.isNotEmpty ? devices.first : const AudioOutputDevice(id: 'default', name: 'Built-in Speaker', type: AudioDeviceType.speaker, isActive: true)),
     );
     state = state.copyWith(
       availableDevices: devices,

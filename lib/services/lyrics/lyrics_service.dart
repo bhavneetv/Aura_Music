@@ -321,29 +321,37 @@ class LyricsService {
     final cacheKey = 'translated_lyrics_${trackId}_$targetLanguage';
     final cached = StorageService.getSetting(cacheKey, defaultValue: null);
     if (cached != null && cached.toString().trim().isNotEmpty) {
-      return cached.toString();
+      final cachedStr = cached.toString().trim();
+      final originalClean = lyricsText.trim();
+      // DO NOT return cache if it matches original untranslated lyrics or contains prompt leaks
+      if (cachedStr != originalClean &&
+          !cachedStr.contains('Understand the Source') &&
+          !cachedStr.contains('Role:')) {
+        return cachedStr;
+      }
     }
 
     final String languageInstruction = targetLanguage.toLowerCase() == 'hinglish'
-        ? 'Romanized Hinglish (Hindi language written using English/Roman alphabet script, e.g., "Mera dil ye pukaare aaja...")'
+        ? 'Romanized Hinglish (Hindi/Punjabi song lyrics converted line-by-line into English/Latin alphabet, e.g. "Time laggu mitne nu, saanu thalle sitne nu...")'
         : (targetLanguage.toLowerCase() == 'hindi' ? 'Hindi in Devanagari script (हिंदी)' : targetLanguage);
 
     final prompt = '''You are a professional music lyric translator.
-Translate the following song lyrics into $languageInstruction line by line.
+Translate the song lyrics below line-by-line into $languageInstruction.
 
-CRITICAL FORMAT REQUIREMENTS:
-- Output EXACTLY one line of translation for each line of input lyrics.
-- Output ONLY the raw translated text lines.
-- DO NOT include markdown code blocks (```), DO NOT include line numbers (1., 2.), DO NOT include introductory text or titles.
-- Maintain empty lines where input has empty lines.
+CRITICAL INSTRUCTIONS:
+1. Translate EVERY line into $targetLanguage.
+2. If target is Hinglish, convert all lines into English/Latin script words (e.g. "Do-do kole Magnan ni, char G-Wagonan ni..."). Do NOT leave lines in Punjabi/Gurmukhi script.
+3. Output ONLY the raw translated lyric lines, line by line.
+4. Do NOT output notes, explanations, system role, headers, or bullet points.
 
-Lyrics to translate:
+Input Lyrics:
 $lyricsText''';
 
     try {
       final (response, _) = await AiService.instance.generate(prompt);
       if (response.trim().isNotEmpty) {
         String clean = response.trim();
+
         // Remove markdown code blocks if AI wrapped output in ```
         if (clean.startsWith('```')) {
           final lines = clean.split('\n');
@@ -354,25 +362,25 @@ $lyricsText''';
           }
         }
 
-        // Clean any leading introductory header lines
         final lines = clean.split('\n');
         final filteredLines = <String>[];
         for (final line in lines) {
           final l = line.trim();
           final lower = l.toLowerCase();
-          if (lower.startsWith('here is') ||
-              lower.startsWith('here are') ||
-              lower.startsWith('translation') ||
-              lower.startsWith('translated lyrics')) {
+          if (lower.startsWith('**understand') ||
+              lower.startsWith('**task') ||
+              lower.startsWith('**role') ||
+              lower.startsWith('here is') ||
+              lower.startsWith('translation:') ||
+              lower.startsWith('translated lyrics:')) {
             continue;
           }
-          // Strip accidental line numbering prefixes (e.g. "1. ", "12) ")
           final unnumbered = l.replaceFirst(RegExp(r'^\d+[\.\)]\s*'), '');
           filteredLines.add(unnumbered);
         }
 
-        final resultText = filteredLines.join('\n');
-        if (resultText.trim().isNotEmpty) {
+        final resultText = filteredLines.join('\n').trim();
+        if (resultText.isNotEmpty && resultText != lyricsText.trim()) {
           await StorageService.saveSetting(cacheKey, resultText);
           return resultText;
         }
