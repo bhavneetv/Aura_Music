@@ -95,5 +95,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+		<string>_http._udp</string>
+		<string>_aura._tcp</string>
+		<string>_aura._udp</string>
+	</array>
 </dict>
 </plist>
