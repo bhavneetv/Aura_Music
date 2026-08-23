@@ -7,6 +7,7 @@ import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/lyrics/lyrics_service.dart';
 import '../../services/ai/song_summary_service.dart';
+import '../../services/storage/storage_service.dart';
 
 class LyricsScreen extends ConsumerStatefulWidget {
   final Track track;
@@ -45,6 +46,9 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
   Map<int, String> _lineExplanations = {};
   bool _isLoadingExplanations = false;
   bool _showExplanations = false;
+
+  /// Per-track cache key prefix for persisting lyrics screen state
+  String get _trackCacheKey => 'lyrics_state_${widget.track.id}';
 
   // Entrance animation for the whole screen
   late final AnimationController _entranceController;
@@ -91,15 +95,45 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
 
     if (widget.lyricsResult.candidates.isNotEmpty) {
       _selectedCandidate = widget.lyricsResult.candidates.first;
-      _applyCandidate(_selectedCandidate);
+      _applyCandidate(_selectedCandidate, clearSavedState: false);
     } else {
       _currentSyncedLines = widget.lyricsResult.synced;
       _originalSyncedLines = widget.lyricsResult.synced;
       _currentPlainLyrics = widget.lyricsResult.plain;
     }
+
+    // Restore previously saved lyrics state (language + explanations)
+    _restoreSavedState();
   }
 
-  void _applyCandidate(LyricsCandidate candidate) {
+  /// Restores the last active translation language and explanation state from local storage.
+  /// If a translation was active, it re-applies it from cache (no API call needed).
+  void _restoreSavedState() {
+    final savedLang = StorageService.getSetting(
+      '${_trackCacheKey}_language',
+      defaultValue: 'Original',
+    ) as String;
+
+    if (savedLang != 'Original' && savedLang.isNotEmpty) {
+      // Re-apply translation from cache (translateLyrics will hit local cache first)
+      _translateLyrics(savedLang);
+    }
+
+    final savedExplanations = StorageService.getSetting(
+      '${_trackCacheKey}_explanations',
+      defaultValue: false,
+    );
+    if (savedExplanations == true) {
+      // Delay so the translation can settle first
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && !_isTranslating) {
+          _toggleLineExplanations();
+        }
+      });
+    }
+  }
+
+  void _applyCandidate(LyricsCandidate candidate, {bool clearSavedState = true}) {
     setState(() {
       _selectedCandidate = candidate;
       _activeLanguage = 'Original';
@@ -116,6 +150,11 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
       }
       _activeLineIndex = -1;
     });
+    // Only clear saved state when user manually switches versions, not during init
+    if (clearSavedState) {
+      StorageService.saveSetting('${_trackCacheKey}_language', 'Original');
+      StorageService.saveSetting('${_trackCacheKey}_explanations', false);
+    }
   }
 
   Future<void> _translateLyrics(String targetLang, [VoidCallback? onStateUpdated]) async {
@@ -127,6 +166,8 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
         _isTranslating = false;
         _showExplanations = false;
       });
+      // Persist the language choice
+      StorageService.saveSetting('${_trackCacheKey}_language', 'Original');
       onStateUpdated?.call();
       return;
     }
@@ -150,12 +191,22 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
         final rawSplit = translatedText.split('\n');
         final translatedSplit = rawSplit.where((l) {
           final lower = l.toLowerCase().trim();
-          return !lower.contains('understand the source') &&
+          return lower.isNotEmpty &&
+              !lower.contains('understand the source') &&
               !lower.contains('gurmukhi script') &&
               !lower.contains('typical punjabi rap') &&
               !lower.contains('i need to translate') &&
               !lower.contains('i must maintain') &&
-              !lower.startsWith('**understand');
+              !lower.startsWith('**understand') &&
+              !lower.startsWith('**translation') &&
+              !lower.startsWith('**note') &&
+              !lower.startsWith('note:') &&
+              !lower.startsWith('translation:') &&
+              !lower.startsWith('translated lyrics:') &&
+              !lower.startsWith('here is') &&
+              !lower.startsWith('here are') &&
+              !lower.startsWith('below is') &&
+              !lower.startsWith('the following');
         }).toList();
 
         final newSynced = <LyricLine>[];
@@ -178,6 +229,8 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
             _isTranslating = false;
             _showExplanations = false;
           });
+          // Persist the active translation language
+          StorageService.saveSetting('${_trackCacheKey}_language', targetLang);
           onStateUpdated?.call();
         }
       } else if (_selectedCandidate.plainLyrics != null || widget.lyricsResult.plain != null) {
@@ -196,6 +249,8 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
               _isTranslating = false;
               _showExplanations = false;
             });
+            // Persist the active translation language
+            StorageService.saveSetting('${_trackCacheKey}_language', targetLang);
             onStateUpdated?.call();
           }
         }
@@ -235,6 +290,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
       setState(() {
         _showExplanations = false;
       });
+      StorageService.saveSetting('${_trackCacheKey}_explanations', false);
       return;
     }
 
@@ -242,6 +298,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
       setState(() {
         _showExplanations = true;
       });
+      StorageService.saveSetting('${_trackCacheKey}_explanations', true);
       return;
     }
 
@@ -264,6 +321,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
           _lineExplanations = map;
           _isLoadingExplanations = false;
         });
+        StorageService.saveSetting('${_trackCacheKey}_explanations', true);
       }
     } catch (_) {
       if (mounted) {

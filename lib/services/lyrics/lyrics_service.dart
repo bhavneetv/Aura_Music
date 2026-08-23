@@ -323,28 +323,35 @@ class LyricsService {
     if (cached != null && cached.toString().trim().isNotEmpty) {
       final cachedStr = cached.toString().trim();
       final originalClean = lyricsText.trim();
+      final cachedLower = cachedStr.toLowerCase();
       // DO NOT return cache if it matches original untranslated lyrics or contains prompt leaks
       if (cachedStr != originalClean &&
-          !cachedStr.contains('Understand the Source') &&
-          !cachedStr.contains('Role:')) {
+          !cachedLower.contains('understand the source') &&
+          !cachedLower.contains('role:') &&
+          !cachedLower.contains('meaning:') &&
+          !cachedLower.contains('explanation:') &&
+          !cachedLower.contains('summary:') &&
+          !cachedLower.contains('note:') &&
+          !cachedLower.contains('here is the translation') &&
+          !cachedLower.contains('here are the translated')) {
         return cachedStr;
       }
     }
 
     final String languageInstruction = targetLanguage.toLowerCase() == 'hinglish'
-        ? 'Romanized Hinglish (Hindi/Punjabi song lyrics converted line-by-line into English/Latin alphabet, e.g. "Time laggu mitne nu, saanu thalle sitne nu...")'
-        : (targetLanguage.toLowerCase() == 'hindi' ? 'Hindi in Devanagari script (हिंदी)' : targetLanguage);
+        ? 'Romanized Hinglish (transliterate into English/Latin alphabet, e.g. "Tere bina dil mera lagda nahi...")'
+        : (targetLanguage.toLowerCase() == 'hindi' ? 'Hindi Devanagari (हिंदी)' : targetLanguage);
 
-    final prompt = '''You are a professional music lyric translator.
-Translate the song lyrics below line-by-line into $languageInstruction.
+    final prompt = '''You are Google Translate. Translate the following song lyrics into $languageInstruction.
 
-CRITICAL INSTRUCTIONS:
-1. Translate EVERY line into $targetLanguage.
-2. If target is Hinglish, convert all lines into English/Latin script words (e.g. "Do-do kole Magnan ni, char G-Wagonan ni..."). Do NOT leave lines in Punjabi/Gurmukhi script.
-3. Output ONLY the raw translated lyric lines, line by line.
-4. Do NOT output notes, explanations, system role, headers, or bullet points.
+RULES:
+- Translate EVERY line. One translated line per original line.
+- Output ONLY raw translated lyric lines, nothing else.
+- Do NOT add any notes, explanations, meanings, summaries, headers, bullet points, numbering, or commentary.
+- Do NOT explain what the lyrics mean. Just translate the words.
+- If target is Hinglish, write all lines in Latin/English script (romanized). Do NOT use Gurmukhi or Devanagari script.
+- Keep the same number of lines as input.
 
-Input Lyrics:
 $lyricsText''';
 
     try {
@@ -370,12 +377,21 @@ $lyricsText''';
           if (lower.startsWith('**understand') ||
               lower.startsWith('**task') ||
               lower.startsWith('**role') ||
+              lower.startsWith('**translation') ||
+              lower.startsWith('**note') ||
               lower.startsWith('here is') ||
+              lower.startsWith('here are') ||
+              lower.startsWith('below is') ||
+              lower.startsWith('the following') ||
               lower.startsWith('translation:') ||
-              lower.startsWith('translated lyrics:')) {
+              lower.startsWith('translated lyrics:') ||
+              lower.startsWith('note:') ||
+              lower.startsWith('meaning:') ||
+              lower.startsWith('explanation:') ||
+              lower.startsWith('summary:')) {
             continue;
           }
-          final unnumbered = l.replaceFirst(RegExp(r'^\d+[\.\)]\s*'), '');
+          final unnumbered = l.replaceFirst(RegExp(r'^\d+[\.\\)]\s*'), '');
           filteredLines.add(unnumbered);
         }
 
