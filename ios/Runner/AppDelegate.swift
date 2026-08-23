@@ -28,14 +28,14 @@ import Intents
 
     let handler: FlutterMethodCallHandler = { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
-      if call.method == "updateLibraryIndex" {
+      if call.method == "updateLibraryIndex" || call.method == "syncLibraryIndex" {
         if let args = call.arguments as? [String: Any], let jsonStr = args["json"] as? String {
           let success = self.writeLibraryIndexToAppGroup(jsonStr: jsonStr)
           result(success)
         } else {
           result(false)
         }
-      } else if call.method == "donateMediaIntent" {
+      } else if call.method == "donateMediaIntent" || call.method == "donateMediaItem" {
         if let args = call.arguments as? [String: Any] {
           self.donateMediaIntent(args: args)
           result(true)
@@ -55,9 +55,11 @@ import Intents
       AudioRoutingPlugin.register(with: registrar)
     }
 
-    // Request Siri permission with system
-    INPreferences.requestSiriAuthorization { status in
-      print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
+    // Request Siri permission safely on background thread (prevents launch crash on sideloaded profiles without Siri entitlement)
+    DispatchQueue.global(qos: .utility).async {
+      INPreferences.requestSiriAuthorization { status in
+        print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
+      }
     }
 
     // Check for pending Siri queries stored in shared App Group defaults
