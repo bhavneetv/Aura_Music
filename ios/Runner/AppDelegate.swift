@@ -7,12 +7,19 @@ import Intents
   private let appGroupId = "group.com.example.musicApp"
   private var voiceChannel: FlutterMethodChannel?
   private var siriChannel: FlutterMethodChannel?
+  private var pendingDeepLink: String?
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+
+    if let launchUrl = launchOptions?[.url] as? URL {
+      pendingDeepLink = launchUrl.absoluteString
+    }
     
     let mainChannel = FlutterMethodChannel(
       name: "com.example.music_app/voice_assistant",
@@ -28,7 +35,10 @@ import Intents
 
     let handler: FlutterMethodCallHandler = { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
-      if call.method == "updateLibraryIndex" || call.method == "syncLibraryIndex" {
+      if call.method == "getPendingDeepLink" {
+        result(self.pendingDeepLink)
+        self.pendingDeepLink = nil
+      } else if call.method == "updateLibraryIndex" || call.method == "syncLibraryIndex" {
         if let args = call.arguments as? [String: Any], let jsonStr = args["json"] as? String {
           let success = self.writeLibraryIndexToAppGroup(jsonStr: jsonStr)
           result(success)
@@ -55,10 +65,18 @@ import Intents
       AudioRoutingPlugin.register(with: registrar)
     }
 
-    // Request Siri permission safely on background thread (prevents launch crash on sideloaded profiles without Siri entitlement)
+    // Request Siri permission safely — wrapped in do/catch because sideloaded
+    // builds without proper Siri entitlement will crash if this is called directly.
     DispatchQueue.global(qos: .utility).async {
-      INPreferences.requestSiriAuthorization { status in
-        print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
+      do {
+        // Verify Intents framework availability before calling
+        if NSClassFromString("INPreferences") != nil {
+          INPreferences.requestSiriAuthorization { status in
+            print("[AURA-SIRI] Siri authorization status: \(status.rawValue)")
+          }
+        } else {
+          print("[AURA-SIRI] Intents framework unavailable, skipping Siri authorization")
+        }
       }
     }
 
@@ -144,6 +162,7 @@ import Intents
           return true
         }
       }
+      pendingDeepLink = urlString
       voiceChannel?.invokeMethod("onDeepLink", arguments: ["link": urlString])
       siriChannel?.invokeMethod("onDeepLink", arguments: ["link": urlString])
       return true
@@ -201,6 +220,12 @@ import Intents
   }
 
   private func donateMediaIntent(args: [String: Any]) {
+    // Guard against crashes on sideloaded builds without proper entitlements
+    guard NSClassFromString("INInteraction") != nil else {
+      print("[AURA-SIRI] Intents framework unavailable, skipping media donation")
+      return
+    }
+    
     let title = args["title"] as? String ?? ""
     let artist = args["artist"] as? String ?? ""
     

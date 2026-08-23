@@ -13,11 +13,24 @@ class PlatformInfo {
   static bool get isAndroid => !kIsWeb && Platform.isAndroid;
   static bool get isMacOS => !kIsWeb && Platform.isMacOS;
 
-  /// Detection for iOS 26 Liquid Glass translucent refractive material capabilities
+  /// Detection for iOS 26 Liquid Glass translucent refractive material capabilities.
+  /// Parses Platform.operatingSystemVersion (e.g. "26.0") to check actual version.
   static bool isIOS26OrHigher() {
-    return isIOS;
+    if (!isIOS) return false;
+    try {
+      final version = Platform.operatingSystemVersion;
+      // iOS version string format is typically "Version 18.1 (Build 22B83)"
+      // or just "18.1" or "26.0"
+      final versionMatch = RegExp(r'(\d+)\.').firstMatch(version);
+      if (versionMatch != null) {
+        final major = int.tryParse(versionMatch.group(1)!) ?? 0;
+        return major >= 26;
+      }
+    } catch (_) {}
+    return false;
   }
 }
+
 
 /// Destination model for Adaptive Navigation Bar
 class AdaptiveNavigationDestination {
@@ -57,8 +70,11 @@ class AdaptiveNavigationBar extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (navBarStyle == 'os_style') {
-      if (PlatformInfo.isIOS) {
+      if (PlatformInfo.isIOS && PlatformInfo.isIOS26OrHigher()) {
         return _buildIOSLiquidGlassNavigationBar(context, isDark);
+      } else if (PlatformInfo.isIOS) {
+        // iOS below 26 — CNTabBar (Liquid Glass) not available, use default glass bar
+        return _buildDefaultFloatingGlassBar(context, isDark);
       } else {
         return _buildAndroidMaterial3NavigationBar(context, isDark);
       }

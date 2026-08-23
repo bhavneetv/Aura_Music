@@ -21,9 +21,9 @@ class PlaylistLinkShareService {
   PlaylistLinkShareService._();
   static final PlaylistLinkShareService instance = PlaylistLinkShareService._();
 
-  static const String linkPrefix = 'https://auramusic.app/share?p=';
-  static const String shortLinkPrefix = 'https://auramusic.app/share?dp=';
-  static const String idsLinkPrefix = 'https://auramusic.app/share?ids=';
+  static const String linkPrefix = 'aura://share?p=';
+  static const String shortLinkPrefix = 'aura://share?dp=';
+  static const String idsLinkPrefix = 'aura://share?ids=';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -108,7 +108,7 @@ class PlaylistLinkShareService {
             final shortId = respStr.split('dpaste.com/').last.replaceAll('/', '').replaceAll('.txt', '').trim();
             if (shortId.isNotEmpty) {
               debugPrint('[PlaylistLinkShare] Successfully created dpaste.com short code: $shortId');
-              return 'https://auramusic.app/share?dpc=$shortId';
+              return 'aura://share?dpc=$shortId';
             }
           }
         }

@@ -183,10 +183,10 @@ class NearbyHandoffService {
     final ip = _localIp ?? '127.0.0.1';
     final port = serverPort;
     if (shortCode != null && shortCode.isNotEmpty) {
-      final cleanCode = shortCode.replaceAll('https://auramusic.app/share?dp=', '').replaceAll('aura://dp=', '');
-      return 'https://auramusic.app/share?dp=$cleanCode&ip=$ip&port=$port';
+      final cleanCode = shortCode.replaceAll('https://auramusic.app/share?dp=', '').replaceAll('aura://share?dp=', '').replaceAll('aura://dp=', '');
+      return 'aura://share?dp=$cleanCode&ip=$ip&port=$port';
     }
-    return 'https://auramusic.app/share?ip=$ip&port=$port';
+    return 'aura://share?ip=$ip&port=$port';
   }
 
   /// Fetch handoff payload directly from a sender IP/port

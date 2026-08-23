@@ -14,6 +14,7 @@ class MainActivity : AudioServiceActivity() {
     private val CHANNEL = "com.example.music_app/voice_assistant"
     private var methodChannel: MethodChannel? = null
     private var pendingVoiceQuery: String? = null
+    private var pendingDeepLink: String? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -24,15 +25,22 @@ class MainActivity : AudioServiceActivity() {
             if (call.method == "getPendingVoiceQuery") {
                 result.success(pendingVoiceQuery)
                 pendingVoiceQuery = null
+            } else if (call.method == "getPendingDeepLink") {
+                result.success(pendingDeepLink)
+                pendingDeepLink = null
             } else {
                 result.notImplemented()
             }
         }
 
-        // Process any voice intent received before Flutter was initialized
+        // Process any voice intent or deep link received before Flutter was initialized
         pendingVoiceQuery?.let { query ->
             sendVoiceQueryToFlutter(query)
             pendingVoiceQuery = null
+        }
+        pendingDeepLink?.let { link ->
+            sendDeepLinkToFlutter(link)
+            pendingDeepLink = null
         }
     }
 
@@ -76,9 +84,13 @@ class MainActivity : AudioServiceActivity() {
             val data: Uri? = intent.data
             if (data != null) {
                 val dataStr = data.toString()
-                if (dataStr.contains("dp=") || dataStr.contains("p=") || dataStr.contains("ids=") || dataStr.startsWith("aura")) {
-                    methodChannel?.invokeMethod("onDeepLink", mapOf("link" to dataStr))
-                } else if ("aura" == data.scheme) {
+                if (dataStr.contains("dp=") || dataStr.contains("p=") || dataStr.contains("ids=") || dataStr.contains("dpc=") || dataStr.startsWith("aura")) {
+                    if (methodChannel != null) {
+                        sendDeepLinkToFlutter(dataStr)
+                    } else {
+                        pendingDeepLink = dataStr
+                    }
+                } else if ("aura" == data.scheme || "auramusic" == data.scheme) {
                     query = data.getQueryParameter("query") ?: data.getQueryParameter("q")
                 }
             } else {
@@ -99,5 +111,9 @@ class MainActivity : AudioServiceActivity() {
 
     private fun sendVoiceQueryToFlutter(query: String) {
         methodChannel?.invokeMethod("onVoiceQuery", mapOf("query" to query))
+    }
+
+    private fun sendDeepLinkToFlutter(link: String) {
+        methodChannel?.invokeMethod("onDeepLink", mapOf("link" to link))
     }
 }

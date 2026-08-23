@@ -46,6 +46,16 @@ class VoiceAssistantService {
 
     // Initial sync of local library index to platform (App Group container for iOS SiriKit)
     await syncLibraryIndexToPlatform();
+
+    // Check if app was cold-started via deep link
+    try {
+      final String? pendingLink = await _channel.invokeMethod('getPendingDeepLink');
+      if (pendingLink != null && pendingLink.isNotEmpty) {
+        await _handleIncomingDeepLink(pendingLink);
+      }
+    } catch (e) {
+      debugPrint('[DeepLink] Error checking pending deep link: $e');
+    }
   }
 
   Future<void> _handleIncomingDeepLink(String link) async {
@@ -71,7 +81,13 @@ class VoiceAssistantService {
         final playlists = StorageService.getPlaylists();
         playlists.insert(0, newPl);
         await StorageService.savePlaylists(playlists);
-        debugPrint('[DeepLink] Automatically imported playlist: ${decoded.title}');
+
+        if (_container != null) {
+          final notifier = _container!.read(playbackProvider.notifier);
+          notifier.playCustomQueue(decoded.tracks, initialIndex: 0);
+        }
+
+        debugPrint('[DeepLink] Automatically imported & started playing playlist: ${decoded.title}');
       }
     } catch (e) {
       debugPrint('[DeepLink] Error handling incoming deep link: $e');
