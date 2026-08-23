@@ -7,6 +7,7 @@ import '../storage/storage_service.dart';
 import '../recommendation/recommendation_engine.dart';
 import '../audio/audio_url_resolver.dart';
 import '../audio/des_cipher.dart';
+import '../ai/ai_service.dart';
 
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
@@ -117,20 +118,128 @@ class JamendoSource implements MusicSource {
 
   @override
   Future<List<Track>> getTracksByGenre(String genre) async {
+    final cleanGenre = genre.trim();
+    final lowerGenre = cleanGenre.toLowerCase();
+    print('[AURA-GENRE] getTracksByGenre requested for: "$cleanGenre"');
+
+    // 1. Ask AI for LATEST 2025/2026 TOP HITS search queries specific to this language
+    List<String> targetQueries = [];
     try {
-      final page = math.Random().nextInt(4) + 1;
-      final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(genre)}&page=$page');
-      if (data != null) {
-        final tracks = _parseTracks(data);
-        if (tracks.isNotEmpty) {
-          final resolved = await AudioUrlResolver.instance.resolveAll(tracks);
-          return RecommendationEngine.instance.rankRecommendations(resolved);
-        }
+      final aiPrompt = '''
+You are an expert music curator. Provide a JSON array of 4 search queries to find the LATEST 2025/2026 TOP CHARTING hits exclusively for language/genre "$cleanGenre".
+Rules:
+- Each query MUST specify "$cleanGenre" and "latest 2025 2026" (e.g. "latest $cleanGenre songs 2026", "top $cleanGenre hits 2025 2026", "new $cleanGenre chartbusters 2026").
+- Output ONLY valid JSON array of strings.
+''';
+      final (aiResult, provider) = await AiService.instance.generate(aiPrompt);
+      print('[AURA-GENRE] AI ($provider) suggested query for "$cleanGenre": $aiResult');
+      final decoded = jsonDecode(aiResult);
+      if (decoded is List) {
+        targetQueries = decoded.map((e) => e.toString()).where((q) => q.isNotEmpty).toList();
       }
     } catch (e) {
-      print('Error fetching tracks by genre "$genre": $e');
+      print('[AURA-GENRE] AI prompt failed for "$cleanGenre" ($e), using dynamic fallbacks');
     }
+
+    if (targetQueries.isEmpty) {
+      if (lowerGenre.contains('punjabi')) {
+        targetQueries = [
+          'latest punjabi songs 2025 2026',
+          'top punjabi hits 2026',
+          'new punjabi chartbusters 2025',
+          'Karan Aujla latest songs 2025',
+        ];
+      } else if (lowerGenre.contains('hindi') || lowerGenre.contains('bollywood')) {
+        targetQueries = [
+          'latest hindi songs 2025 2026',
+          'top bollywood romantic hits 2026',
+          'new hindi chartbusters 2025',
+          'Arijit Singh latest songs 2025',
+        ];
+      } else if (lowerGenre.contains('english') || lowerGenre.contains('pop')) {
+        targetQueries = [
+          'latest english pop songs 2025 2026',
+          'top global billboard hits 2026',
+          'new english pop chartbusters 2025',
+          'Taylor Swift The Weeknd latest 2025',
+        ];
+      } else if (lowerGenre.contains('haryanvi')) {
+        targetQueries = [
+          'latest haryanvi songs 2025 2026',
+          'top haryanvi hits 2026',
+          'new haryanvi chartbusters 2025',
+          'Gulzaar Chhaniwala MC Square latest 2025',
+        ];
+      } else {
+        targetQueries = [
+          'latest $cleanGenre songs 2025 2026',
+          'top $cleanGenre hits 2026',
+          'new $cleanGenre chartbusters 2025',
+        ];
+      }
+    }
+
+    // 2. Fetch live tracks from API mirrors using targetQueries
+    final List<Track> allFetched = [];
+    for (final q in targetQueries.take(4)) {
+      try {
+        final data = await _fetchFromApi('/search/songs?query=${Uri.encodeComponent(q)}&page=1');
+        if (data != null) {
+          final parsed = _parseTracks(data);
+          allFetched.addAll(parsed);
+        }
+      } catch (_) {}
+    }
+
+    if (allFetched.isNotEmpty) {
+      // 3. Strict language filtering to prevent cross-language bleeding
+      List<Track> filteredTracks = allFetched.where((t) {
+        final tLang = t.genre.toLowerCase();
+        if (lowerGenre.contains('punjabi')) {
+          if (tLang == 'hindi' || tLang == 'english' || tLang == 'telugu' || tLang == 'tamil') return false;
+          return tLang.contains('punjabi') || _isLanguageMatch(t, 'punjabi');
+        }
+        if (lowerGenre.contains('hindi') || lowerGenre.contains('bollywood')) {
+          if (tLang == 'punjabi' || tLang == 'english' || tLang == 'telugu' || tLang == 'tamil') return false;
+          return tLang.contains('hindi') || tLang.contains('bollywood') || _isLanguageMatch(t, 'hindi');
+        }
+        if (lowerGenre.contains('english')) {
+          if (tLang == 'hindi' || tLang == 'punjabi' || tLang == 'haryanvi') return false;
+          return tLang.contains('english') || _isLanguageMatch(t, 'english');
+        }
+        if (lowerGenre.contains('haryanvi')) {
+          if (tLang == 'hindi' || tLang == 'punjabi' || tLang == 'english') return false;
+          return tLang.contains('haryanvi') || _isLanguageMatch(t, 'haryanvi');
+        }
+        return true;
+      }).toList();
+
+      if (filteredTracks.isEmpty) {
+        filteredTracks = allFetched;
+      }
+
+      final Map<String, Track> unique = {};
+      for (final t in filteredTracks) {
+        final key = '${t.id}_${t.title.toLowerCase().trim()}';
+        if (!unique.containsKey(key)) {
+          unique[key] = t;
+        }
+      }
+      final resolved = await AudioUrlResolver.instance.resolveAll(unique.values.toList());
+      if (resolved.isNotEmpty) {
+        return RecommendationEngine.instance.rankRecommendations(resolved);
+      }
+    }
+
     return _getMockFallback();
+  }
+
+  bool _isLanguageMatch(Track t, String lang) {
+    final title = t.title.toLowerCase();
+    final artist = t.artist.toLowerCase();
+    final album = t.album.toLowerCase();
+    final target = lang.toLowerCase();
+    return title.contains(target) || artist.contains(target) || album.contains(target);
   }
 
   @override
@@ -438,6 +547,9 @@ class JamendoSource implements MusicSource {
           artworkUrl = artworkUrl.replaceFirst('http:/', 'http://');
         }
 
+        final itemMoreInfo = item['more_info'] is Map ? item['more_info'] as Map : null;
+        final rawLang = (item['language'] ?? itemMoreInfo?['language'] ?? item['genre'] ?? '').toString().trim().toUpperCase();
+
         tracks.add(
           Track(
             id: id,
@@ -447,7 +559,7 @@ class JamendoSource implements MusicSource {
             duration: duration,
             artworkUrl: artworkUrl,
             audioUrl: audioUrl,
-            genre: item['language']?.toString().toUpperCase() ?? 'BOLLYWOOD',
+            genre: rawLang.isNotEmpty ? rawLang : 'INDIAN',
           ),
         );
       } catch (e) {

@@ -745,12 +745,15 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       contextPivoted = true;
     }
 
-    if (contextPivoted) {
+    if (contextPivoted || currentQueue.isEmpty) {
       currentQueue = [resolvedTrack];
       idx = 0;
     } else {
-      currentQueue.add(resolvedTrack);
-      idx = currentQueue.length - 1;
+      final insertPosition = (state.currentIndex >= 0 && state.currentIndex < currentQueue.length)
+          ? state.currentIndex + 1
+          : currentQueue.length;
+      currentQueue.insert(insertPosition, resolvedTrack);
+      idx = insertPosition;
     }
 
     if (offline) {

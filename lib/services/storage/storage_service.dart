@@ -127,6 +127,23 @@ class StorageService {
     await box.put('genres', genres);
   }
 
+  static String getLastSelectedHomeLanguage() {
+    final box = Hive.box(_profileBox);
+    final saved = box.get('last_home_language')?.toString();
+    if (saved != null && saved.isNotEmpty) return saved;
+    final langs = List<String>.from(box.get('languages', defaultValue: <String>[]));
+    if (langs.isNotEmpty) return langs.first;
+    return 'Punjabi';
+  }
+
+  static Future<void> saveLastSelectedHomeLanguage(String language) async {
+    final box = Hive.box(_profileBox);
+    await box.put('last_home_language', language);
+    if (language != 'All') {
+      await box.put('languages', [language]);
+    }
+  }
+
   static List<String> getPreferredArtists() {
     final box = Hive.box(_profileBox);
     return List<String>.from(box.get('artists', defaultValue: <String>[]));

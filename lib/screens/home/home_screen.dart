@@ -31,10 +31,12 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _currentTab = 0;
+  String _selectedLanguage = 'All';
 
   @override
   void initState() {
     super.initState();
+    _selectedLanguage = StorageService.getLastSelectedHomeLanguage();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       UpdateService.checkForUpdates(context);
       if (!StorageService.hasCompletedOnboarding()) {
@@ -166,9 +168,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             // 1. Personal Header & Greeting
             _buildHomeHeader(context, accentColor),
+            const SizedBox(height: 16),
+
+            // 2. Language Category Filter Pill Bar (Punjabi, Hindi, English, Haryanvi, All)
+            _buildLanguageCategoryBar(context, accentColor),
             const SizedBox(height: 20),
 
-            // 2. Ultra Hero Feature Banner Card
+            // 3. Dynamic Language Track Collection (if language filter active)
+            if (_selectedLanguage != 'All') ...[
+              _buildLanguageTracksSection(context, _selectedLanguage, accentColor),
+              const SizedBox(height: 28),
+            ],
+
+            // 4. Ultra Hero Feature Banner Card
             _buildHeroStationCard(context, continueTracks.first, accentColor),
             const SizedBox(height: 24),
 
@@ -473,6 +485,113 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
         }).toList(),
       ),
+    );
+  }
+
+  // Language Filter Bar (Punjabi, Hindi, English, Haryanvi, All)
+  Widget _buildLanguageCategoryBar(BuildContext context, Color accentColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final languages = [
+      {'label': 'All', 'icon': '🌐'},
+      {'label': 'Punjabi', 'icon': '🪘'},
+      {'label': 'Hindi', 'icon': '🎤'},
+      {'label': 'English', 'icon': '🎧'},
+      {'label': 'Haryanvi', 'icon': '⚡'},
+    ];
+
+    return SizedBox(
+      height: 42,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: languages.length,
+        itemBuilder: (context, index) {
+          final lang = languages[index];
+          final name = lang['label']!;
+          final icon = lang['icon']!;
+          final isSelected = _selectedLanguage.toLowerCase() == name.toLowerCase();
+
+          return GestureDetector(
+            onTap: () {
+              triggerHaptic(HapticFeedbackType.selection);
+              setState(() {
+                _selectedLanguage = name;
+              });
+              StorageService.saveLastSelectedHomeLanguage(name);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.only(right: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? accentColor
+                    : (isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05)),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: isSelected ? accentColor : accentColor.withValues(alpha: 0.25),
+                  width: 1.5,
+                ),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: accentColor.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))]
+                    : [],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(icon, style: const TextStyle(fontSize: 14)),
+                  const SizedBox(width: 6),
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                      color: isSelected ? Colors.black : (isDark ? Colors.white : Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildLanguageTracksSection(BuildContext context, String lang, Color accentColor) {
+    final genreAsync = ref.watch(genreTracksProvider('$lang Hits'));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          context,
+          '$lang Music Collection 🎵',
+          accentColor,
+          onSeeAll: () {
+            final tracks = genreAsync.value ?? Track.mockTracks;
+            _showSeeAllTracksSheet(context, '$lang Hits', tracks);
+          },
+        ),
+        const SizedBox(height: 12),
+        genreAsync.when(
+          loading: () => const RailShimmer(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (tracks) {
+            final liveTracks = tracks.where((t) => !t.id.startsWith('mock_')).toList();
+            final displayTracks = liveTracks.isNotEmpty ? liveTracks : tracks;
+            if (displayTracks.isEmpty) return const SizedBox.shrink();
+            return _buildTrackRail(
+              context,
+              '$lang Top Hits',
+              displayTracks,
+              accentColor,
+              large: true,
+            );
+          },
+        ),
+      ],
     );
   }
 
