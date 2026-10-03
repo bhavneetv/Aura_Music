@@ -47,6 +47,8 @@ public class AudioRoutingPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             let success = setAudioOutput(typeStr: "none")
             sendRouteUpdate()
             result(success)
+        case "setVirtual3dSound":
+            result(true)
         default:
             result(FlutterMethodNotImplemented)
         }

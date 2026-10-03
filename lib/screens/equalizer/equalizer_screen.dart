@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../themes/app_theme.dart';
 import '../../providers/customization_provider.dart';
 import '../../providers/playback_provider.dart';
+import '../../services/audio/spatial_audio_service.dart';
 
 class EqualizerScreen extends ConsumerStatefulWidget {
   const EqualizerScreen({super.key});
@@ -16,6 +17,17 @@ class _EqualizerScreenState extends ConsumerState<EqualizerScreen> {
   final List<double> _bandGains = [2.0, -1.0, 4.0, 1.5, -3.0];
   final List<String> _bandLabels = ['60 Hz', '230 Hz', '910 Hz', '4 kHz', '14 kHz'];
   String _selectedPreset = 'Custom';
+  bool _is3dEnabled = false;
+  String _spatialMode = 'Wide Room';
+  double _spatialIntensity = 0.65;
+
+  @override
+  void initState() {
+    super.initState();
+    _is3dEnabled = SpatialAudioService.isEnabled;
+    _spatialMode = SpatialAudioService.currentMode;
+    _spatialIntensity = SpatialAudioService.intensity;
+  }
 
   final Map<String, List<double>> _presets = {
     'Rock': [4.0, 2.0, -1.0, 2.0, 5.0],
@@ -133,7 +145,67 @@ class _EqualizerScreenState extends ConsumerState<EqualizerScreen> {
               ),
             ),
 
-            const SizedBox(height: 24),
+            // 3D Spatial Audio Quick Card
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF19191D) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _is3dEnabled ? customBranding.accentColor.withOpacity(0.5) : (isDark ? Colors.white10 : Colors.black12),
+                  width: 1.0,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: (_is3dEnabled ? customBranding.accentColor : Colors.grey).withOpacity(0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.headphones_rounded,
+                      color: _is3dEnabled ? customBranding.accentColor : Colors.grey,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '3D Virtual Sound for Headphones',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: _is3dEnabled ? customBranding.accentColor : null,
+                          ),
+                        ),
+                        Text(
+                          _is3dEnabled ? 'Mode: $_spatialMode (${(_spatialIntensity * 100).toInt()}%)' : 'Binaural 360° soundstage disabled',
+                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: _is3dEnabled,
+                    activeColor: customBranding.accentColor,
+                    onChanged: (val) async {
+                      setState(() {
+                        _is3dEnabled = val;
+                      });
+                      await SpatialAudioService.setEnabled(val);
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
 
             // Gain Band Controllers
             Expanded(

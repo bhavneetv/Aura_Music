@@ -8,6 +8,7 @@ import '../../providers/settings_provider.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../services/audio/spatial_audio_service.dart';
 import '../equalizer/equalizer_screen.dart';
 import '../../services/update/update_service.dart';
 import '../../services/version/version_service.dart';
@@ -28,6 +29,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _hapticsEnabled = true;
   String _progressBarStyle = 'normal';
   String _summaryLanguage = 'en';
+  bool _is3dSoundEnabled = false;
+  String _3dSoundMode = 'Wide Room';
+  double _3dSoundIntensity = 0.65;
 
   @override
   void initState() {
@@ -39,6 +43,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _hapticsEnabled = StorageService.isHapticsEnabled();
     _progressBarStyle = StorageService.getProgressBarStyle();
     _summaryLanguage = StorageService.getSetting('summary_language', defaultValue: 'en') as String;
+    _is3dSoundEnabled = SpatialAudioService.isEnabled;
+    _3dSoundMode = SpatialAudioService.currentMode;
+    _3dSoundIntensity = SpatialAudioService.intensity;
   }
 
   @override
@@ -556,13 +563,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
         // 4. Group: Audio & Equalizer
         const SizedBox(height: 12),
-        _buildSectionHeader('AUDIO EFFECTS', customBranding.accentColor),
+        _buildSectionHeader('AUDIO EFFECTS & SPATIAL SOUND', customBranding.accentColor),
         _buildNavigationTile(
           context,
-          'Equalizer & Effects',
-          'Customize frequency bands and presets',
+          'Equalizer & Presets',
+          'Fine-tune 5-band frequency spectrum and gains',
           const EqualizerScreen(),
         ),
+        _buildSwitchTile(
+          'Virtual 3D Sound for Headphones',
+          'Binaural 360° spatial audio & expanded headphone soundstage',
+          _is3dSoundEnabled,
+          customBranding.accentColor,
+          (val) async {
+            setState(() {
+              _is3dSoundEnabled = val;
+            });
+            await SpatialAudioService.setEnabled(val);
+          },
+        ),
+        if (_is3dSoundEnabled)
+          _buildSelectionTile(
+            '3D Spatial Preset & Width',
+            '$_3dSoundMode (${(_3dSoundIntensity * 100).toInt()}%)',
+            () => _show3dSoundDialog(customBranding.accentColor),
+          ),
         _buildSelectionTile(
           'Progress Bar Visual Style',
           _progressBarStyle.toUpperCase(),
@@ -1137,6 +1162,193 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         });
         await StorageService.setProgressBarStyle(key);
         if (mounted) Navigator.pop(context);
+      },
+    );
+  }
+
+  void _show3dSoundDialog(Color accentColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(28),
+                  topRight: Radius.circular(28),
+                ),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: accentColor.withOpacity(0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.headphones_rounded, color: accentColor, size: 24),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '3D Spatial Audio for Headphones',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, fontFamily: 'Outfit'),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Binaural 360° virtual soundstage simulation',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'SPATIAL PRESETS',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 0.5),
+                    ),
+                    const SizedBox(height: 10),
+                    ...SpatialAudioService.presets.entries.map((entry) {
+                      final key = entry.key;
+                      final preset = entry.value;
+                      final isSelected = _3dSoundMode == key;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected ? accentColor.withOpacity(0.12) : (isDark ? const Color(0xFF222226) : Colors.white),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isSelected ? accentColor : Colors.grey.withOpacity(0.12),
+                            width: isSelected ? 1.5 : 1.0,
+                          ),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: Icon(
+                            preset.icon,
+                            color: isSelected ? accentColor : Colors.grey,
+                            size: 24,
+                          ),
+                          title: Text(
+                            preset.name,
+                            style: TextStyle(
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                              fontSize: 14,
+                              color: isSelected ? accentColor : null,
+                            ),
+                          ),
+                          subtitle: Text(
+                            preset.description,
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                          trailing: isSelected
+                              ? Icon(Icons.check_circle_rounded, color: accentColor, size: 20)
+                              : null,
+                          onTap: () async {
+                            setModalState(() {
+                              _3dSoundMode = key;
+                              _3dSoundIntensity = preset.defaultIntensity;
+                            });
+                            setState(() {
+                              _3dSoundMode = key;
+                              _3dSoundIntensity = preset.defaultIntensity;
+                            });
+                            await SpatialAudioService.setMode(key);
+                          },
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'SOUNDSTAGE WIDTH & INTENSITY',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 0.5),
+                        ),
+                        Text(
+                          '${(_3dSoundIntensity * 100).toInt()}%',
+                          style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: accentColor,
+                        thumbColor: accentColor,
+                        overlayColor: accentColor.withOpacity(0.2),
+                      ),
+                      child: Slider(
+                        value: _3dSoundIntensity,
+                        min: 0.1,
+                        max: 1.0,
+                        divisions: 18,
+                        onChanged: (val) async {
+                          setModalState(() {
+                            _3dSoundIntensity = val;
+                          });
+                          setState(() {
+                            _3dSoundIntensity = val;
+                          });
+                          await SpatialAudioService.setIntensity(val);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: accentColor,
+                          foregroundColor: isDark ? Colors.black : Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text('Apply 3D Sound', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
       },
     );
   }

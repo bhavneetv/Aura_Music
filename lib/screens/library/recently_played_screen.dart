@@ -115,7 +115,7 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
       }
     });
 
-    final int streakDays = _history.isEmpty ? 0 : 3;
+    final int streakDays = _calculateListeningStreak(_history);
 
     return Scaffold(
       appBar: AppBar(
@@ -315,4 +315,50 @@ class _RecentlyPlayedScreenState extends ConsumerState<RecentlyPlayedScreen> {
       },
     );
   }
+
+  int _calculateListeningStreak(List<Map<String, dynamic>> history) {
+    if (history.isEmpty) return 0;
+
+    final Set<String> uniqueDates = {};
+    final dateFormat = DateFormat('yyyy-MM-dd');
+
+    for (final item in history) {
+      final ts = item['timestamp']?.toString();
+      if (ts != null && ts.isNotEmpty) {
+        try {
+          final dt = DateTime.parse(ts);
+          uniqueDates.add(dateFormat.format(dt));
+        } catch (_) {}
+      }
+    }
+
+    if (uniqueDates.isEmpty) return 0;
+
+    final now = DateTime.now();
+    final todayStr = dateFormat.format(now);
+    final yesterdayStr = dateFormat.format(now.subtract(const Duration(days: 1)));
+
+    DateTime cursor;
+    if (uniqueDates.contains(todayStr)) {
+      cursor = now;
+    } else if (uniqueDates.contains(yesterdayStr)) {
+      cursor = now.subtract(const Duration(days: 1));
+    } else {
+      return 0;
+    }
+
+    int streak = 0;
+    while (true) {
+      final dateKey = dateFormat.format(cursor);
+      if (uniqueDates.contains(dateKey)) {
+        streak++;
+        cursor = cursor.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }
 }
+

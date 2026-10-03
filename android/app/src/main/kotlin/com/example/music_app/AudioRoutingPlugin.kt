@@ -95,6 +95,12 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                 sendRouteUpdate()
                 result.success(success)
             }
+            "setVirtual3dSound" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                val strength = (call.argument<Double>("strength") ?: 0.65).toFloat()
+                val success = setVirtual3dSound(enabled, strength)
+                result.success(success)
+            }
             else -> result.notImplemented()
         }
     }
@@ -268,4 +274,27 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
     override fun onCancel(arguments: Any?) {
         eventSink = null
     }
+
+    private var virtualizer: android.media.audiofx.Virtualizer? = null
+
+    private fun setVirtual3dSound(enabled: Boolean, strength: Float): Boolean {
+        return try {
+            if (virtualizer == null) {
+                // Attach 3D spatial audio virtualizer to the device's main output audio mix
+                virtualizer = android.media.audiofx.Virtualizer(0, 0)
+            }
+            virtualizer?.let { v ->
+                v.enabled = enabled
+                if (enabled && v.strengthSupported) {
+                    val s = (strength.coerceIn(0f, 1f) * 1000).toInt().toShort()
+                    v.setStrength(s)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }
+

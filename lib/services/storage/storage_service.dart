@@ -381,7 +381,7 @@ class StorageService {
     };
     
     history.insert(0, item);
-    if (history.length > 200) history.removeLast(); // Cap size
+    // Unlimited dynamic history by default
     await box.put('listening_history', jsonEncode(history));
   }
 
@@ -395,6 +395,34 @@ class StorageService {
   static Future<void> clearListeningHistory() async {
     final box = Hive.box(_historyBox);
     await box.put('listening_history', jsonEncode([]));
+  }
+
+  // ── 3D Virtual Sound / Spatial Audio ─────────────────────────
+
+  static bool is3dSoundEnabled() {
+    return getSetting('virtual_3d_sound_enabled', defaultValue: false) as bool;
+  }
+
+  static Future<void> set3dSoundEnabled(bool enabled) async {
+    await saveSetting('virtual_3d_sound_enabled', enabled);
+  }
+
+  static String get3dSoundMode() {
+    return getSetting('virtual_3d_sound_mode', defaultValue: 'Wide Room') as String;
+  }
+
+  static Future<void> set3dSoundMode(String mode) async {
+    await saveSetting('virtual_3d_sound_mode', mode);
+  }
+
+  static double get3dSoundIntensity() {
+    final val = getSetting('virtual_3d_sound_intensity', defaultValue: 0.65);
+    if (val is num) return val.toDouble();
+    return 0.65;
+  }
+
+  static Future<void> set3dSoundIntensity(double intensity) async {
+    await saveSetting('virtual_3d_sound_intensity', intensity);
   }
 
   // ── Searched & Played Tracks Tracker ────────────────────────
