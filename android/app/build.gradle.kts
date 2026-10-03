@@ -43,8 +43,11 @@ if (keystorePropertiesFile.exists()) {
     }
 }
 
-// Load version.properties for central app versioning
-val versionPropertiesFile = rootProject.file("version.properties")
+// Load version.properties for central app versioning (checks both root and android directories)
+val versionPropertiesFile = run {
+    val fInAndroid = rootProject.file("version.properties")
+    if (fInAndroid.exists()) fInAndroid else rootProject.file("../version.properties")
+}
 val versionProperties = Properties()
 if (versionPropertiesFile.exists()) {
     versionProperties.load(FileInputStream(versionPropertiesFile))
@@ -93,6 +96,14 @@ android {
 
     buildTypes {
         release {
+            signingConfig = if (hasValidKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+        debug {
+            // Unify debug signing with release key when keystore exists to prevent signature mismatch conflicts during updates
             signingConfig = if (hasValidKeystore) {
                 signingConfigs.getByName("release")
             } else {
