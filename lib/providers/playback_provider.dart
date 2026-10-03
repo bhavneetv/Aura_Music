@@ -227,9 +227,32 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   PlaybackState build() {
     _handler = ref.watch(audioHandlerProvider) as MyAudioHandler;
 
-    // Bind stock notification and remote control action callbacks
+    // Bind stock notification, home widget and Android Auto remote action callbacks
     _handler.onNextRequested = () => nextTrack();
     _handler.onPreviousRequested = () => previousTrack();
+    _handler.onSkipToQueueItemRequested = (index) => jumpToQueueIndex(index);
+    _handler.onPlayFromMediaIdRequested = (mediaId) async {
+      final inQueueIdx = state.queue.indexWhere((t) => t.id == mediaId);
+      if (inQueueIdx != -1) {
+        jumpToQueueIndex(inQueueIdx);
+        return;
+      }
+      final history = StorageService.getListeningHistory();
+      final hMatch = history.firstWhere((item) => item['track_id'] == mediaId, orElse: () => {});
+      if (hMatch.isNotEmpty) {
+        final track = Track(
+          id: hMatch['track_id']?.toString() ?? '',
+          title: hMatch['title']?.toString() ?? '',
+          artist: hMatch['artist']?.toString() ?? '',
+          album: hMatch['album']?.toString() ?? '',
+          duration: hMatch['duration']?.toString() ?? '',
+          artworkUrl: hMatch['artworkUrl']?.toString() ?? '',
+          audioUrl: hMatch['audioUrl']?.toString() ?? '',
+          genre: hMatch['genre']?.toString() ?? '',
+        );
+        playTrack(track);
+      }
+    };
 
     // Load saved settings from Hive (default to minimal cover art skin)
     final savedSkin = StorageService.getSetting('player_skin', defaultValue: 'minimal') as String;

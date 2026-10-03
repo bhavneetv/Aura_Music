@@ -13,6 +13,7 @@ import 'services/version/version_service.dart';
 
 import 'services/voice/voice_assistant_service.dart';
 import 'services/quick_actions/quick_actions_service.dart';
+import 'services/widget/home_widget_service.dart';
 
 final audioHandlerProvider = Provider<AudioHandler>((ref) => throw UnimplementedError());
 
@@ -40,6 +41,7 @@ void main() async {
   }
   await StorageService.init();
   await AppVersionService.init();
+  await HomeWidgetService.init();
   
   _audioHandlerInstance ??= await initAudioHandler();
 

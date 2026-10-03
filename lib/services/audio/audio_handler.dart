@@ -5,6 +5,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../models/track.dart';
+import '../storage/storage_service.dart';
+import '../widget/home_widget_service.dart';
 
 Future<AudioHandler> initAudioHandler() async {
   return await AudioService.init(
@@ -116,6 +118,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   Future<void> Function()? onNextRequested;
   Future<void> Function()? onPreviousRequested;
+  Future<void> Function(int index)? onSkipToQueueItemRequested;
+  Future<void> Function(String mediaId)? onPlayFromMediaIdRequested;
+
+  @override
+  Future<void> skipToQueueItem(int index) async {
+    if (onSkipToQueueItemRequested != null) {
+      await onSkipToQueueItemRequested!(index);
+    }
+  }
 
   // ── Audio Controls ─────────────────────────────────────────
 
@@ -771,5 +782,201 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       bufferedPosition: _activePlayer.bufferedPosition,
       speed: _activePlayer.speed,
     ));
+
+    // Synchronize Material You (Android) and WidgetKit (iOS) home screen widgets
+    _syncHomeWidget(isPlaying);
+  }
+
+  void _syncHomeWidget(bool isPlaying) {
+    try {
+      final item = mediaItem.value;
+      if (item != null) {
+        final t = Track(
+          id: item.id,
+          title: item.title,
+          artist: item.artist ?? 'Aura Music',
+          album: item.album ?? 'Aura Vinyl',
+          duration: '',
+          artworkUrl: item.artUri?.toString() ?? '',
+          audioUrl: '',
+          genre: '',
+        );
+        HomeWidgetService.updatePlaybackState(track: t, isPlaying: isPlaying);
+      }
+    } catch (_) {}
+  }
+
+  // ── Android Auto & MediaBrowserService Hierarchy ────────────────
+
+  static const String _autoRootRecent = 'root_recent';
+  static const String _autoRootQueue = 'root_queue';
+  static const String _autoRootPlaylists = 'root_playlists';
+  static const String _autoRootDownloads = 'root_downloads';
+
+  @override
+  Future<List<MediaItem>> getChildren(String parentMediaId, [Map<String, dynamic>? options]) async {
+    // 1. Root level tabs for Android Auto dashboard
+    if (parentMediaId == 'root' || parentMediaId == '/' || parentMediaId.isEmpty) {
+      return [
+        const MediaItem(
+          id: _autoRootQueue,
+          title: 'Current Queue',
+          album: 'Aura Music',
+          playable: false,
+        ),
+        const MediaItem(
+          id: _autoRootRecent,
+          title: 'Recently Played',
+          album: 'Aura Music',
+          playable: false,
+        ),
+        const MediaItem(
+          id: _autoRootPlaylists,
+          title: 'Your Playlists',
+          album: 'Aura Music',
+          playable: false,
+        ),
+        const MediaItem(
+          id: _autoRootDownloads,
+          title: 'Downloaded Music',
+          album: 'Aura Music',
+          playable: false,
+        ),
+      ];
+    }
+
+    // 2. Queue tracks
+    if (parentMediaId == _autoRootQueue) {
+      return queue.value;
+    }
+
+    // 3. Recently Played tracks from StorageService
+    if (parentMediaId == _autoRootRecent) {
+      try {
+        final history = StorageService.getListeningHistory();
+        return history.map((item) {
+          return MediaItem(
+            id: item['track_id']?.toString() ?? '',
+            title: item['title']?.toString() ?? 'Track',
+            artist: item['artist']?.toString() ?? 'Aura Music',
+            album: item['album']?.toString() ?? 'Recent',
+            duration: _parseDuration(item['duration']?.toString() ?? ''),
+            artUri: Uri.tryParse(item['artworkUrl']?.toString() ?? ''),
+            playable: true,
+            extras: {
+              'audioUrl': item['audioUrl'],
+              'genre': item['genre'],
+            },
+          );
+        }).toList();
+      } catch (_) {
+        return [];
+      }
+    }
+
+    // 4. Downloaded Offline tracks from StorageService
+    if (parentMediaId == _autoRootDownloads) {
+      try {
+        final downloaded = StorageService.getFullDownloadedTracks();
+        return downloaded.map(_trackToMediaItem).toList();
+      } catch (_) {
+        return [];
+      }
+    }
+
+    // 5. Playlists list
+    if (parentMediaId == _autoRootPlaylists) {
+      try {
+        final playlists = StorageService.getPlaylists();
+        return playlists.map((pl) {
+          final pId = pl['id']?.toString() ?? '';
+          return MediaItem(
+            id: 'playlist_$pId',
+            title: pl['name']?.toString() ?? 'Playlist',
+            album: 'Aura Music',
+            playable: false,
+          );
+        }).toList();
+      } catch (_) {
+        return [];
+      }
+    }
+
+    // 6. Tracks inside a specific playlist
+    if (parentMediaId.startsWith('playlist_')) {
+      final pId = parentMediaId.replaceFirst('playlist_', '');
+      final playlists = StorageService.getPlaylists();
+      final pl = playlists.firstWhere((p) => p['id']?.toString() == pId, orElse: () => {});
+      final tracksRaw = pl['tracks'] as List?;
+      if (tracksRaw != null) {
+        return tracksRaw.map((t) {
+          final map = Map<String, dynamic>.from(t as Map);
+          return _trackToMediaItem(Track.fromJson(map));
+        }).toList();
+      }
+    }
+
+    return [];
+  }
+
+  @override
+  Future<MediaItem?> getMediaItem(String mediaId) async {
+    final cur = mediaItem.value;
+    if (cur?.id == mediaId) return cur;
+    try {
+      final inQueue = queue.value.firstWhere((it) => it.id == mediaId);
+      return inQueue;
+    } catch (_) {}
+    return null;
+  }
+
+  @override
+  Future<void> playFromMediaId(String mediaId, [Map<String, dynamic>? extras]) async {
+    if (onPlayFromMediaIdRequested != null) {
+      await onPlayFromMediaIdRequested!(mediaId);
+      return;
+    }
+
+    // Fallback: check current queue
+    try {
+      final inQueue = queue.value.firstWhere((it) => it.id == mediaId);
+      final idx = queue.value.indexOf(inQueue);
+      if (idx != -1) {
+        await skipToQueueItem(idx);
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback: check recently played
+    try {
+      final history = StorageService.getListeningHistory();
+      final hMatch = history.firstWhere((item) => item['track_id'] == mediaId, orElse: () => {});
+      if (hMatch.isNotEmpty) {
+        final track = Track(
+          id: hMatch['track_id']?.toString() ?? '',
+          title: hMatch['title']?.toString() ?? '',
+          artist: hMatch['artist']?.toString() ?? '',
+          album: hMatch['album']?.toString() ?? '',
+          duration: hMatch['duration']?.toString() ?? '',
+          artworkUrl: hMatch['artworkUrl']?.toString() ?? '',
+          audioUrl: hMatch['audioUrl']?.toString() ?? '',
+          genre: hMatch['genre']?.toString() ?? '',
+        );
+        await playTrack(track);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<List<MediaItem>> search(String query, [Map<String, dynamic>? extras]) async {
+    if (query.trim().isEmpty) return [];
+    final qLower = query.toLowerCase();
+
+    final matches = queue.value.where((item) =>
+      item.title.toLowerCase().contains(qLower) ||
+      (item.artist?.toLowerCase().contains(qLower) ?? false)
+    ).toList();
+
+    return matches;
   }
 }
