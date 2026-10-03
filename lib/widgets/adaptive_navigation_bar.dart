@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cupertino_native/cupertino_native.dart';
 import '../providers/playback_provider.dart';
-import 'glass_bottom_navigation.dart';
 
 /// Platform detection helper for OS-specific rendering
 class PlatformInfo {

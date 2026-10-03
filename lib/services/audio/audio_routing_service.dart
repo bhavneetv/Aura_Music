@@ -168,4 +168,16 @@ class AudioRoutingService {
       return false;
     }
   }
+
+  Future<bool> openSystemOutputSwitcher() async {
+    if (!Platform.isAndroid) return false;
+
+    try {
+      final bool? success = await _methodChannel.invokeMethod('openSystemOutputSwitcher');
+      return success ?? false;
+    } on PlatformException catch (e) {
+      print('[AUDIO-ROUTING-SERVICE] openSystemOutputSwitcher error: $e');
+      return false;
+    }
+  }
 }

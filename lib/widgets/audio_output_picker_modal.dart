@@ -177,34 +177,50 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
                     );
                   }),
 
-                  // iOS Native AVRoutePickerView Embedded Control
-                  if (Platform.isIOS) ...[
+                  // System Output Switchers (Android Media Output Panel & iOS AVRoutePickerView)
+                  if (Platform.isAndroid || Platform.isIOS) ...[
                     const SizedBox(height: 8),
-                    Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: accentColor.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: accentColor.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.airplay_rounded, size: 20, color: accentColor),
-                          const SizedBox(width: 8),
-                          Text(
-                            'AirPlay / Bluetooth System Picker',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: accentColor),
-                          ),
-                          const SizedBox(width: 12),
-                          const SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: UiKitView(
-                              viewType: 'com.example.music_app/av_route_picker_view',
+                    InkWell(
+                      onTap: () {
+                        if (Platform.isAndroid) {
+                          AudioRoutingService.instance.openSystemOutputSwitcher();
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: accentColor.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: accentColor.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Platform.isIOS ? Icons.airplay_rounded : Icons.speaker_group_rounded,
+                              size: 20,
+                              color: accentColor,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Text(
+                              Platform.isIOS
+                                  ? 'AirPlay / Bluetooth System Picker'
+                                  : 'System Output Switcher (Bluetooth / Cast)',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: accentColor),
+                            ),
+                            if (Platform.isIOS) ...[
+                              const SizedBox(width: 12),
+                              const SizedBox(
+                                width: 32,
+                                height: 32,
+                                child: UiKitView(
+                                  viewType: 'com.example.music_app/av_route_picker_view',
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
                   ],
