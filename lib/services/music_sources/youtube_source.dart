@@ -245,9 +245,33 @@ class YouTubeSource implements MusicSource {
             .getManifest(videoId)
             .timeout(const Duration(seconds: 8));
 
+        // ROOT CAUSE FIX: YouTube DASH audio-only streams (itag 140/251) reject open-ended
+        // range requests (Range: bytes=0-) with HTTP 403 Forbidden because YouTube enforces
+        // SABR / PO Token chunking. In contrast, progressive muxed MP4 streams (itag 18) are
+        // standard progressive HTTP download streams that support open-ended range requests
+        // (206 Partial Content) and play flawlessly on ExoPlayer (Android) & AVPlayer (iOS).
+        // ExoPlayer automatically plays only the AAC audio track from the MP4 container without video.
+        final progressiveStreams = manifest.muxed.toList();
+        if (progressiveStreams.isNotEmpty) {
+          // itag 18 is 360p progressive MP4 with AAC stereo audio (96-128 kbps).
+          // It provides high quality audio with minimal video bitrate for quick buffering.
+          final itag18 = progressiveStreams.where((s) => s.tag == 18).firstOrNull;
+          final selected = itag18 ?? (progressiveStreams..sort((a, b) => a.bitrate.compareTo(b.bitrate))).first;
+          final streamUrl = selected.url.toString();
+
+          // Cache for 30 minutes (YouTube URLs expire unpredictably)
+          _streamCache[videoIdStr] = _CachedStream(
+            url: streamUrl,
+            expiry: DateTime.now().add(const Duration(minutes: 30)),
+          );
+
+          print('[AURA-YT] Successfully resolved progressive stream (itag ${selected.tag}, ${selected.container.name}, ${selected.size}) for $videoIdStr');
+          return streamUrl;
+        }
+
+        // Fallback to audio-only streams if no muxed stream is available
         final audioStreams = manifest.audioOnly;
         if (audioStreams.isNotEmpty) {
-          // Prefer MP4/AAC (e.g. itag 140) for universal hardware decoding in Android ExoPlayer
           final mp4Streams = audioStreams.where((s) => s.container.name.toLowerCase() == 'mp4').toList();
           final bestAudio = mp4Streams.isNotEmpty
               ? mp4Streams.withHighestBitrate()
@@ -260,18 +284,7 @@ class YouTubeSource implements MusicSource {
             expiry: DateTime.now().add(const Duration(minutes: 30)),
           );
 
-          print('[AURA-YT] Successfully resolved stream (${bestAudio.container.name}, ${bestAudio.bitrate}) for $videoIdStr');
-          return streamUrl;
-        }
-
-        // Fallback to muxed stream if no audio-only
-        if (manifest.muxed.isNotEmpty) {
-          final bestMuxed = manifest.muxed.withHighestBitrate();
-          final streamUrl = bestMuxed.url.toString();
-          _streamCache[videoIdStr] = _CachedStream(
-            url: streamUrl,
-            expiry: DateTime.now().add(const Duration(minutes: 30)),
-          );
+          print('[AURA-YT] Resolved fallback audio stream (${bestAudio.container.name}, ${bestAudio.bitrate}) for $videoIdStr');
           return streamUrl;
         }
 
