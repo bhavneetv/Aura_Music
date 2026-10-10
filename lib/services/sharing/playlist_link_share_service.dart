@@ -17,9 +17,41 @@ class DecodedPlaylistLink {
   });
 }
 
+class PlaylistImportEvent {
+  final String title;
+  final String description;
+  final int trackCount;
+  final List<Track> tracks;
+  final bool fromQrScan;
+
+  PlaylistImportEvent({
+    required this.title,
+    required this.description,
+    required this.trackCount,
+    required this.tracks,
+    this.fromQrScan = false,
+  });
+}
+
 class PlaylistLinkShareService {
   PlaylistLinkShareService._();
   static final PlaylistLinkShareService instance = PlaylistLinkShareService._();
+
+  static PlaylistImportEvent? pendingImportEvent;
+  static final ValueNotifier<PlaylistImportEvent?> importEventNotifier =
+      ValueNotifier<PlaylistImportEvent?>(null);
+
+  static void notifyImport(PlaylistImportEvent event) {
+    pendingImportEvent = event;
+    importEventNotifier.value = event;
+  }
+
+  static PlaylistImportEvent? consumePendingEvent() {
+    final event = pendingImportEvent ?? importEventNotifier.value;
+    pendingImportEvent = null;
+    importEventNotifier.value = null;
+    return event;
+  }
 
   static const String linkPrefix = 'aura://share?p=';
   static const String shortLinkPrefix = 'aura://share?dp=';
@@ -255,6 +287,30 @@ class PlaylistLinkShareService {
           description: 'Imported via Track IDs',
           tracks: tracks,
         );
+      }
+
+      // Check if raw short code (dpaste.com or dpaste.org short code without url prefix)
+      final cleanAlphanumeric = cleanCode.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
+      if (!cleanCode.contains('://') && !cleanCode.contains('p=') && !cleanCode.contains('ids=') && cleanAlphanumeric.length >= 3 && cleanAlphanumeric.length <= 30) {
+        // Try dpaste.com first
+        try {
+          final rawUrl = 'https://dpaste.com/$cleanAlphanumeric.txt';
+          final response = await _dio.get(rawUrl, options: Options(responseType: ResponseType.plain));
+          if (response.statusCode == 200 && response.data != null) {
+            final Map<String, dynamic> parsedMap = jsonDecode(response.data.toString()) as Map<String, dynamic>;
+            return _parsePlaylistMap(parsedMap);
+          }
+        } catch (_) {}
+
+        // Try dpaste.org next
+        try {
+          final rawUrl = 'https://dpaste.org/$cleanAlphanumeric.raw';
+          final response = await _dio.get(rawUrl, options: Options(responseType: ResponseType.plain));
+          if (response.statusCode == 200 && response.data != null) {
+            final Map<String, dynamic> parsedMap = jsonDecode(response.data.toString()) as Map<String, dynamic>;
+            return _parsePlaylistMap(parsedMap);
+          }
+        } catch (_) {}
       }
 
       // Synchronous decode fallback

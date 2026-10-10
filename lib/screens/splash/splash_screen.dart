@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../themes/app_theme.dart';
 import '../../services/storage/storage_service.dart';
+import '../../services/sharing/playlist_link_share_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -71,6 +72,18 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       }
     });
 
+    // If opened via QR code or shared link, navigate to /home immediately so user isn't stuck on splash!
+    if (PlaylistLinkShareService.pendingImportEvent != null || PlaylistLinkShareService.importEventNotifier.value != null) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          context.go('/home');
+        }
+      });
+      return;
+    }
+
+    PlaylistLinkShareService.importEventNotifier.addListener(_onSplashImportEvent);
+
     // Navigate out after 3 seconds
     Future.delayed(const Duration(milliseconds: 3200), () {
       if (mounted) {
@@ -83,8 +96,15 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     });
   }
 
+  void _onSplashImportEvent() {
+    if (PlaylistLinkShareService.importEventNotifier.value != null && mounted) {
+      context.go('/home');
+    }
+  }
+
   @override
   void dispose() {
+    PlaylistLinkShareService.importEventNotifier.removeListener(_onSplashImportEvent);
     _rotationController.dispose();
     _needleController.dispose();
     _fadeTextController.dispose();

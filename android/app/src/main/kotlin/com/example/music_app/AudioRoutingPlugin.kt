@@ -171,23 +171,54 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                 am.communicationDevice
             } else null
 
-            // Filter out earpiece, telephony, and internal line output nodes for media audio
+            // Filter out earpiece, telephony, Bluetooth SCO (caller voice), and internal line output nodes for media audio
             val validDevices = devices.filter { dev ->
                 val type = dev.type
                 type != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE &&
                 type != AudioDeviceInfo.TYPE_TELEPHONY &&
+                type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO &&
                 type != AudioDeviceInfo.TYPE_AUX_LINE &&
                 type != AudioDeviceInfo.TYPE_LINE_ANALOG &&
                 type != AudioDeviceInfo.TYPE_LINE_DIGITAL &&
                 getDeviceTypeName(type) != "unknown"
             }
 
-            val btDevice = validDevices.firstOrNull { 
+            // Deduplicate devices by product name, prioritizing A2DP stereo media over lower-priority profiles
+            val deduplicatedDevices = mutableListOf<AudioDeviceInfo>()
+            val seenNames = mutableSetOf<String>()
+
+            val sortedDevices = validDevices.sortedWith(Comparator { a, b ->
+                fun rank(t: Int): Int = when (t) {
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> 1
+                    AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> 2
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 3
+                    AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> 4
+                    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> 5
+                    else -> 10
+                }
+                rank(a.type).compareTo(rank(b.type))
+            })
+
+            for (dev in sortedDevices) {
+                if (dev.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    deduplicatedDevices.add(dev)
+                } else {
+                    val rawName = dev.productName.toString().trim().lowercase()
+                    if (rawName.isNotEmpty() && !seenNames.contains(rawName)) {
+                        seenNames.add(rawName)
+                        deduplicatedDevices.add(dev)
+                    } else if (rawName.isEmpty()) {
+                        deduplicatedDevices.add(dev)
+                    }
+                }
+            }
+
+            val btDevice = deduplicatedDevices.firstOrNull { 
                 it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || 
                 it.type == AudioDeviceInfo.TYPE_BLE_HEADSET || 
                 it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER 
             }
-            val wiredDevice = validDevices.firstOrNull { 
+            val wiredDevice = deduplicatedDevices.firstOrNull { 
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET || 
                 it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || 
                 it.type == AudioDeviceInfo.TYPE_USB_HEADSET || 
@@ -197,7 +228,7 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
             val isForcedSpeaker = (am.isSpeakerphoneOn && am.mode == AudioManager.MODE_IN_COMMUNICATION) ||
                 (currentCommunicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
 
-            for (dev in validDevices) {
+            for (dev in deduplicatedDevices) {
                 val typeName = getDeviceTypeName(dev.type)
                 val isSpeaker = dev.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
 
@@ -218,7 +249,7 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                     name = when (dev.type) {
                         AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone Speaker"
                         AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
-                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> "Bluetooth Audio"
+                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> "Bluetooth Audio"
                         else -> typeName.replaceFirstChar { it.uppercase() }
                     }
                 }
@@ -288,7 +319,8 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && deviceId != null) {
                     val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                     val target = devices.firstOrNull { it.id == deviceId }
-                    if (target != null && target.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    if (target != null && target.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && target.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                        am.mode = AudioManager.MODE_NORMAL
                         am.setCommunicationDevice(target)
                     }
                 }
@@ -336,7 +368,6 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
             AudioDeviceInfo.TYPE_USB_HEADSET,
             AudioDeviceInfo.TYPE_USB_DEVICE -> "headset"
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
             AudioDeviceInfo.TYPE_BLE_HEADSET,
             AudioDeviceInfo.TYPE_BLE_SPEAKER -> "bluetooth"
             AudioDeviceInfo.TYPE_AUX_LINE,

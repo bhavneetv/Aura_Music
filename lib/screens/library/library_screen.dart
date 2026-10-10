@@ -11,8 +11,10 @@ import '../../widgets/app_artwork_image.dart';
 import 'playlist_detail_screen.dart';
 import 'recently_played_screen.dart';
 import 'spotify_import_preview_screen.dart';
+import 'package:flutter/services.dart';
 import '../../services/sharing/playlist_link_share_service.dart';
 import '../sharing/remote_link_share_modal.dart';
+import '../../widgets/playlist_imported_dialog.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -33,10 +35,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _loadPlaylists();
+    PlaylistLinkShareService.importEventNotifier.addListener(_loadPlaylists);
   }
 
   @override
   void dispose() {
+    PlaylistLinkShareService.importEventNotifier.removeListener(_loadPlaylists);
     _tabController.dispose();
     _playlistNameController.dispose();
     _playlistDescController.dispose();
@@ -50,28 +54,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     });
   }
 
-  void _createPlaylist() async {
-    final name = _playlistNameController.text.trim();
-    final desc = _playlistDescController.text.trim();
-    if (name.isNotEmpty) {
-      final playlists = StorageService.getPlaylists();
-      final newPl = {
-        'id': DateTime.now().millisecondsSinceEpoch.toString(),
-        'name': name,
-        'description': desc.isNotEmpty ? desc : 'A custom playlist',
-        'trackIds': <String>[],
-      };
-      playlists.add(newPl);
-      await StorageService.savePlaylists(playlists);
-      
-      _playlistNameController.clear();
-      _playlistDescController.clear();
-      _loadPlaylists();
-      Navigator.pop(context);
-    }
-  }
-
-  void _showCreatePlaylistBottomSheet() {
+  void _showAddPlaylistModal({int initialTab = 0}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = ref.read(customizationProvider).accentColor;
 
@@ -79,116 +62,31 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          padding: EdgeInsets.only(
-            left: 24, 
-            right: 24, 
-            top: 24, 
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24
-          ),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text('Create Custom Playlist 🎵', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _playlistNameController,
-                decoration: InputDecoration(
-                  labelText: 'Playlist Title',
-                  filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _playlistDescController,
-                decoration: InputDecoration(
-                  labelText: 'Description (Optional)',
-                  filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _createPlaylist,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accentColor,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: const Text('Create Playlist', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+      builder: (modalContext) {
+        int selectedTab = initialTab;
+        String? inlineError;
+        bool isLoading = false;
 
-  void _showImportPlaylistBottomSheet() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accentColor = ref.read(customizationProvider).accentColor;
-    
-    String? inlineError;
-    bool isLoading = false;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (sheetContext, setModalState) {
             return Container(
               padding: EdgeInsets.only(
                 left: 24, 
                 right: 24, 
-                top: 24, 
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24
+                top: 20, 
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
               ),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Center(
                     child: Container(
-                      width: 36,
+                      width: 40,
                       height: 4,
                       decoration: BoxDecoration(
                         color: Colors.grey.withValues(alpha: 0.3),
@@ -196,94 +94,242 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Import Playlist Link / Code 🎧', 
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Paste an Aura shared link/code or Spotify playlist link below to import.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: _spotifyUrlController,
-                    enabled: !isLoading,
-                    decoration: InputDecoration(
-                      labelText: 'Aura Shared Link or Spotify URL',
-                      errorText: inlineError,
-                      filled: true,
-                      fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accentColor, width: 1.5)),
-                      suffixIcon: _spotifyUrlController.text.isNotEmpty 
-                        ? IconButton(
-                            icon: const Icon(Icons.clear_rounded),
-                            onPressed: () {
-                              _spotifyUrlController.clear();
+
+                  // Header Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        selectedTab == 0 ? 'Import Playlist 📥' : 'Create Playlist 🎵',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Outfit',
+                          color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(sheetContext),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Two-way Sliding Bar Selector
+                  Container(
+                    height: 46,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(23),
+                      border: Border.all(
+                        color: isDark ? Colors.white12 : Colors.black12,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        // Sliding Tab 1: Import
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
                               setModalState(() {
+                                selectedTab = 0;
                                 inlineError = null;
                               });
                             },
-                          )
-                        : null,
-                    ),
-                    onChanged: (_) {
-                      if (inlineError != null) {
-                        setModalState(() {
-                          inlineError = null;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: isLoading ? null : () => Navigator.pop(context),
-                        child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: isLoading 
-                          ? null 
-                          : () async {
-                              final url = _spotifyUrlController.text.trim();
-                              
-                              // Check if stateless Aura link or ultra-short relay code
-                              final decodedAura = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(url);
-                              if (decodedAura != null) {
-                                final newPl = {
-                                  'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                                  'name': decodedAura.title,
-                                  'description': decodedAura.description.isNotEmpty ? decodedAura.description : 'Imported via Link',
-                                  'trackIds': decodedAura.tracks.map((t) => t.id).toList(),
-                                  'tracks': decodedAura.tracks.map((t) => t.toJson()).toList(),
-                                };
-                                final playlists = StorageService.getPlaylists();
-                                playlists.insert(0, newPl);
-                                await StorageService.savePlaylists(playlists);
-
-                                Navigator.pop(context);
-                                _spotifyUrlController.clear();
-                                _loadPlaylists();
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Imported "${decodedAura.title}" with ${decodedAura.tracks.length} tracks! 🎵'),
-                                    backgroundColor: accentColor,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeInOut,
+                              decoration: BoxDecoration(
+                                color: selectedTab == 0 ? accentColor : Colors.transparent,
+                                borderRadius: BorderRadius.circular(19),
+                                boxShadow: selectedTab == 0
+                                    ? [
+                                        BoxShadow(
+                                          color: accentColor.withValues(alpha: 0.35),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ]
+                                    : [],
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.download_rounded,
+                                    size: 17,
+                                    color: selectedTab == 0 ? Colors.black : (isDark ? Colors.white70 : Colors.black54),
                                   ),
-                                );
-                                return;
-                              }
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Import Playlist',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'Outfit',
+                                      color: selectedTab == 0 ? Colors.black : (isDark ? Colors.white70 : Colors.black54),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
 
-                              final playlistId = SpotifyImportService.instance.validateAndExtractPlaylistId(url);
-                              
-                              if (playlistId == null) {
+                        // Sliding Tab 2: Create Playlist
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setModalState(() {
+                                selectedTab = 1;
+                                inlineError = null;
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeInOut,
+                              decoration: BoxDecoration(
+                                color: selectedTab == 1 ? accentColor : Colors.transparent,
+                                borderRadius: BorderRadius.circular(19),
+                                boxShadow: selectedTab == 1
+                                    ? [
+                                        BoxShadow(
+                                          color: accentColor.withValues(alpha: 0.35),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ]
+                                    : [],
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.add_rounded,
+                                    size: 17,
+                                    color: selectedTab == 1 ? Colors.black : (isDark ? Colors.white70 : Colors.black54),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Create Playlist',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'Outfit',
+                                      color: selectedTab == 1 ? Colors.black : (isDark ? Colors.white70 : Colors.black54),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // TAB CONTENT
+                  if (selectedTab == 0) ...[
+                    // --- TAB 0: IMPORT PLAYLIST ---
+                    Text(
+                      'Paste an Aura shared link, playlist code, or Spotify URL:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _spotifyUrlController,
+                      enabled: !isLoading,
+                      autofocus: true,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                        fontSize: 14,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. 7KX9Y2 or aura://share?dpc=... or Spotify URL',
+                        hintStyle: TextStyle(
+                          fontSize: 12.5,
+                          color: isDark ? Colors.white38 : Colors.black38,
+                        ),
+                        errorText: inlineError,
+                        prefixIcon: Icon(Icons.link_rounded, color: accentColor, size: 20),
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_spotifyUrlController.text.isNotEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                onPressed: () {
+                                  _spotifyUrlController.clear();
+                                  setModalState(() {
+                                    inlineError = null;
+                                  });
+                                },
+                              ),
+                            TextButton(
+                              onPressed: () async {
+                                final data = await Clipboard.getData(Clipboard.kTextPlain);
+                                if (data?.text != null && data!.text!.trim().isNotEmpty) {
+                                  _spotifyUrlController.text = data.text!.trim();
+                                  setModalState(() {
+                                    inlineError = null;
+                                  });
+                                }
+                              },
+                              child: Text(
+                                'PASTE',
+                                style: TextStyle(
+                                  color: accentColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                        ),
+                        filled: true,
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: accentColor, width: 1.5),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      ),
+                      onChanged: (_) {
+                        if (inlineError != null) {
+                          setModalState(() {
+                            inlineError = null;
+                          });
+                        }
+                      },
+                    ),
+
+                    const SizedBox(height: 22),
+
+                    ElevatedButton(
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              final input = _spotifyUrlController.text.trim();
+                              if (input.isEmpty) {
                                 setModalState(() {
-                                  inlineError = 'Please enter a valid Aura shared link or Spotify playlist URL.';
+                                  inlineError = 'Please enter a playlist code or paste a link.';
                                 });
                                 return;
                               }
@@ -294,45 +340,188 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                               });
 
                               try {
-                                final preview = await SpotifyImportService.instance.fetchPlaylistPreview(url);
-                                Navigator.pop(context);
-                                _spotifyUrlController.clear();
-                                
-                                if (context.mounted) {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => SpotifyImportPreviewScreen(preview: preview),
-                                    ),
-                                  ).then((_) => _loadPlaylists());
+                                // 1. Attempt Aura Link or code decode
+                                final decodedAura = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(input);
+                                if (decodedAura != null && decodedAura.tracks.isNotEmpty) {
+                                  final newPl = {
+                                    'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                                    'name': decodedAura.title,
+                                    'description': decodedAura.description.isNotEmpty
+                                        ? decodedAura.description
+                                        : 'Imported via Shared Code / Link',
+                                    'trackIds': decodedAura.tracks.map((t) => t.id).toList(),
+                                    'tracks': decodedAura.tracks.map((t) => t.toJson()).toList(),
+                                  };
+                                  final playlists = StorageService.getPlaylists();
+                                  playlists.insert(0, newPl);
+                                  await StorageService.savePlaylists(playlists);
+
+                                  final importEvent = PlaylistImportEvent(
+                                    title: decodedAura.title,
+                                    description: decodedAura.description,
+                                    trackCount: decodedAura.tracks.length,
+                                    tracks: decodedAura.tracks,
+                                    fromQrScan: false,
+                                  );
+
+                                  Navigator.pop(sheetContext);
+                                  _spotifyUrlController.clear();
+                                  _loadPlaylists();
+
+                                  // Show the celebratory popup!
+                                  if (context.mounted) {
+                                    PlaylistImportSuccessDialog.show(context, importEvent, ref);
+                                  }
+                                  return;
                                 }
+
+                                // 2. Attempt Spotify URL import
+                                final playlistId = SpotifyImportService.instance.validateAndExtractPlaylistId(input);
+                                if (playlistId != null) {
+                                  final preview = await SpotifyImportService.instance.fetchPlaylistPreview(input);
+                                  Navigator.pop(sheetContext);
+                                  _spotifyUrlController.clear();
+
+                                  if (context.mounted) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => SpotifyImportPreviewScreen(preview: preview),
+                                      ),
+                                    ).then((_) => _loadPlaylists());
+                                  }
+                                  return;
+                                }
+
+                                setModalState(() {
+                                  isLoading = false;
+                                  inlineError = 'Could not find or decode playlist. Please check your code or link.';
+                                });
                               } catch (e) {
                                 setModalState(() {
                                   isLoading = false;
-                                  inlineError = e.toString().replaceFirst('Exception: ', '');
+                                  inlineError = 'Failed to load playlist: $e';
                                 });
                               }
                             },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentColor,
-                          disabledBackgroundColor: accentColor.withValues(alpha: 0.3),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        child: isLoading
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accentColor,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        elevation: 2,
+                      ),
+                      child: isLoading
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                             )
-                          : const Text('Load Preview', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                          : const Text(
+                              'Import Playlist',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                    ),
+                  ] else ...[
+                    // --- TAB 1: CREATE PLAYLIST ---
+                    Text(
+                      'Give your new playlist a title and optional description:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.black54,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _playlistNameController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: 'Playlist Title',
+                        filled: true,
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: accentColor, width: 1.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _playlistDescController,
+                      decoration: InputDecoration(
+                        labelText: 'Description (Optional)',
+                        filled: true,
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: accentColor, width: 1.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    ElevatedButton(
+                      onPressed: () {
+                        final name = _playlistNameController.text.trim();
+                        final desc = _playlistDescController.text.trim();
+                        if (name.isNotEmpty) {
+                          final playlists = StorageService.getPlaylists();
+                          final newPl = {
+                            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                            'name': name,
+                            'description': desc.isNotEmpty ? desc : 'A custom playlist',
+                            'trackIds': <String>[],
+                            'tracks': <Map<String, dynamic>>[],
+                          };
+                          playlists.add(newPl);
+                          StorageService.savePlaylists(playlists);
+
+                          _playlistNameController.clear();
+                          _playlistDescController.clear();
+                          _loadPlaylists();
+                          Navigator.pop(sheetContext);
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Created playlist "$name"! 🎉'),
+                              backgroundColor: accentColor,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accentColor,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        elevation: 2,
+                      ),
+                      child: const Text(
+                        'Create Playlist',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );
-          }
+          },
         );
       },
     );
@@ -387,8 +576,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                       ),
                       child: Icon(Icons.add_rounded, color: accentColor, size: 20),
                     ),
-                    tooltip: 'Create Playlist',
-                    onPressed: _showCreatePlaylistBottomSheet,
+                    tooltip: 'Add / Import Playlist',
+                    onPressed: () => _showAddPlaylistModal(initialTab: 0),
                   ),
                   IconButton(
                     icon: Container(
@@ -399,8 +588,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                       ),
                       child: Icon(Icons.import_export_rounded, color: accentColor, size: 20),
                     ),
-                    tooltip: 'Import Spotify Playlist',
-                    onPressed: _showImportPlaylistBottomSheet,
+                    tooltip: 'Import Playlist',
+                    onPressed: () => _showAddPlaylistModal(initialTab: 0),
                   ),
                 ],
               ),
@@ -539,9 +728,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
             const Text('Tap "+" in top right or import from Spotify!', style: TextStyle(color: Colors.grey, fontSize: 13)),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: _showCreatePlaylistBottomSheet,
+              onPressed: () => _showAddPlaylistModal(initialTab: 0),
               icon: const Icon(Icons.add_rounded, color: Colors.black, size: 18),
-              label: const Text('Create Playlist', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              label: const Text('Add / Import Playlist', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(backgroundColor: accentColor),
             ),
           ],

@@ -55,11 +55,22 @@ class StorageService {
   }
 
   static bool hasCompletedOnboarding() {
-    return getSetting('completed_onboarding', defaultValue: false) as bool;
+    final fromSettings = getSetting('completed_onboarding', defaultValue: false) as bool;
+    try {
+      final box = Hive.box(_profileBox);
+      final fromProfile = box.get('completed', defaultValue: false) as bool;
+      return fromSettings || fromProfile;
+    } catch (_) {
+      return fromSettings;
+    }
   }
 
   static Future<void> setCompletedOnboarding(bool completed) async {
     await saveSetting('completed_onboarding', completed);
+    try {
+      final box = Hive.box(_profileBox);
+      await box.put('completed', completed);
+    } catch (_) {}
   }
 
   static bool isCrossfadeEnabled() {
@@ -112,13 +123,11 @@ class StorageService {
   // ── Onboarding Profile ──────────────────────────────────────
   
   static bool isOnboardingComplete() {
-    final box = Hive.box(_profileBox);
-    return box.get('completed', defaultValue: false) as bool;
+    return hasCompletedOnboarding();
   }
 
   static Future<void> completeOnboarding() async {
-    final box = Hive.box(_profileBox);
-    await box.put('completed', true);
+    await setCompletedOnboarding(true);
   }
 
   static List<String> getPreferredLanguages() {

@@ -23,6 +23,9 @@ import '../../widgets/audio_output_picker_modal.dart';
 import '../../providers/multi_device_sync_provider.dart';
 import '../../services/update/update_service.dart';
 import '../../services/music_sources/source_manager.dart';
+import '../../services/sharing/playlist_link_share_service.dart';
+import '../../widgets/playlist_imported_dialog.dart';
+import '../../routes/app_routes.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -40,18 +43,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     _selectedLanguage = StorageService.getLastSelectedHomeLanguage();
     SourceManager.fallbackNotifier.addListener(_handleSourceFallback);
+    PlaylistLinkShareService.importEventNotifier.addListener(_handlePlaylistImportEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       UpdateService.checkForUpdates(context);
-      if (!StorageService.hasCompletedOnboarding()) {
+      final hasPendingImport = PlaylistLinkShareService.pendingImportEvent != null ||
+          PlaylistLinkShareService.importEventNotifier.value != null;
+      if (!hasPendingImport && !StorageService.hasCompletedOnboarding()) {
         _showFirstLaunchOnboardingModal(context);
       }
+      _checkPendingPlaylistImport();
     });
   }
 
   @override
   void dispose() {
     SourceManager.fallbackNotifier.removeListener(_handleSourceFallback);
+    PlaylistLinkShareService.importEventNotifier.removeListener(_handlePlaylistImportEvent);
     super.dispose();
+  }
+
+  void _checkPendingPlaylistImport() {
+    final event = PlaylistLinkShareService.consumePendingEvent();
+    if (event != null && mounted) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          final targetContext = rootNavigatorKey.currentContext ?? context;
+          PlaylistImportSuccessDialog.show(targetContext, event, ref);
+        }
+      });
+    }
+  }
+
+  void _handlePlaylistImportEvent() {
+    final event = PlaylistLinkShareService.consumePendingEvent();
+    if (event == null || !mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final targetContext = rootNavigatorKey.currentContext ?? context;
+        PlaylistImportSuccessDialog.show(targetContext, event, ref);
+      }
+    });
   }
 
   void _handleSourceFallback() {

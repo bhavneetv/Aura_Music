@@ -33,15 +33,8 @@ class MainActivity : AudioServiceActivity() {
             }
         }
 
-        // Process any voice intent or deep link received before Flutter was initialized
-        pendingVoiceQuery?.let { query ->
-            sendVoiceQueryToFlutter(query)
-            pendingVoiceQuery = null
-        }
-        pendingDeepLink?.let { link ->
-            sendDeepLinkToFlutter(link)
-            pendingDeepLink = null
-        }
+        // Keep pendingVoiceQuery and pendingDeepLink intact so Flutter can fetch them via
+        // getPendingVoiceQuery and getPendingDeepLink once Dart engine is fully booted.
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

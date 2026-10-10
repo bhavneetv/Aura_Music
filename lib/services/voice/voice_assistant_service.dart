@@ -65,29 +65,26 @@ class VoiceAssistantService {
         final newPl = {
           'id': DateTime.now().millisecondsSinceEpoch.toString(),
           'name': decoded.title,
-          'description': decoded.description.isNotEmpty ? decoded.description : 'Imported via Link',
+          'description': decoded.description.isNotEmpty ? decoded.description : 'Imported via QR / Link',
           'trackIds': decoded.tracks.map((t) => t.id).toList(),
-          'tracks': decoded.tracks.map((t) => {
-            'id': t.id,
-            'title': t.title,
-            'artist': t.artist,
-            'album': t.album,
-            'duration': t.duration,
-            'artworkUrl': t.artworkUrl,
-            'audioUrl': t.audioUrl,
-            'genre': t.genre,
-          }).toList(),
+          'tracks': decoded.tracks.map((t) => t.toJson()).toList(),
         };
         final playlists = StorageService.getPlaylists();
         playlists.insert(0, newPl);
         await StorageService.savePlaylists(playlists);
 
-        if (_container != null) {
-          final notifier = _container!.read(playbackProvider.notifier);
-          notifier.playCustomQueue(decoded.tracks, initialIndex: 0);
-        }
+        final importEvent = PlaylistImportEvent(
+          title: decoded.title,
+          description: decoded.description,
+          trackCount: decoded.tracks.length,
+          tracks: decoded.tracks,
+          fromQrScan: true,
+        );
+        PlaylistLinkShareService.notifyImport(importEvent);
 
-        debugPrint('[DeepLink] Automatically imported & started playing playlist: ${decoded.title}');
+        await StorageService.setCompletedOnboarding(true);
+
+        debugPrint('[DeepLink] Successfully imported playlist without auto-play: ${decoded.title}');
       }
     } catch (e) {
       debugPrint('[DeepLink] Error handling incoming deep link: $e');
