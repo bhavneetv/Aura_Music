@@ -260,16 +260,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                   'name': decodedAura.title,
                                   'description': decodedAura.description.isNotEmpty ? decodedAura.description : 'Imported via Link',
                                   'trackIds': decodedAura.tracks.map((t) => t.id).toList(),
-                                  'tracks': decodedAura.tracks.map((t) => {
-                                    'id': t.id,
-                                    'title': t.title,
-                                    'artist': t.artist,
-                                    'album': t.album,
-                                    'duration': t.duration,
-                                    'artworkUrl': t.artworkUrl,
-                                    'audioUrl': t.audioUrl,
-                                    'genre': t.genre,
-                                  }).toList(),
+                                  'tracks': decodedAura.tracks.map((t) => t.toJson()).toList(),
                                 };
                                 final playlists = StorageService.getPlaylists();
                                 playlists.insert(0, newPl);

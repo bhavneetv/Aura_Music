@@ -152,7 +152,9 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
             "setVirtual3dSound" -> {
                 val enabled = call.argument<Boolean>("enabled") ?: false
                 val strength = (call.argument<Double>("strength") ?: 0.65).toFloat()
-                val success = setVirtual3dSound(enabled, strength)
+                val mode = call.argument<String>("mode") ?: "Wide Room"
+                val audioSessionId = call.argument<Int>("audioSessionId") ?: 0
+                val success = setVirtual3dSound(enabled, strength, mode, audioSessionId)
                 result.success(success)
             }
             else -> result.notImplemented()
@@ -354,22 +356,135 @@ class AudioRoutingPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Event
     }
 
     private var virtualizer: android.media.audiofx.Virtualizer? = null
+    private var bassBoost: android.media.audiofx.BassBoost? = null
+    private var presetReverb: android.media.audiofx.PresetReverb? = null
+    private var activeSessionId: Int = 0
 
-    private fun setVirtual3dSound(enabled: Boolean, strength: Float): Boolean {
+    private fun releaseEffects() {
+        android.util.Log.d("AURA-3D", "Releasing spatial 3D effects on session $activeSessionId")
+        try {
+            virtualizer?.enabled = false
+            virtualizer?.release()
+        } catch (_: Exception) {}
+        virtualizer = null
+
+        try {
+            bassBoost?.enabled = false
+            bassBoost?.release()
+        } catch (_: Exception) {}
+        bassBoost = null
+
+        try {
+            presetReverb?.enabled = false
+            presetReverb?.release()
+        } catch (_: Exception) {}
+        presetReverb = null
+        activeSessionId = -1
+    }
+
+    private fun setVirtual3dSound(enabled: Boolean, strength: Float, mode: String, audioSessionId: Int): Boolean {
+        android.util.Log.d("AURA-3D", "setVirtual3dSound: enabled=$enabled, strength=$strength, mode=$mode, audioSessionId=$audioSessionId (current activeSession=$activeSessionId)")
+        if (!enabled) {
+            releaseEffects()
+            return true
+        }
+
         return try {
-            if (virtualizer == null) {
-                // Attach 3D spatial audio virtualizer to the device's main output audio mix
-                virtualizer = android.media.audiofx.Virtualizer(0, 0)
-            }
-            virtualizer?.let { v ->
-                v.enabled = enabled
-                if (enabled && v.strengthSupported) {
-                    val s = (strength.coerceIn(0f, 1f) * 1000).toInt().toShort()
-                    v.setStrength(s)
+            val targetSession = if (audioSessionId > 0) audioSessionId else 0
+
+            // If audio session ID changed or effects not created, re-create effects on target session
+            if (virtualizer == null || targetSession != activeSessionId) {
+                releaseEffects()
+                activeSessionId = targetSession
+                android.util.Log.d("AURA-3D", "Creating audiofx on targetSession: $targetSession")
+                try {
+                    virtualizer = android.media.audiofx.Virtualizer(0, targetSession)
+                    android.util.Log.d("AURA-3D", "Virtualizer created successfully on session $targetSession")
+                } catch (e: Exception) {
+                    android.util.Log.e("AURA-3D", "Virtualizer failed on session $targetSession, trying fallback to 0: $e")
+                    if (targetSession != 0) {
+                        try {
+                            virtualizer = android.media.audiofx.Virtualizer(0, 0)
+                            activeSessionId = 0
+                        } catch (err: Exception) {
+                            android.util.Log.e("AURA-3D", "Virtualizer fallback to 0 also failed: $err")
+                        }
+                    }
+                }
+
+                try {
+                    bassBoost = android.media.audiofx.BassBoost(0, activeSessionId)
+                    android.util.Log.d("AURA-3D", "BassBoost created successfully on session $activeSessionId")
+                } catch (e: Exception) {
+                    android.util.Log.w("AURA-3D", "BassBoost creation failed: $e")
+                }
+
+                try {
+                    presetReverb = android.media.audiofx.PresetReverb(0, activeSessionId)
+                    android.util.Log.d("AURA-3D", "PresetReverb created successfully on session $activeSessionId")
+                } catch (e: Exception) {
+                    android.util.Log.w("AURA-3D", "PresetReverb creation failed: $e")
                 }
             }
+
+            // Apply 3D Virtualizer
+            virtualizer?.let { v ->
+                v.enabled = enabled
+                if (enabled) {
+                    if (v.strengthSupported) {
+                        val s = (strength.coerceIn(0f, 1f) * 1000).toInt().toShort()
+                        v.setStrength(s)
+                        android.util.Log.d("AURA-3D", "Virtualizer strength set to $s")
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        try {
+                            v.forceVirtualizationMode(android.media.audiofx.Virtualizer.VIRTUALIZATION_MODE_BINAURAL)
+                            android.util.Log.d("AURA-3D", "Virtualizer mode set to BINAURAL")
+                        } catch (_: Exception) {
+                            try {
+                                v.forceVirtualizationMode(android.media.audiofx.Virtualizer.VIRTUALIZATION_MODE_TRANSAURAL)
+                                android.util.Log.d("AURA-3D", "Virtualizer mode set to TRANSAURAL fallback")
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+
+            // Apply Bass Boost & Reverb based on preset mode for rich spatial presence
+            bassBoost?.let { bb ->
+                bb.enabled = enabled
+                if (enabled && bb.strengthSupported) {
+                    val boostStrength: Short = when (mode) {
+                        "Bass Surround 3D" -> ((strength * 800).coerceIn(0f, 1000f)).toInt().toShort()
+                        "Concert Hall" -> ((strength * 450).coerceIn(0f, 1000f)).toInt().toShort()
+                        "Wide Room" -> ((strength * 250).coerceIn(0f, 1000f)).toInt().toShort()
+                        else -> 0
+                    }
+                    bb.setStrength(boostStrength)
+                    android.util.Log.d("AURA-3D", "BassBoost strength set to $boostStrength for $mode")
+                }
+            }
+
+            presetReverb?.let { pr ->
+                pr.enabled = enabled
+                if (enabled) {
+                    val reverbPreset: Short = when (mode) {
+                        "Concert Hall" -> android.media.audiofx.PresetReverb.PRESET_LARGEHALL
+                        "Wide Room" -> android.media.audiofx.PresetReverb.PRESET_LARGEROOM
+                        "Bass Surround 3D" -> android.media.audiofx.PresetReverb.PRESET_MEDIUMHALL
+                        "Subtle Headstage" -> android.media.audiofx.PresetReverb.PRESET_SMALLROOM
+                        else -> android.media.audiofx.PresetReverb.PRESET_NONE
+                    }
+                    try {
+                        pr.preset = reverbPreset
+                        android.util.Log.d("AURA-3D", "PresetReverb preset set to $reverbPreset for $mode")
+                    } catch (_: Exception) {}
+                }
+            }
+
             true
         } catch (e: Exception) {
+            android.util.Log.e("AURA-3D", "Error applying 3D sound: $e")
             e.printStackTrace()
             false
         }

@@ -480,16 +480,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                         'name': name,
                         'description': 'Created from active queue (${targetTracks.length} tracks)',
                         'trackIds': targetTracks.map((t) => t.id).toList(),
-                        'tracks': targetTracks.map((t) => {
-                          'id': t.id,
-                          'title': t.title,
-                          'artist': t.artist,
-                          'album': t.album,
-                          'duration': t.duration,
-                          'artworkUrl': t.artworkUrl,
-                          'audioUrl': t.audioUrl,
-                          'genre': t.genre,
-                        }).toList(),
+                        'tracks': targetTracks.map((t) => t.toJson()).toList(),
                       };
                       playlists.add(newPl);
                       await StorageService.savePlaylists(playlists);

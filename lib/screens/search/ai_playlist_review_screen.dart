@@ -23,6 +23,7 @@ class AiPlaylistReviewScreen extends ConsumerStatefulWidget {
 class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen> {
   late TextEditingController _nameController;
   late Set<String> _selectedTrackIds;
+  String _sourceFilter = 'All'; // 'All', 'Saavn', 'YT'
 
   @override
   void initState() {
@@ -37,13 +38,167 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
     super.dispose();
   }
 
+  List<Track> get _visibleTracks {
+    if (_sourceFilter == 'Saavn') {
+      return widget.tracks.where((t) => t.isJioSaavn).toList();
+    } else if (_sourceFilter == 'YT') {
+      return widget.tracks.where((t) => t.isYouTube).toList();
+    }
+    return widget.tracks;
+  }
+
+  int get _allCount => widget.tracks.length;
+  int get _saavnCount => widget.tracks.where((t) => t.isJioSaavn).length;
+  int get _ytCount => widget.tracks.where((t) => t.isYouTube).length;
+
+  Widget _buildSourceSliderBar({
+    required BuildContext context,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.all(3.5),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C22) : const Color(0xFFE8E8EE),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            _buildSliderSegment(
+              label: 'All',
+              filterKey: 'All',
+              count: _allCount,
+              icon: Icons.all_inclusive_rounded,
+              activeColor: accentColor,
+              activeTextColor: Colors.black,
+              isDark: isDark,
+            ),
+            const SizedBox(width: 4),
+            _buildSliderSegment(
+              label: 'Saavn',
+              filterKey: 'Saavn',
+              count: _saavnCount,
+              icon: Icons.graphic_eq_rounded,
+              activeColor: const Color(0xFF00D1B2),
+              activeTextColor: Colors.black,
+              isDark: isDark,
+            ),
+            const SizedBox(width: 4),
+            _buildSliderSegment(
+              label: 'YT',
+              filterKey: 'YT',
+              count: _ytCount,
+              icon: Icons.smart_display_rounded,
+              activeColor: const Color(0xFFFF0033),
+              activeTextColor: Colors.white,
+              isDark: isDark,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSliderSegment({
+    required String label,
+    required String filterKey,
+    required int count,
+    required IconData icon,
+    required Color activeColor,
+    required Color activeTextColor,
+    required bool isDark,
+  }) {
+    final isSelected = _sourceFilter == filterKey;
+
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (_sourceFilter != filterKey) {
+            triggerHaptic(HapticFeedbackType.selection);
+            setState(() {
+              _sourceFilter = filterKey;
+            });
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: activeColor.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
+                  fontFamily: 'Outfit',
+                  color: isSelected ? activeTextColor : (isDark ? Colors.white70 : Colors.black87),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? (activeTextColor == Colors.black ? Colors.black.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.25))
+                      : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final customBranding = ref.watch(customizationProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = customBranding.accentColor;
     const goldColor = Color(0xFFFFC72C);
 
     final selectedTracks = widget.tracks.where((t) => _selectedTrackIds.contains(t.id)).toList();
+    final visibleTracks = _visibleTracks;
+    final allVisibleSelected = visibleTracks.isNotEmpty && visibleTracks.every((t) => _selectedTrackIds.contains(t.id));
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0F0F11) : const Color(0xFFFAF7F2),
@@ -67,7 +222,7 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
         children: [
           // Header Card
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -107,7 +262,7 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${selectedTracks.length} / ${widget.tracks.length} Tracks Selected',
+                        '${selectedTracks.length} / ${widget.tracks.length} Selected',
                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: goldColor),
                       ),
                     ),
@@ -115,20 +270,24 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
                     TextButton.icon(
                       onPressed: () {
                         setState(() {
-                          if (_selectedTrackIds.length == widget.tracks.length) {
-                            _selectedTrackIds.clear();
+                          if (allVisibleSelected) {
+                            for (final t in visibleTracks) {
+                              _selectedTrackIds.remove(t.id);
+                            }
                           } else {
-                            _selectedTrackIds = widget.tracks.map((t) => t.id).toSet();
+                            for (final t in visibleTracks) {
+                              _selectedTrackIds.add(t.id);
+                            }
                           }
                         });
                       },
                       icon: Icon(
-                        _selectedTrackIds.length == widget.tracks.length ? Icons.deselect_rounded : Icons.select_all_rounded,
+                        allVisibleSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
                         size: 16,
                         color: goldColor,
                       ),
                       label: Text(
-                        _selectedTrackIds.length == widget.tracks.length ? 'Deselect All' : 'Select All',
+                        allVisibleSelected ? 'Deselect (${visibleTracks.length})' : 'Select All (${visibleTracks.length})',
                         style: const TextStyle(fontSize: 12, color: goldColor, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -138,15 +297,48 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
             ),
           ),
 
+          // 3 Source Filter Slider Bar: All, Saavn, YT
+          _buildSourceSliderBar(
+            context: context,
+            accentColor: accentColor,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 4),
+
           // Songs Checklist
           Expanded(
-            child: widget.tracks.isEmpty
-                ? const Center(child: Text('No tracks found for query', style: TextStyle(color: Colors.grey)))
+            child: visibleTracks.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _sourceFilter == 'YT' ? Icons.smart_display_outlined : Icons.graphic_eq_rounded,
+                            size: 48,
+                            color: Colors.grey.withValues(alpha: 0.5),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No $_sourceFilter tracks in this curated playlist',
+                            style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: () => setState(() => _sourceFilter = 'All'),
+                            child: const Text('Show All Tracks', style: TextStyle(color: goldColor, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: widget.tracks.length,
+                    itemCount: visibleTracks.length,
                     itemBuilder: (context, index) {
-                      final track = widget.tracks[index];
+                      final track = visibleTracks[index];
                       final isSelected = _selectedTrackIds.contains(track.id);
 
                       return CheckboxListTile(
@@ -173,7 +365,38 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
                           borderRadius: BorderRadius.circular(8),
                         ),
                         title: Text(track.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                        subtitle: Text(track.artist, style: const TextStyle(fontSize: 12)),
+                        subtitle: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                color: track.isYouTube
+                                    ? Colors.red.withValues(alpha: 0.15)
+                                    : const Color(0xFF00D1B2).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: track.isYouTube
+                                      ? Colors.red.withValues(alpha: 0.5)
+                                      : const Color(0xFF00D1B2).withValues(alpha: 0.5),
+                                  width: 0.5,
+                                ),
+                              ),
+                              child: Text(
+                                track.isYouTube ? 'YT' : 'Saavn',
+                                style: TextStyle(
+                                  color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(track.artist, style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   ),
@@ -207,21 +430,12 @@ class _AiPlaylistReviewScreenState extends ConsumerState<AiPlaylistReviewScreen>
                               'name': name,
                               'description': 'AI generated playlist from prompt',
                               'trackIds': selectedTracks.map((t) => t.id).toList(),
-                              'tracks': selectedTracks.map((t) => {
-                                'id': t.id,
-                                'title': t.title,
-                                'artist': t.artist,
-                                'album': t.album,
-                                'duration': t.duration,
-                                'artworkUrl': t.artworkUrl,
-                                'audioUrl': t.audioUrl,
-                                'genre': t.genre,
-                              }).toList(),
+                              'tracks': selectedTracks.map((t) => t.toJson()).toList(),
                             };
                             playlists.add(newPl);
                             await StorageService.savePlaylists(playlists);
 
-                            if (mounted) {
+                            if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('Saved AI Playlist "$name" with ${selectedTracks.length} tracks! ⚡'),

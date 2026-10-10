@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:music_app/models/track.dart';
 import 'package:music_app/models/source_mode.dart';
 import 'package:music_app/services/music_sources/source_manager.dart';
-import 'package:music_app/services/music_sources/youtube_source.dart';
 
 void main() {
   group('SourceMode Enum Tests', () {

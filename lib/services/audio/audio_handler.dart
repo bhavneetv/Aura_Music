@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 import '../../models/track.dart';
 import '../storage/storage_service.dart';
 import '../widget/home_widget_service.dart';
+import 'spatial_audio_service.dart';
 
 Future<AudioHandler> initAudioHandler() async {
   return await AudioService.init(
@@ -112,6 +113,17 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         _broadcastState();
       }
     });
+
+    _playerA.androidAudioSessionIdStream.listen((sessionId) {
+      if (_activePlayer == _playerA && sessionId != null) {
+        SpatialAudioService.updateAudioSessionId(sessionId);
+      }
+    });
+    _playerB.androidAudioSessionIdStream.listen((sessionId) {
+      if (_activePlayer == _playerB && sessionId != null) {
+        SpatialAudioService.updateAudioSessionId(sessionId);
+      }
+    });
   }
 
   AudioPlayer get player => _activePlayer;
@@ -134,6 +146,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> play() async {
     await _ensureAudioSessionActive();
     _activePlayer.play(); // don't await, it blocks until song ends
+    SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
     if (_isCrossfadeActive) {
       _fadePlayer.play();
     }
@@ -366,6 +379,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await _ensureAudioSessionActive();
 
         _activePlayer.play(); // DON'T AWAIT: it blocks until song finishes!
+        SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
         _preloadedTrack = null;
 
         // Clean up the old player asynchronously
@@ -407,6 +421,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await _ensureAudioSessionActive();
 
         _activePlayer.play(); // DON'T AWAIT
+        SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
         _isTrackTransitioning = false;
         _broadcastState();
       }
@@ -476,6 +491,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       // Swap active player references — incoming is now active, outgoing is fade player
       _activePlayer = incomingPlayer;
       _fadePlayer = outgoingPlayer;
+      SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
       _preloadedTrack = null;
       _isCrossfadeActive = true;
 

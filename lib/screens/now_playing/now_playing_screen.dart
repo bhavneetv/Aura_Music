@@ -3227,16 +3227,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                             onTap: () async {
                               if (!alreadyContains) {
                                 trackIds.add(track.id);
-                                tracksList.add({
-                                  'id': track.id,
-                                  'title': track.title,
-                                  'artist': track.artist,
-                                  'album': track.album,
-                                  'duration': track.duration,
-                                  'artworkUrl': track.artworkUrl,
-                                  'audioUrl': track.audioUrl,
-                                  'genre': track.genre,
-                                });
+                                tracksList.add(track.toJson());
                                 playlists[index]['trackIds'] = trackIds;
                                 playlists[index]['tracks'] = tracksList;
                                 await StorageService.savePlaylists(playlists);
@@ -3440,18 +3431,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                     'name': name,
                     'description': 'A premium custom playlist',
                     'trackIds': <String>[track.id],
-                    'tracks': <Map<String, dynamic>>[
-                      {
-                        'id': track.id,
-                        'title': track.title,
-                        'artist': track.artist,
-                        'album': track.album,
-                        'duration': track.duration,
-                        'artworkUrl': track.artworkUrl,
-                        'audioUrl': track.audioUrl,
-                        'genre': track.genre,
-                      }
-                    ],
+                    'tracks': <Map<String, dynamic>>[track.toJson()],
                   };
                   playlists.add(newPl);
                   await StorageService.savePlaylists(playlists);

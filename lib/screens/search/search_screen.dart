@@ -11,6 +11,7 @@ import '../../services/ai/ai_service.dart';
 import '../../widgets/ai_search_loading.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
+import '../../services/music_sources/source_manager.dart';
 import 'ai_playlist_review_screen.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -26,6 +27,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounceTimer;
   Timer? _typewriterTimer;
+  List<Track> _allSearchResults = [];
   List<Track> _filteredTracks = [];
   List<String> _recentSearches = [];
   bool _isSearching = false;
@@ -34,6 +36,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   String _aiLoadingText = 'AI is curating your personalized music experience...';
   String _currentAiPlaylistName = '';
   String _selectedSortFilter = 'Popularity';
+  String _sourceFilter = 'All'; // 'All', 'Saavn', 'YT'
 
   // Typewriter placeholder animation state
   int _typewriterPromptIndex = 0;
@@ -188,6 +191,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     setState(() {
       _isSearching = false;
       _isAiLoading = false;
+      _allSearchResults = [];
       _filteredTracks = [];
       _currentAiPlaylistName = '';
       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
@@ -309,12 +313,36 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     });
   }
 
+  void _setSourceFilter(String filter) {
+    if (_sourceFilter == filter) return;
+    triggerHaptic(HapticFeedbackType.selection);
+    setState(() {
+      _sourceFilter = filter;
+      _applySourceFilter();
+    });
+  }
+
+  void _applySourceFilter() {
+    if (_allSearchResults.isEmpty) {
+      _filteredTracks = [];
+      return;
+    }
+    if (_sourceFilter == 'Saavn') {
+      _filteredTracks = _allSearchResults.where((t) => t.isJioSaavn).toList();
+    } else if (_sourceFilter == 'YT') {
+      _filteredTracks = _allSearchResults.where((t) => t.isYouTube).toList();
+    } else {
+      _filteredTracks = List.from(_allSearchResults);
+    }
+  }
+
   void _onSearchChanged() {
     if (_isAiMode) return;
     _debounceTimer?.cancel();
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       setState(() {
+        _allSearchResults = [];
         _filteredTracks = [];
         _isSearching = false;
       });
@@ -327,10 +355,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
 
     _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
       try {
-        final results = await ref.read(musicSourceProvider).searchTracks(query);
+        List<Track> results;
+        try {
+          results = await searchAllMusicSources(query);
+        } catch (_) {
+          results = await SourceManager.instance.searchTracks(query);
+        }
         if (mounted && _searchController.text.trim() == query) {
           setState(() {
-            _filteredTracks = _deduplicateTracks(results);
+            _allSearchResults = _deduplicateTracks(results);
+            _applySourceFilter();
             _isSearching = false;
           });
           await StorageService.addSearchQuery(query);
@@ -359,14 +393,21 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
       await StorageService.addSearchQuery(query);
       setState(() {
         _isSearching = true;
+        _allSearchResults = [];
         _filteredTracks = [];
         _recentSearches = StorageService.getRecentSearches();
       });
       try {
-        final results = await ref.read(musicSourceProvider).searchTracks(query);
+        List<Track> results;
+        try {
+          results = await searchAllMusicSources(query);
+        } catch (_) {
+          results = await SourceManager.instance.searchTracks(query);
+        }
         if (mounted && _searchController.text.trim() == query) {
           setState(() {
-            _filteredTracks = _deduplicateTracks(results);
+            _allSearchResults = _deduplicateTracks(results);
+            _applySourceFilter();
             _isSearching = false;
           });
         }
@@ -452,12 +493,16 @@ Output ONLY valid JSON:
         }
       }
 
-      final musicSource = ref.read(musicSourceProvider);
       final trackMap = <String, Track>{};
 
       for (final q in searchQueries) {
         try {
-          final results = await musicSource.searchTracks(q);
+          List<Track> results;
+          try {
+            results = await searchAllMusicSources(q);
+          } catch (_) {
+            results = await SourceManager.instance.searchTracks(q);
+          }
           for (final t in results) {
             final normTitle = t.title.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim();
             final normArtist = t.artist.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim();
@@ -473,7 +518,11 @@ Output ONLY valid JSON:
       List<Track> resultsList = trackMap.values.toList();
       if (resultsList.isEmpty) {
         try {
-          resultsList = await musicSource.searchTracks(query);
+          try {
+            resultsList = await searchAllMusicSources(query);
+          } catch (_) {
+            resultsList = await SourceManager.instance.searchTracks(query);
+          }
         } catch (_) {}
       }
 
@@ -490,7 +539,8 @@ Output ONLY valid JSON:
       if (mounted) {
         setState(() {
           _isAiLoading = false;
-          _filteredTracks = resultsList;
+          _allSearchResults = resultsList;
+          _applySourceFilter();
           _currentAiPlaylistName = playlistName;
           _recentSearches = StorageService.getAiRecentSearches();
         });
@@ -609,16 +659,7 @@ Output ONLY valid JSON:
                               'name': name,
                               'description': 'AI generated playlist',
                               'trackIds': sessionTracks.map((t) => t.id).toList(),
-                              'tracks': sessionTracks.map((t) => {
-                                'id': t.id,
-                                'title': t.title,
-                                'artist': t.artist,
-                                'album': t.album,
-                                'duration': t.duration,
-                                'artworkUrl': t.artworkUrl,
-                                'audioUrl': t.audioUrl,
-                                'genre': t.genre,
-                              }).toList(),
+                              'tracks': sessionTracks.map((t) => t.toJson()).toList(),
                             };
                             playlists.add(newPl);
                             await StorageService.savePlaylists(playlists);
@@ -667,11 +708,42 @@ Output ONLY valid JSON:
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                             ),
-                            subtitle: Text(
-                              '${track.artist} • ${track.genre}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            subtitle: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: track.isYouTube
+                                        ? Colors.red.withValues(alpha: 0.15)
+                                        : const Color(0xFF00D1B2).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: track.isYouTube
+                                          ? Colors.red.withValues(alpha: 0.5)
+                                          : const Color(0xFF00D1B2).withValues(alpha: 0.5),
+                                      width: 0.5,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    track.isYouTube ? 'YT' : 'Saavn',
+                                    style: TextStyle(
+                                      color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    '${track.artist} • ${track.genre}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  ),
+                                ),
+                              ],
                             ),
                             trailing: const Icon(Icons.play_arrow_rounded, size: 20),
                             onTap: () {
@@ -768,6 +840,144 @@ Output ONLY valid JSON:
           },
         );
       },
+    );
+  }
+
+  Widget _buildSourceSliderBar({
+    required BuildContext context,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    final int allCount = _allSearchResults.length;
+    final int saavnCount = _allSearchResults.where((t) => t.isJioSaavn).length;
+    final int ytCount = _allSearchResults.where((t) => t.isYouTube).length;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.all(3.5),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C22) : const Color(0xFFE8E8EE),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            _buildSliderSegment(
+              label: 'All',
+              filterKey: 'All',
+              count: allCount,
+              icon: Icons.all_inclusive_rounded,
+              activeColor: accentColor,
+              activeTextColor: Colors.black,
+              isDark: isDark,
+            ),
+            const SizedBox(width: 4),
+            _buildSliderSegment(
+              label: 'Saavn',
+              filterKey: 'Saavn',
+              count: saavnCount,
+              icon: Icons.graphic_eq_rounded,
+              activeColor: const Color(0xFF00D1B2),
+              activeTextColor: Colors.black,
+              isDark: isDark,
+            ),
+            const SizedBox(width: 4),
+            _buildSliderSegment(
+              label: 'YT',
+              filterKey: 'YT',
+              count: ytCount,
+              icon: Icons.smart_display_rounded,
+              activeColor: const Color(0xFFFF0033),
+              activeTextColor: Colors.white,
+              isDark: isDark,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSliderSegment({
+    required String label,
+    required String filterKey,
+    required int count,
+    required IconData icon,
+    required Color activeColor,
+    required Color activeTextColor,
+    required bool isDark,
+  }) {
+    final isSelected = _sourceFilter == filterKey;
+    final showCount = _allSearchResults.isNotEmpty;
+
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _setSourceFilter(filterKey),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: activeColor.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
+                  fontFamily: 'Outfit',
+                  color: isSelected ? activeTextColor : (isDark ? Colors.white70 : Colors.black87),
+                ),
+              ),
+              if (showCount) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? (activeTextColor == Colors.black ? Colors.black.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.25))
+                        : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -915,6 +1125,7 @@ Output ONLY valid JSON:
           ),
         ),
 
+
         // Floating Segmented Tab Selector
         Container(
           height: 38,
@@ -1009,7 +1220,59 @@ Output ONLY valid JSON:
       );
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     if (_filteredTracks.isEmpty) {
+      if (_allSearchResults.isNotEmpty) {
+        return Column(
+          children: [
+            _buildSourceSliderBar(
+              context: context,
+              accentColor: accentColor,
+              isDark: isDark,
+            ),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _sourceFilter == 'YT' ? Icons.smart_display_outlined : Icons.graphic_eq_rounded,
+                        size: 54,
+                        color: Colors.grey.withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'No $_sourceFilter tracks found for this search',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Found ${_allSearchResults.length} total songs in other sources.',
+                        style: const TextStyle(fontSize: 13, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () => _setSourceFilter('All'),
+                        icon: const Icon(Icons.all_inclusive_rounded, size: 16),
+                        label: Text('Show All (${_allSearchResults.length}) Songs'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: accentColor,
+                          foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1032,8 +1295,17 @@ Output ONLY valid JSON:
     return Consumer(
       builder: (context, ref, child) {
         final notifier = ref.read(playbackProvider.notifier);
-        return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 150, top: 8),
+        return Column(
+          children: [
+            // Slide filter bar ONLY shown here inside searched songs page!
+            _buildSourceSliderBar(
+              context: context,
+              accentColor: accentColor,
+              isDark: isDark,
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 150, top: 4),
           itemCount: _filteredTracks.length + (showAiBanner ? 1 : 0),
           itemBuilder: (context, index) {
             if (showAiBanner && index == 0) {
@@ -1086,26 +1358,31 @@ Output ONLY valid JSON:
                 ),
                 subtitle: Row(
                   children: [
-                    if (track.isYouTube) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.5),
-                        ),
-                        child: const Text(
-                          'YT',
-                          style: TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      margin: const EdgeInsets.only(right: 6),
+                      decoration: BoxDecoration(
+                        color: track.isYouTube
+                            ? Colors.red.withValues(alpha: 0.15)
+                            : const Color(0xFF00D1B2).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: track.isYouTube
+                              ? Colors.red.withValues(alpha: 0.5)
+                              : const Color(0xFF00D1B2).withValues(alpha: 0.5),
+                          width: 0.5,
                         ),
                       ),
-                    ],
+                      child: Text(
+                        track.isYouTube ? 'YT' : 'Saavn',
+                        style: TextStyle(
+                          color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: Text(
                         '${track.artist} • ${track.genre}',
@@ -1128,12 +1405,15 @@ Output ONLY valid JSON:
                   notifier.playTrack(track);
                 },
               ),
-            );
-          },
-        );
-      },
+              );
+            },
+          ),
+        ),
+      ],
     );
-  }
+  },
+);
+}
 
   Widget _buildAlbumsTab(Color accentColor) {
     if (_isSearching) {
@@ -1932,26 +2212,31 @@ Output ONLY valid JSON:
                   ),
                   subtitle: Row(
                     children: [
-                      if (track.isYouTube) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          margin: const EdgeInsets.only(right: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.5),
-                          ),
-                          child: const Text(
-                            'YT',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          color: track.isYouTube
+                              ? Colors.red.withValues(alpha: 0.15)
+                              : const Color(0xFF00D1B2).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: track.isYouTube
+                                ? Colors.red.withValues(alpha: 0.5)
+                                : const Color(0xFF00D1B2).withValues(alpha: 0.5),
+                            width: 0.5,
                           ),
                         ),
-                      ],
+                        child: Text(
+                          track.isYouTube ? 'YT' : 'Saavn',
+                          style: TextStyle(
+                            color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
                       Expanded(
                         child: Text(
                           '${track.artist} • ${track.genre}',

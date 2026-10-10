@@ -96,14 +96,31 @@ class SpatialAudioService {
     await apply();
   }
 
+  static int? _activeAudioSessionId;
+
+  /// Updates the active audio session ID from ExoPlayer / just_audio
+  static void updateAudioSessionId(int? sessionId) {
+    if (sessionId != null && sessionId > 0) {
+      final changed = sessionId != _activeAudioSessionId;
+      _activeAudioSessionId = sessionId;
+      if (changed || _isEnabled) {
+        debugPrint('[AURA-SPATIAL] updateAudioSessionId: $sessionId (enabled: $_isEnabled, mode: $_currentMode, intensity: $_intensity)');
+        apply();
+      }
+    }
+  }
+
   /// Applies the 3D Virtualizer settings to the native hardware audio pipeline
   static Future<void> apply() async {
     try {
-      await _channel.invokeMethod('setVirtual3dSound', {
+      debugPrint('[AURA-SPATIAL] Invoking setVirtual3dSound: enabled=$_isEnabled, strength=$_intensity, mode=$_currentMode, sessionId=$_activeAudioSessionId');
+      final res = await _channel.invokeMethod('setVirtual3dSound', {
         'enabled': _isEnabled,
         'strength': _intensity,
         'mode': _currentMode,
+        'audioSessionId': _activeAudioSessionId ?? 0,
       });
+      debugPrint('[AURA-SPATIAL] Native setVirtual3dSound response: $res');
     } catch (e) {
       debugPrint('Failed to apply 3D Spatial Audio: $e');
     }

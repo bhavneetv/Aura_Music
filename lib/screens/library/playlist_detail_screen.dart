@@ -44,16 +44,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       if (rawTracks.isNotEmpty) {
         for (final item in rawTracks) {
           if (item is Map) {
-            _playlistTracks.add(Track(
-              id: item['id']?.toString() ?? '',
-              title: item['title']?.toString() ?? 'Unknown Track',
-              artist: item['artist']?.toString() ?? 'Unknown Artist',
-              album: item['album']?.toString() ?? 'Single',
-              duration: item['duration']?.toString() ?? '3:30',
-              artworkUrl: item['artworkUrl']?.toString() ?? item['coverUrl']?.toString() ?? '',
-              audioUrl: item['audioUrl']?.toString() ?? item['streamUrl']?.toString() ?? '',
-              genre: item['genre']?.toString() ?? '',
-            ));
+            _playlistTracks.add(Track.fromJson(Map<String, dynamic>.from(item)));
           }
         }
       } else {
@@ -121,16 +112,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     final playlists = StorageService.getPlaylists();
     if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
       final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
-      final trackMap = {
-        'id': track.id,
-        'title': track.title,
-        'artist': track.artist,
-        'album': track.album,
-        'duration': track.duration,
-        'artworkUrl': track.artworkUrl,
-        'audioUrl': track.audioUrl,
-        'genre': track.genre,
-      };
+      final trackMap = track.toJson();
       
       if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
         rawTracks.add(trackMap);
@@ -524,7 +506,38 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                             ],
                           ),
                           title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                margin: const EdgeInsets.only(right: 6),
+                                decoration: BoxDecoration(
+                                  color: track.isYouTube
+                                      ? Colors.red.withValues(alpha: 0.15)
+                                      : const Color(0xFF00D1B2).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: track.isYouTube
+                                        ? Colors.red.withValues(alpha: 0.5)
+                                        : const Color(0xFF00D1B2).withValues(alpha: 0.5),
+                                    width: 0.5,
+                                  ),
+                                ),
+                                child: Text(
+                                  track.isYouTube ? 'YT' : 'Saavn',
+                                  style: TextStyle(
+                                    color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                              ),
+                            ],
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

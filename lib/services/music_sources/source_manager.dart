@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import '../../models/track.dart';
 import '../../models/source_mode.dart';
@@ -21,6 +22,11 @@ class FallbackEvent {
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
+/// Top-level helper to search across all music sources simultaneously
+Future<List<Track>> searchAllMusicSources(String query) async {
+  return await SourceManager.instance.searchAllSources(query);
+}
+
 class SourceManager implements MusicSource {
   static final SourceManager instance = SourceManager._();
   SourceManager._();
@@ -28,6 +34,68 @@ class SourceManager implements MusicSource {
 
   final JamendoSource _jioSaavn = JamendoSource();
   final YouTubeSource _youTube = YouTubeSource();
+
+  JamendoSource get jioSaavn => _jioSaavn;
+  YouTubeSource get youTube => _youTube;
+
+  /// Searches both JioSaavn & YouTube in parallel, interleave & deduplicate
+  Future<List<Track>> searchAllSources(String query) async {
+    print('[AURA-SM] searchAllSources: query="$query"');
+    try {
+      final futures = await Future.wait([
+        _jioSaavn.searchTracks(query).timeout(const Duration(seconds: 8)).catchError((e) {
+          print('[AURA-SM] Filter All - JioSaavn error: $e');
+          return <Track>[];
+        }),
+        _youTube.searchTracks(query).timeout(const Duration(seconds: 8)).catchError((e) {
+          print('[AURA-SM] Filter All - YouTube error: $e');
+          return <Track>[];
+        }),
+      ]);
+
+      final jioResults = futures[0];
+      final ytResults = futures[1];
+
+      final results = <Track>[];
+      final seen = <String>{};
+
+      final maxLen = math.max(jioResults.length, ytResults.length);
+      for (int i = 0; i < maxLen; i++) {
+        if (i < jioResults.length) {
+          final t = jioResults[i];
+          final key = t.id.isNotEmpty ? t.id : '${t.title.toLowerCase().trim()}_${t.artist.toLowerCase().trim()}';
+          if (!seen.contains(key)) {
+            seen.add(key);
+            results.add(t);
+          }
+        }
+        if (i < ytResults.length) {
+          final t = ytResults[i];
+          final key = t.id.isNotEmpty ? t.id : '${t.title.toLowerCase().trim()}_${t.artist.toLowerCase().trim()}';
+          if (!seen.contains(key)) {
+            seen.add(key);
+            results.add(t);
+          }
+        }
+      }
+      return results;
+    } catch (e) {
+      print('[AURA-SM] searchAllSources All failed: $e, falling back to standard search');
+      return await searchTracks(query);
+    }
+  }
+
+  /// Searches tracks filtered specifically by source ('All', 'Saavn'/'JioSaavn', 'YT'/'YouTube')
+  Future<List<Track>> searchByFilter(String query, String filter) async {
+    print('[AURA-SM] searchByFilter: query="$query", filter="$filter"');
+    if (filter == 'Saavn' || filter == 'JioSaavn') {
+      return await _jioSaavn.searchTracks(query);
+    } else if (filter == 'YT' || filter == 'YouTube') {
+      return await _youTube.searchTracks(query);
+    } else {
+      return await searchAllSources(query);
+    }
+  }
 
   // Notification stream/notifier for UI snackbar when fallback occurs
   static final ValueNotifier<FallbackEvent?> fallbackNotifier = ValueNotifier<FallbackEvent?>(null);
