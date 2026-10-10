@@ -22,6 +22,7 @@ import '../../widgets/adaptive_navigation_bar.dart';
 import '../../widgets/audio_output_picker_modal.dart';
 import '../../providers/multi_device_sync_provider.dart';
 import '../../services/update/update_service.dart';
+import '../../services/music_sources/source_manager.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -38,12 +39,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     _selectedLanguage = StorageService.getLastSelectedHomeLanguage();
+    SourceManager.fallbackNotifier.addListener(_handleSourceFallback);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       UpdateService.checkForUpdates(context);
       if (!StorageService.hasCompletedOnboarding()) {
         _showFirstLaunchOnboardingModal(context);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    SourceManager.fallbackNotifier.removeListener(_handleSourceFallback);
+    super.dispose();
+  }
+
+  void _handleSourceFallback() {
+    final event = SourceManager.fallbackNotifier.value;
+    if (event == null || !mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.auto_awesome_rounded, color: Colors.amberAccent, size: 18),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'Playing via YouTube fallback (JioSaavn unavailable)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.only(bottom: 90, left: 16, right: 16),
+      ),
+    );
   }
 
   @override

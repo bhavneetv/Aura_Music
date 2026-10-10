@@ -1084,11 +1084,37 @@ Output ONLY valid JSON:
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
-                subtitle: Text(
-                  '${track.artist} • ${track.genre}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                subtitle: Row(
+                  children: [
+                    if (track.isYouTube) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.5),
+                        ),
+                        child: const Text(
+                          'YT',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                    Expanded(
+                      child: Text(
+                        '${track.artist} • ${track.genre}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                  ],
                 ),
                 trailing: IconButton(
                   icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
@@ -1904,11 +1930,37 @@ Output ONLY valid JSON:
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
-                  subtitle: Text(
-                    '${track.artist} • ${track.genre}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  subtitle: Row(
+                    children: [
+                      if (track.isYouTube) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          margin: const EdgeInsets.only(right: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.5),
+                          ),
+                          child: const Text(
+                            'YT',
+                            style: TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                      Expanded(
+                        child: Text(
+                          '${track.artist} • ${track.genre}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ),
+                    ],
                   ),
                   trailing: IconButton(
                     icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),

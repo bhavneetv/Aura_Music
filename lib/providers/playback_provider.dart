@@ -11,6 +11,7 @@ import '../services/audio/audio_handler.dart';
 import '../services/audio/audio_url_resolver.dart';
 import '../services/recommendation/recommendation_engine.dart';
 import '../services/music_sources/jamendo_source.dart';
+import '../services/music_sources/source_manager.dart';
 import '../services/voice/voice_assistant_service.dart';
 import '../services/quick_actions/quick_actions_service.dart';
 import '../services/sync/multi_device_sync_service.dart';
@@ -249,6 +250,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           artworkUrl: hMatch['artworkUrl']?.toString() ?? '',
           audioUrl: hMatch['audioUrl']?.toString() ?? '',
           genre: hMatch['genre']?.toString() ?? '',
+          source: hMatch['source']?.toString() ?? 'jiosaavn',
+          youtubeVideoId: hMatch['youtubeVideoId']?.toString(),
         );
         playTrack(track);
       }
@@ -292,11 +295,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       }
 
       // Preload next track audio immediately as soon as track starts playing for zero-latency gapless & crossfade playback
+      // NOTE: Skip YouTube tracks — their stream URLs expire quickly and preloading them
+      // would cache a stale URL that causes 403 errors when the fade player tries to use it.
       if (state.isPlaying && !_isTransitioning && pos.inSeconds >= 2 && !_isNextTrackPreloaded) {
         final nextIdx = state.currentIndex + 1;
         if (nextIdx < state.queue.length) {
           final nextTrack = state.queue[nextIdx];
-          if (nextTrack.audioUrl.isNotEmpty && 
+          final isNextYT = nextTrack.isYouTube || 
+              nextTrack.youtubeVideoId != null || 
+              nextTrack.id.startsWith('yt_');
+          if (!isNextYT && nextTrack.audioUrl.isNotEmpty && 
               (nextTrack.audioUrl.startsWith('http') || File(nextTrack.audioUrl).existsSync())) {
             _isNextTrackPreloaded = true;
             _handler.preloadNextTrack(nextTrack);
@@ -439,16 +447,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     if (saved != null) {
       try {
         final List rawTracks = saved['tracks'] as List;
-        final tracks = rawTracks.map((item) => Track(
-          id: item['id']?.toString() ?? '',
-          title: item['title']?.toString() ?? '',
-          artist: item['artist']?.toString() ?? '',
-          album: item['album']?.toString() ?? '',
-          duration: item['duration']?.toString() ?? '',
-          artworkUrl: item['artworkUrl']?.toString() ?? '',
-          audioUrl: item['audioUrl']?.toString() ?? '',
-          genre: item['genre']?.toString() ?? '',
-        )).toList();
+        final tracks = rawTracks.map((item) => Track.fromJson(Map<String, dynamic>.from(item as Map))).toList();
         
         final idx = saved['currentIndex'] as int? ?? -1;
         final shuffle = saved['isShuffle'] as bool? ?? false;
@@ -574,16 +573,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final first = playlists.first;
       final rawTracks = first['tracks'] as List? ?? [];
       if (rawTracks.isNotEmpty) {
-        final tracks = rawTracks.map((item) => Track(
-          id: item['id']?.toString() ?? '',
-          title: item['title']?.toString() ?? 'Track',
-          artist: item['artist']?.toString() ?? 'Unknown Artist',
-          album: item['album']?.toString() ?? 'Album',
-          duration: item['duration']?.toString() ?? '3:30',
-          artworkUrl: item['artworkUrl']?.toString() ?? '',
-          audioUrl: item['audioUrl']?.toString() ?? '',
-          genre: item['genre']?.toString() ?? '',
-        )).toList();
+        final tracks = rawTracks.map((item) => Track.fromJson(Map<String, dynamic>.from(item as Map))).toList();
         playCustomQueue(tracks, initialIndex: 0);
         return;
       }
@@ -594,16 +584,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final first = downloadedPlaylists.first;
       final rawTracks = first['tracks'] as List? ?? [];
       if (rawTracks.isNotEmpty) {
-        final tracks = rawTracks.map((item) => Track(
-          id: item['id']?.toString() ?? '',
-          title: item['title']?.toString() ?? 'Track',
-          artist: item['artist']?.toString() ?? 'Unknown Artist',
-          album: item['album']?.toString() ?? 'Album',
-          duration: item['duration']?.toString() ?? '3:30',
-          artworkUrl: item['artworkUrl']?.toString() ?? '',
-          audioUrl: item['audioUrl']?.toString() ?? '',
-          genre: item['genre']?.toString() ?? '',
-        )).toList();
+        final tracks = rawTracks.map((item) => Track.fromJson(Map<String, dynamic>.from(item as Map))).toList();
         playCustomQueue(tracks, initialIndex: 0);
         return;
       }
@@ -846,10 +827,25 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       return;
     }
 
-    // Only resolve fresh working URL if audioUrl is completely empty or invalid
-    if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
-      print('[AURA-PLAY] Resolving audioUrl for "${track.title}" (id: ${track.id})...');
-      final resolved = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: false);
+    // CRITICAL FIX: YouTube stream URLs (googlevideo.com) expire quickly and cause
+    // 403 Forbidden errors. ALWAYS resolve a fresh URL for YouTube tracks at playback
+    // time, even if we have a previously cached URL. JioSaavn CDN URLs are stable.
+    final bool isYouTubeTrack = track.isYouTube || 
+        track.youtubeVideoId != null || 
+        track.id.startsWith('yt_') ||
+        audioUrl.contains('googlevideo.com');
+    
+    final bool needsResolution = audioUrl.isEmpty || 
+        (!audioUrl.startsWith('http') && !File(audioUrl).existsSync()) ||
+        isYouTubeTrack; // Always re-resolve YouTube tracks
+
+    if (needsResolution) {
+      print('[AURA-PLAY] Resolving ${isYouTubeTrack ? "FRESH YouTube" : ""} audioUrl for "${track.title}" (id: ${track.id}, source: ${track.source})...');
+      
+      // Use getFreshStreamUrl for YouTube to bypass any stale cache
+      final resolved = isYouTubeTrack
+          ? await SourceManager.instance.getFreshStreamUrl(track)
+          : await SourceManager.instance.getStreamUrl(track);
       
       if (nonce != _playbackNonce) {
         print('[AURA-PLAY] Stale resolution for "${track.title}" (user changed song), discarding');
@@ -914,7 +910,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         }
 
         try {
-          final resolvedUrl = await AudioUrlResolver.instance.resolveAudioUrl(track, forceFresh: true);
+          SourceManager.instance.invalidateStreamCache(track);
+          // CRITICAL: Use getFreshStreamUrl for YouTube to guarantee a brand new URL
+          final resolvedUrl = isYouTubeTrack
+              ? await SourceManager.instance.getFreshStreamUrl(track)
+              : await SourceManager.instance.getStreamUrl(track);
           if (nonce != _playbackNonce) return;
           
           if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
@@ -941,7 +941,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             return;
           }
         } catch (resolveErr) {
-          print('[AURA-PLAY] AudioUrlResolver fallback also failed: $resolveErr');
+          print('[AURA-PLAY] SourceManager fallback also failed: $resolveErr');
         }
 
         if (nonce != _playbackNonce) return;
@@ -1013,12 +1013,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     try {
       final source = ref.read(musicSourceProvider);
-      List<Track> recommendations;
-      if (source is JamendoSource) {
-        recommendations = await source.getContextualRecommendations(state.currentTrack!);
-      } else {
-        recommendations = await source.getDynamicRecommendations();
-      }
+      List<Track> recommendations = await source.getContextualRecommendations(state.currentTrack!);
 
       if (recommendations.isEmpty) {
         String genreQuery = state.currentTrack!.genre.trim();
@@ -1084,10 +1079,19 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     for (int nextIdx = curIdx + 1; nextIdx < endIdx; nextIdx++) {
       final nextTrackItem = state.queue[nextIdx];
+      
+      // SKIP pre-resolving YouTube tracks — their stream URLs expire quickly
+      // and will be stale by the time we actually play them, causing 403 errors.
+      // YouTube tracks get fresh URLs at playback time in _streamTrack.
+      final isYT = nextTrackItem.isYouTube || 
+          nextTrackItem.youtubeVideoId != null || 
+          nextTrackItem.id.startsWith('yt_');
+      if (isYT) continue;
+      
       final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id);
       if (localPath == null || !File(localPath).existsSync()) {
         try {
-          final freshUrl = await AudioUrlResolver.instance.resolveAudioUrl(nextTrackItem, forceFresh: false);
+          final freshUrl = await SourceManager.instance.getStreamUrl(nextTrackItem);
           if (freshUrl != null && freshUrl.isNotEmpty && freshUrl != nextTrackItem.audioUrl) {
             final List<Track> updatedQueue = List.from(state.queue);
             if (nextIdx < updatedQueue.length) {

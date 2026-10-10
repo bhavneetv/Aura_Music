@@ -12,6 +12,8 @@ import '../../services/audio/spatial_audio_service.dart';
 import '../equalizer/equalizer_screen.dart';
 import '../../services/update/update_service.dart';
 import '../../services/version/version_service.dart';
+import '../../models/source_mode.dart';
+import '../../providers/music_source_mode_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -408,6 +410,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
     final customBranding = ref.watch(customizationProvider);
+    final currentSourceMode = ref.watch(sourceModeProvider);
     
     final playbackState = ref.watch(playbackProvider);
     final playbackNotifier = ref.read(playbackProvider.notifier);
@@ -558,6 +561,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           'AI Song & Lyrics Summary Language',
           _getSummaryLanguageLabel(_summaryLanguage),
           () => _showSummaryLanguageDialog(),
+        ),
+        const Divider(indent: 24, endIndent: 24, height: 1),
+
+        // Group: Music Streaming Source
+        const SizedBox(height: 12),
+        _buildSectionHeader('MUSIC STREAMING SOURCE', customBranding.accentColor),
+        _buildSelectionTile(
+          'Playback & Search Source',
+          currentSourceMode.label,
+          () => _showMusicSourceDialog(context),
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
 
@@ -814,6 +827,114 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
       trailing: const Icon(Icons.arrow_drop_down_rounded, color: Colors.grey),
       onTap: onTap,
+    );
+  }
+
+  // ── Music Source Bottom Sheet ────────────────────────────────
+
+  void _showMusicSourceDialog(BuildContext context) {
+    final currentSourceMode = ref.read(sourceModeProvider);
+    final customBranding = ref.read(customizationProvider);
+    final accentColor = customBranding.accentColor;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Select Music Source',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Choose where Aura searches and streams your tracks from',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ...SourceMode.values.map((mode) {
+                  final isSelected = mode == currentSourceMode;
+                  IconData icon;
+                  switch (mode) {
+                    case SourceMode.hybrid:
+                      icon = Icons.auto_awesome_rounded;
+                      break;
+                    case SourceMode.jiosaavn:
+                      icon = Icons.music_note_rounded;
+                      break;
+                    case SourceMode.youtube:
+                      icon = Icons.play_circle_filled_rounded;
+                      break;
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? accentColor.withValues(alpha: 0.12)
+                          : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isSelected ? accentColor : Colors.transparent,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: ListTile(
+                      leading: Icon(
+                        icon,
+                        color: isSelected ? accentColor : Colors.grey,
+                      ),
+                      title: Text(
+                        mode.label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? accentColor : null,
+                        ),
+                      ),
+                      subtitle: Text(
+                        mode.description,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? Icon(Icons.check_circle_rounded, color: accentColor)
+                          : null,
+                      onTap: () {
+                        ref.read(sourceModeProvider.notifier).setMode(mode);
+                        Navigator.pop(context);
+                      },
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

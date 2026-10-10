@@ -180,13 +180,38 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> with SingleTickerProvid
                                 ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            track.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  fontSize: 12,
+                          Row(
+                            children: [
+                              if (track.isYouTube) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
+                                  margin: const EdgeInsets.only(right: 5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.red.withValues(alpha: 0.4), width: 0.5),
+                                  ),
+                                  child: const Text(
+                                    'YT',
+                                    style: TextStyle(
+                                      color: Colors.redAccent,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        fontSize: 12,
+                                      ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

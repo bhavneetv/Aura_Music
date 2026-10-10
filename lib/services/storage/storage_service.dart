@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/track.dart';
+import '../../models/source_mode.dart';
 
 class StorageService {
   static const String _settingsBox = 'settings_box';
@@ -83,6 +84,19 @@ class StorageService {
 
   static Future<void> setHapticsEnabled(bool enabled) async {
     await saveSetting('haptics_enabled', enabled);
+  }
+
+  // ── Music Source Mode ─────────────────────────────────────────
+
+  static const String _sourceModeKey = 'music_source_mode';
+
+  static SourceMode getSourceMode() {
+    final val = getSetting(_sourceModeKey, defaultValue: 'hybrid') as String?;
+    return SourceMode.fromKey(val);
+  }
+
+  static Future<void> setSourceMode(SourceMode mode) async {
+    await saveSetting(_sourceModeKey, mode.key);
   }
 
   static bool hasSeenPlayerTutorial() {
@@ -169,16 +183,7 @@ class StorageService {
       final List decoded = jsonDecode(raw.toString());
       return decoded.map((e) {
         final map = Map<String, dynamic>.from(e as Map);
-        return Track(
-          id: map['id']?.toString() ?? '',
-          title: map['title']?.toString() ?? 'Unknown Track',
-          artist: map['artist']?.toString() ?? 'Unknown Artist',
-          album: map['album']?.toString() ?? 'Single',
-          duration: map['duration']?.toString() ?? '3:30',
-          artworkUrl: map['artworkUrl']?.toString() ?? '',
-          audioUrl: map['audioUrl']?.toString() ?? '',
-          genre: map['genre']?.toString() ?? 'Pop',
-        );
+        return Track.fromJson(map);
       }).where((t) => t.id.isNotEmpty).toList();
     } catch (_) {
       return [];
@@ -200,16 +205,7 @@ class StorageService {
     }
 
     await box.put('trackIds', ids);
-    final jsonList = tracks.map((t) => {
-      'id': t.id,
-      'title': t.title,
-      'artist': t.artist,
-      'album': t.album,
-      'duration': t.duration,
-      'artworkUrl': t.artworkUrl,
-      'audioUrl': t.audioUrl,
-      'genre': t.genre,
-    }).toList();
+    final jsonList = tracks.map((t) => t.toJson()).toList();
     await box.put('favorite_tracks_objects', jsonEncode(jsonList));
   }
 
@@ -294,16 +290,7 @@ class StorageService {
   static Future<void> saveGroupedAiSession(String sessionTitle, List<Track> tracks) async {
     final box = Hive.box(_historyBox);
     final Map<String, dynamic> allSessions = getGroupedAiSessionsMap();
-    final List<Map<String, dynamic>> trackMaps = tracks.map((t) => {
-      'id': t.id,
-      'title': t.title,
-      'artist': t.artist,
-      'album': t.album,
-      'duration': t.duration,
-      'artworkUrl': t.artworkUrl,
-      'audioUrl': t.audioUrl,
-      'genre': t.genre,
-    }).toList();
+    final List<Map<String, dynamic>> trackMaps = tracks.map((t) => t.toJson()).toList();
     allSessions[sessionTitle.trim().toLowerCase()] = trackMaps;
     await box.put('ai_session_tracks', jsonEncode(allSessions));
   }
@@ -325,16 +312,7 @@ class StorageService {
     if (rawList == null || rawList is! List) return [];
     return rawList.map((e) {
       final map = Map<String, dynamic>.from(e as Map);
-      return Track(
-        id: map['id']?.toString() ?? '',
-        title: map['title']?.toString() ?? 'Track',
-        artist: map['artist']?.toString() ?? 'Unknown Artist',
-        album: map['album']?.toString() ?? 'Single',
-        duration: map['duration']?.toString() ?? '3:30',
-        artworkUrl: map['artworkUrl']?.toString() ?? '',
-        audioUrl: map['audioUrl']?.toString() ?? '',
-        genre: map['genre']?.toString() ?? '',
-      );
+      return Track.fromJson(map);
     }).toList();
   }
 
@@ -376,6 +354,8 @@ class StorageService {
       'artworkUrl': track.artworkUrl,
       'audioUrl': track.audioUrl,
       'genre': track.genre,
+      'source': track.source,
+      'youtubeVideoId': track.youtubeVideoId,
       'timestamp': DateTime.now().toIso8601String(),
       'durationPlayed': durationPlayedSeconds,
     };
@@ -455,6 +435,8 @@ class StorageService {
       'artworkUrl': track.artworkUrl,
       'audioUrl': track.audioUrl,
       'genre': track.genre,
+      'source': track.source,
+      'youtubeVideoId': track.youtubeVideoId,
       'timestamp': DateTime.now().toIso8601String(),
     };
     
@@ -535,6 +517,8 @@ class StorageService {
                 artworkUrl: finalArt,
                 audioUrl: localPath,
                 genre: val['genre']?.toString() ?? 'OFFLINE',
+                source: val['source']?.toString() ?? 'jiosaavn',
+                youtubeVideoId: val['youtubeVideoId']?.toString(),
               ),
             );
           }
@@ -612,6 +596,8 @@ class StorageService {
       'localArtworkPath': artworkLocalPath ?? '',
       'genre': track.genre,
       'localPath': localPath,
+      'source': track.source,
+      'youtubeVideoId': track.youtubeVideoId,
       'downloadedAt': DateTime.now().toIso8601String(),
     };
     await box.put('downloaded_tracks', jsonEncode(downloads));
@@ -651,15 +637,10 @@ class StorageService {
       'name': name,
       'description': description,
       'downloadedAt': DateTime.now().toIso8601String(),
-      'tracks': tracks.map((t) => {
-        'id': t.id,
-        'title': t.title,
-        'artist': t.artist,
-        'album': t.album,
-        'duration': t.duration,
-        'artworkUrl': t.artworkUrl,
-        'genre': t.genre,
-        'audioUrl': StorageService.getDownloadedTrackPath(t.id) ?? t.audioUrl,
+      'tracks': tracks.map((t) {
+        final m = t.toJson();
+        m['audioUrl'] = StorageService.getDownloadedTrackPath(t.id) ?? t.audioUrl;
+        return m;
       }).toList(),
     });
     await box.put('downloaded_playlists', jsonEncode(playlists));
@@ -693,16 +674,7 @@ class StorageService {
   }) async {
     final box = Hive.box(_queueBox);
     final state = {
-      'tracks': tracks.map((t) => {
-        'id': t.id,
-        'title': t.title,
-        'artist': t.artist,
-        'album': t.album,
-        'duration': t.duration,
-        'artworkUrl': t.artworkUrl,
-        'audioUrl': t.audioUrl,
-        'genre': t.genre,
-      }).toList(),
+      'tracks': tracks.map((t) => t.toJson()).toList(),
       'currentIndex': currentIndex,
       'isShuffle': isShuffle,
       'repeatMode': repeatMode,

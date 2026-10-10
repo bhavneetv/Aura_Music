@@ -7,6 +7,8 @@ class Track {
   final String artworkUrl;
   final String audioUrl;
   final String genre;
+  final String source;
+  final String? youtubeVideoId;
 
   const Track({
     required this.id,
@@ -17,7 +19,12 @@ class Track {
     required this.artworkUrl,
     required this.audioUrl,
     required this.genre,
+    this.source = 'jiosaavn',
+    this.youtubeVideoId,
   });
+
+  bool get isYouTube => source == 'youtube';
+  bool get isJioSaavn => source == 'jiosaavn';
 
   Track copyWith({
     String? id,
@@ -28,6 +35,8 @@ class Track {
     String? artworkUrl,
     String? audioUrl,
     String? genre,
+    String? source,
+    String? youtubeVideoId,
   }) {
     return Track(
       id: id ?? this.id,
@@ -38,6 +47,8 @@ class Track {
       artworkUrl: artworkUrl ?? this.artworkUrl,
       audioUrl: audioUrl ?? this.audioUrl,
       genre: genre ?? this.genre,
+      source: source ?? this.source,
+      youtubeVideoId: youtubeVideoId ?? this.youtubeVideoId,
     );
   }
 
@@ -50,6 +61,8 @@ class Track {
         'artworkUrl': artworkUrl,
         'audioUrl': audioUrl,
         'genre': genre,
+        'source': source,
+        'youtubeVideoId': youtubeVideoId,
       };
 
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -62,6 +75,8 @@ class Track {
       artworkUrl: json['artworkUrl'] as String? ?? '',
       audioUrl: json['audioUrl'] as String? ?? '',
       genre: json['genre'] as String? ?? '',
+      source: json['source'] as String? ?? 'jiosaavn',
+      youtubeVideoId: json['youtubeVideoId'] as String?,
     );
   }
 

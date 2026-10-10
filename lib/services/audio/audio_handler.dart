@@ -221,6 +221,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     'Referer': 'https://www.jiosaavn.com/',
   };
 
+  static Map<String, String>? _getHeadersForUrl(String url) {
+    if (url.contains('saavncdn.com') || url.contains('jiosaavn.com')) {
+      return _cdnHeaders;
+    }
+    // YouTube (googlevideo.com) and other external sources fail with 403 Forbidden if JioSaavn referer is passed
+    return null;
+  }
+
   /// Safely cancels any ongoing crossfade, resets volume levels and stops the fade player.
   void cancelCrossfade({bool snapActiveVolume = true}) {
     if (_crossfadeTimer != null) {
@@ -274,7 +282,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       await _fadePlayer.setVolume(0.0); 
 
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        await _fadePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+        await _fadePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _getHeadersForUrl(url)));
       } else {
         await _fadePlayer.setFilePath(url);
       }
@@ -381,7 +389,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         );
 
         if (url.startsWith('http://') || url.startsWith('https://')) {
-          await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+          await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _getHeadersForUrl(url)));
         } else {
           await _activePlayer.setFilePath(url);
         }
@@ -455,7 +463,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         await incomingPlayer.stop();
         await incomingPlayer.setVolume(0.0);
         if (url.startsWith('http://') || url.startsWith('https://')) {
-          await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+          await incomingPlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _getHeadersForUrl(url)));
         } else {
           await incomingPlayer.setFilePath(url);
         }
@@ -566,7 +574,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       String url = _normalizeUrl(track.audioUrl);
 
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _cdnHeaders));
+        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url), headers: _getHeadersForUrl(url)));
       } else {
         await _activePlayer.setFilePath(url);
       }

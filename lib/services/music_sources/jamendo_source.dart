@@ -12,6 +12,14 @@ import '../ai/ai_service.dart';
 class JamendoSource implements MusicSource {
   final Dio _dio = Dio();
 
+  @override
+  String get name => 'JioSaavn';
+
+  @override
+  Future<String?> getStreamUrl(Track track) async {
+    return AudioUrlResolver.instance.resolveAudioUrl(track);
+  }
+
   // Search mirrors (jiosaavn-api-beta returns accurate search results for any artist/query)
   static const List<String> _baseUrls = [
     'https://saavn.sumit.co/api',
@@ -330,6 +338,7 @@ Rules:
     return _getMockFallback();
   }
 
+  @override
   Future<List<Track>> getContextualRecommendations(Track currentTrack) async {
     final genre = currentTrack.genre.trim().toUpperCase();
     final artist = currentTrack.artist.split(',').first.trim();
