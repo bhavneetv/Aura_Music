@@ -13,6 +13,7 @@ class QuickActionsService {
   bool _initialized = false;
 
   Future<void> init(ProviderContainer container) async {
+    if (kIsWeb) return;
     _container = container;
 
     try {

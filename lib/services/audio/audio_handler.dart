@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
@@ -236,6 +237,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   };
 
   static Map<String, String>? _getHeadersForUrl(String url) {
+    if (kIsWeb) return null;
     if (url.contains('saavncdn.com') || url.contains('jiosaavn.com')) {
       return _cdnHeaders;
     }

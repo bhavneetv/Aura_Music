@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../../models/track.dart';
 import '../storage/storage_service.dart';
 import 'music_source.dart';
+import 'jamendo_source.dart';
+import '../audio/audio_url_resolver.dart';
 
 class _CachedStream {
   final String url;
@@ -62,10 +66,21 @@ class YouTubeSource implements MusicSource {
     'full episode',
   ];
 
+  static const List<String> _invidiousMirrors = [
+    'https://invidious.f5.si',
+    'https://inv.nadeko.net',
+    'https://invidious.nerdvpn.de',
+    'https://invidious.drgns.space',
+  ];
+
   @override
   Future<List<Track>> searchTracks(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return getTrendingTracks();
+
+    if (kIsWeb) {
+      return await _searchTracksWeb(trimmed);
+    }
 
     print('[AURA-YT] Searching YouTube for: "$trimmed"');
     try {
@@ -88,6 +103,63 @@ class YouTubeSource implements MusicSource {
       return tracks;
     } catch (e) {
       print('[AURA-YT] Search error for "$trimmed": $e');
+      return [];
+    }
+  }
+
+  Future<List<Track>> _searchTracksWeb(String query) async {
+    print('[AURA-YT-WEB] Searching via CORS API for: "$query"');
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 5),
+    ));
+
+    for (final mirror in _invidiousMirrors) {
+      try {
+        final url = '$mirror/api/v1/search?q=${Uri.encodeComponent(query)}&type=video';
+        final response = await dio.get(url);
+        if (response.statusCode == 200 && response.data is List) {
+          final list = response.data as List;
+          final tracks = <Track>[];
+          for (final item in list) {
+            if (item is! Map) continue;
+            final videoId = item['videoId']?.toString() ?? '';
+            final rawTitle = item['title']?.toString() ?? '';
+            final author = item['author']?.toString() ?? '';
+            final lengthSeconds = item['lengthSeconds'] as int? ?? 210;
+
+            if (videoId.isEmpty || rawTitle.isEmpty) continue;
+            final parsed = _parseTitleAndArtist(rawTitle, author);
+
+            tracks.add(Track(
+              id: 'yt_$videoId',
+              title: parsed.title,
+              artist: parsed.artist,
+              album: 'YouTube',
+              duration: _formatDuration(lengthSeconds),
+              artworkUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+              audioUrl: '',
+              genre: 'YouTube',
+              source: 'youtube',
+              youtubeVideoId: videoId,
+            ));
+            if (tracks.length >= 25) break;
+          }
+          if (tracks.isNotEmpty) {
+            print('[AURA-YT-WEB] Found ${tracks.length} tracks via $mirror');
+            return tracks;
+          }
+        }
+      } catch (e) {
+        print('[AURA-YT-WEB] Mirror $mirror search notice: $e');
+      }
+    }
+
+    // Fallback: search via JioSaavn which has full CORS support on web
+    print('[AURA-YT-WEB] Invidious mirrors unavailable, falling back to JioSaavn for: "$query"');
+    try {
+      return await JamendoSource().searchTracks(query);
+    } catch (_) {
       return [];
     }
   }
@@ -140,6 +212,13 @@ class YouTubeSource implements MusicSource {
 
   @override
   Future<List<Track>> getContextualRecommendations(Track currentTrack) async {
+    if (kIsWeb) {
+      final artist = currentTrack.artist.split(',').first.trim();
+      final query = artist.isNotEmpty
+          ? '$artist ${currentTrack.genre} songs'
+          : '${currentTrack.title} similar songs';
+      return await searchTracks(query);
+    }
     try {
       // If we have a YouTube video ID, try related videos first
       final videoIdStr = currentTrack.youtubeVideoId ?? _extractVideoIdFromTrackId(currentTrack.id);
@@ -201,7 +280,7 @@ class YouTubeSource implements MusicSource {
 
     print('[AURA-YT] Resolving fresh audio stream for video: $videoIdStr ("${track.title}")');
     try {
-      return await _fetchStreamWithRetry(videoIdStr);
+      return await _fetchStreamWithRetry(videoIdStr, track: track);
     } catch (e) {
       print('[AURA-YT] Failed to resolve stream for $videoIdStr: $e');
       // Reset client in case of corrupted connection
@@ -221,7 +300,7 @@ class YouTubeSource implements MusicSource {
 
     print('[AURA-YT] getFreshStreamUrl: Force-resolving stream for $videoIdStr ("${track.title}")');
     try {
-      return await _fetchStreamWithRetry(videoIdStr);
+      return await _fetchStreamWithRetry(videoIdStr, track: track);
     } catch (e) {
       print('[AURA-YT] getFreshStreamUrl failed for $videoIdStr: $e');
       resetClient();
@@ -237,7 +316,11 @@ class YouTubeSource implements MusicSource {
     _streamCache.clear();
   }
 
-  Future<String?> _fetchStreamWithRetry(String videoIdStr, {int retryCount = 1}) async {
+  Future<String?> _fetchStreamWithRetry(String videoIdStr, {int retryCount = 1, Track? track}) async {
+    if (kIsWeb) {
+      return await _fetchStreamWeb(videoIdStr, track: track);
+    }
+
     for (int attempt = 0; attempt <= retryCount; attempt++) {
       try {
         final videoId = VideoId(videoIdStr);
@@ -299,6 +382,64 @@ class YouTubeSource implements MusicSource {
         }
       }
     }
+    return null;
+  }
+
+  Future<String?> _fetchStreamWeb(String videoIdStr, {Track? track}) async {
+    print('[AURA-YT-WEB] Resolving stream for video $videoIdStr');
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 5),
+    ));
+
+    for (final mirror in _invidiousMirrors) {
+      try {
+        final url = '$mirror/api/v1/videos/$videoIdStr';
+        final response = await dio.get(url);
+        if (response.statusCode == 200 && response.data is Map) {
+          final data = response.data as Map;
+          final adaptive = data['adaptiveFormats'] as List? ?? [];
+
+          String? chosenUrl;
+          int highestBitrate = 0;
+
+          for (final f in adaptive) {
+            if (f is! Map) continue;
+            final type = f['type']?.toString().toLowerCase() ?? '';
+            final fUrl = f['url']?.toString() ?? '';
+            final bitrate = int.tryParse(f['bitrate']?.toString() ?? '') ?? 0;
+
+            if (type.contains('audio') && fUrl.isNotEmpty) {
+              if (chosenUrl == null || bitrate > highestBitrate) {
+                chosenUrl = fUrl;
+                highestBitrate = bitrate;
+              }
+            }
+          }
+
+          if (chosenUrl != null && chosenUrl.isNotEmpty) {
+            print('[AURA-YT-WEB] Resolved audio stream from $mirror');
+            _streamCache[videoIdStr] = _CachedStream(
+              url: chosenUrl,
+              expiry: DateTime.now().add(const Duration(minutes: 20)),
+            );
+            return chosenUrl;
+          }
+        }
+      } catch (e) {
+        print('[AURA-YT-WEB] Mirror $mirror stream notice: $e');
+      }
+    }
+
+    // Fallback on Web: resolve via JioSaavn CDN if track info is available
+    if (track != null && track.title.isNotEmpty) {
+      print('[AURA-YT-WEB] Invidious mirrors failed, resolving via AudioUrlResolver for "${track.title}"');
+      final fallbackUrl = await AudioUrlResolver.instance.resolveAudioUrl(track);
+      if (fallbackUrl != null && fallbackUrl.isNotEmpty) {
+        return fallbackUrl;
+      }
+    }
+
     return null;
   }
 
