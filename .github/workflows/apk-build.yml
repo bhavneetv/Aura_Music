@@ -43,6 +43,17 @@ jobs:
           echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
           echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
 
+      - name: Restore Firebase Config
+        run: |
+          if [ -n "${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
+            echo "Decoding google-services.json from secrets..."
+            echo "${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}" | tr -d '\r\n ' | base64 --decode > android/app/google-services.json
+            echo "Firebase Android config restored successfully."
+          else
+            echo "Warning: FIREBASE_GOOGLE_SERVICES_JSON_BASE64 secret not found."
+          fi
+
+
       - name: Setup Android Release Keystore
         run: |
           KEY_B64="${{ secrets.KEYSTORE_BASE64 }}"

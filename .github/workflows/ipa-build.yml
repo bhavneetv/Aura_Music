@@ -1,0 +1,78 @@
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Load Version Properties
+        run: |
+          grep -v '^#' version.properties | grep '=' >> $GITHUB_ENV
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter Version
+        run: flutter --version
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Create .env File from Secrets
+        run: |
+          touch .env
+          echo "GROQ_KEY=${{ secrets.GROQ_KEY }}" >> .env
+          echo "GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }}" >> .env
+          echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
+
+      - name: Restore Firebase iOS Config
+        run: |
+          if [ -n "${{ secrets.FIREBASE_GOOGLE_SERVICE_INFO_PLIST_BASE64 }}" ]; then
+            echo "Decoding GoogleService-Info.plist from secrets..."
+            echo "${{ secrets.FIREBASE_GOOGLE_SERVICE_INFO_PLIST_BASE64 }}" | tr -d '\r\n ' | base64 --decode > ios/Runner/GoogleService-Info.plist
+            echo "Firebase iOS config restored successfully."
+          else
+            echo "Warning: FIREBASE_GOOGLE_SERVICE_INFO_PLIST_BASE64 secret not found."
+          fi
+
+      - name: Build Unsigned iOS App
+        run: |
+          flutter build ios --release --no-codesign --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -r -q aura-music-unsigned.ipa Payload
+          cd ../../..
+          ls -lh build/ios/ipa/aura-music-unsigned.ipa
+
+      - name: Upload Unsigned IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-music-unsigned-ipa
+          path: build/ios/ipa/aura-music-unsigned.ipa
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: env.RELEASE_TAG != ''
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          generate_release_notes: true
+          files: build/ios/ipa/aura-music-unsigned.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
