@@ -9,6 +9,7 @@ class Track {
   final String genre;
   final String source;
   final String? youtubeVideoId;
+  final String? addedBy;
 
   const Track({
     required this.id,
@@ -21,6 +22,7 @@ class Track {
     required this.genre,
     this.source = 'jiosaavn',
     this.youtubeVideoId,
+    this.addedBy,
   });
 
   bool get isYouTube =>
@@ -42,6 +44,7 @@ class Track {
     String? genre,
     String? source,
     String? youtubeVideoId,
+    String? addedBy,
   }) {
     return Track(
       id: id ?? this.id,
@@ -54,6 +57,7 @@ class Track {
       genre: genre ?? this.genre,
       source: source ?? this.source,
       youtubeVideoId: youtubeVideoId ?? this.youtubeVideoId,
+      addedBy: addedBy ?? this.addedBy,
     );
   }
 
@@ -68,6 +72,7 @@ class Track {
         'genre': genre,
         'source': isYouTube ? 'youtube' : (source.isNotEmpty ? source : 'jiosaavn'),
         'youtubeVideoId': youtubeVideoId ?? (id.startsWith('yt_') ? id.substring(3) : null),
+        if (addedBy != null && addedBy!.isNotEmpty) 'addedBy': addedBy,
       };
 
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -98,6 +103,7 @@ class Track {
       genre: json['genre'] as String? ?? '',
       source: src,
       youtubeVideoId: inferredYtId,
+      addedBy: json['addedBy'] as String?,
     );
   }
 

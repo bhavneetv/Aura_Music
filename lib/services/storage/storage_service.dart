@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/track.dart';
 import '../../models/source_mode.dart';
+import '../../models/user_model.dart';
+import '../sync/playlist_cloud_sync_service.dart';
 
 class StorageService {
   static const String _settingsBox = 'settings_box';
@@ -37,11 +39,13 @@ class StorageService {
   // ── Settings ────────────────────────────────────────────────
   
   static dynamic getSetting(String key, {dynamic defaultValue}) {
+    if (!Hive.isBoxOpen(_settingsBox)) return defaultValue;
     final box = Hive.box(_settingsBox);
     return box.get(key, defaultValue: defaultValue);
   }
 
   static Future<void> saveSetting(String key, dynamic value) async {
+    if (!Hive.isBoxOpen(_settingsBox)) return;
     final box = Hive.box(_settingsBox);
     await box.put(key, value);
   }
@@ -233,17 +237,102 @@ class StorageService {
     return getFavoriteIds(type).contains(id);
   }
 
+  // ── User Accounts & Device ID ──────────────────────────────
+
+  static String getDeviceId() {
+    if (!Hive.isBoxOpen(_profileBox)) return 'dev_guest_device';
+    final box = Hive.box(_profileBox);
+    var id = box.get('device_unique_id')?.toString();
+    if (id == null || id.isEmpty) {
+      id = 'dev_${DateTime.now().millisecondsSinceEpoch}_${(1000 + (DateTime.now().microsecond % 9000))}';
+      box.put('device_unique_id', id);
+    }
+    return id;
+  }
+
+  static UserModel? getCurrentUser() {
+    if (!Hive.isBoxOpen(_profileBox)) return null;
+    final box = Hive.box(_profileBox);
+    final raw = box.get('current_user_profile');
+    if (raw == null) return null;
+    try {
+      final map = jsonDecode(raw.toString()) as Map<String, dynamic>;
+      return UserModel.fromJson(map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> saveCurrentUser(UserModel? user) async {
+    if (!Hive.isBoxOpen(_profileBox)) return;
+    final box = Hive.box(_profileBox);
+    if (user == null) {
+      await box.delete('current_user_profile');
+    } else {
+      await box.put('current_user_profile', jsonEncode(user.toJson()));
+    }
+  }
+
   // ── Playlists CRUD ─────────────────────────────────────────
 
   static List<Map<String, dynamic>> getPlaylists() {
+    if (!Hive.isBoxOpen(_playlistsBox)) return [];
     final box = Hive.box(_playlistsBox);
     final raw = box.get('all_playlists');
     if (raw == null) return [];
     try {
       final decoded = jsonDecode(raw.toString()) as List;
-      return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+      bool needsResave = false;
+      for (final pl in list) {
+        if (pl['shareCode'] == null || pl['shareCode'].toString().isEmpty) {
+          pl['shareCode'] = PlaylistCloudSyncService.generateShareCode();
+          needsResave = true;
+        }
+        if (pl['ownerId'] == null || pl['ownerId'].toString().isEmpty) {
+          if (pl['isImported'] != true) {
+            pl['ownerId'] = getCurrentUser()?.id ?? getDeviceId();
+            pl['ownerName'] = getCurrentUser()?.name ?? getUserAuthorName();
+            needsResave = true;
+          }
+        }
+      }
+
+      if (needsResave) {
+        box.put('all_playlists', jsonEncode(list));
+      }
+      return list;
     } catch (_) {
       return [];
+    }
+  }
+
+  static String getUserAuthorName() {
+    final user = getCurrentUser();
+    if (user != null && user.name.isNotEmpty) return user.name;
+    final name = getUserName().trim();
+    if (name.isNotEmpty) return name;
+    return getSetting('user_author_name', defaultValue: 'Aura Member')?.toString() ?? 'Aura Member';
+  }
+
+  static Future<void> setUserAuthorName(String name) async {
+    final clean = name.trim();
+    await saveSetting('user_author_name', clean.isEmpty ? 'Aura Member' : clean);
+    if (clean.isNotEmpty) {
+      await setUserName(clean);
+    }
+  }
+
+  static Future<void> updatePlaylist(String playlistId, Map<String, dynamic> updatedData) async {
+    final playlists = getPlaylists();
+    final index = playlists.indexWhere((p) => p['id']?.toString() == playlistId);
+    if (index != -1) {
+      playlists[index] = {
+        ...playlists[index],
+        ...updatedData,
+      };
+      await savePlaylists(playlists);
     }
   }
 

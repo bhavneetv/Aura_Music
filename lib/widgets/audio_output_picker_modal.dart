@@ -66,7 +66,10 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
     return BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E1E22).withOpacity(0.92) : Colors.white.withOpacity(0.92),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
@@ -74,47 +77,55 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
             color: (isDark ? Colors.white : Colors.black).withOpacity(0.1),
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 14),
 
-            // Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.devices_other_rounded, color: accentColor, size: 24),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Audio Output & Multi-Room',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(Icons.devices_other_rounded, color: accentColor, size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Audio Output & Multi-Room',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
 
             const SizedBox(height: 16),
 
@@ -235,28 +246,35 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'PLAY ON MULTIPLE DEVICES',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                        color: (isDark ? Colors.white : Colors.black).withOpacity(0.5),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'PLAY ON MULTIPLE DEVICES',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                          color: (isDark ? Colors.white : Colors.black).withOpacity(0.5),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Ultra-Low Latency Peer-to-Peer Sync',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: (isDark ? Colors.white : Colors.black).withOpacity(0.6),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Ultra-Low Latency Peer-to-Peer Sync',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: (isDark ? Colors.white : Colors.black).withOpacity(0.6),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 if (!syncState.session.isInGroup)
                   ElevatedButton.icon(
                     icon: const Icon(Icons.wifi_tethering_rounded, size: 16),
@@ -410,6 +428,7 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

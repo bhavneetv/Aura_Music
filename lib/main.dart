@@ -10,6 +10,7 @@ import 'themes/app_theme.dart';
 import 'services/storage/storage_service.dart';
 import 'services/audio/audio_handler.dart';
 import 'services/version/version_service.dart';
+import 'services/auth/auth_service.dart';
 
 import 'services/voice/voice_assistant_service.dart';
 import 'services/quick_actions/quick_actions_service.dart';
@@ -41,6 +42,7 @@ void main() async {
     debugPrint('Could not load .env file: $e');
   }
   await StorageService.init();
+  AuthService.instance.init();
   await AppVersionService.init();
   await HomeWidgetService.init();
   await SpatialAudioService.init();

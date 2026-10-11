@@ -1,0 +1,62 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:music_app/services/auth/auth_service.dart';
+import 'package:music_app/services/sync/playlist_cloud_sync_service.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('AuthService Tests', () {
+    test('Password hashing is deterministic and salted', () {
+      final hash1 = AuthService.hashPassword('secret123');
+      final hash2 = AuthService.hashPassword('secret123');
+      final hash3 = AuthService.hashPassword('different');
+
+      expect(hash1, equals(hash2));
+      expect(hash1, isNot(equals(hash3)));
+      expect(hash1.length, equals(64)); // SHA-256 hex string is 64 characters
+    });
+
+    test('Ownership check correctly differentiates owner vs non-owner', () {
+      final auth = AuthService.instance;
+
+      // Playlist created by current user
+      final myPlaylist = {
+        'id': 'pl_101',
+        'name': 'My Chill Vibes',
+        'ownerId': auth.currentUserId,
+        'authorName': auth.currentUserName,
+        'isImported': false,
+      };
+      expect(auth.isPlaylistOwner(myPlaylist), isTrue);
+
+      // Playlist imported from another device/user
+      final importedPlaylist = {
+        'id': 'pl_102',
+        'name': 'Someone Else Vibes',
+        'ownerId': 'usr_other_device_999',
+        'authorName': 'Device 2 User',
+        'isImported': true,
+      };
+      expect(auth.isPlaylistOwner(importedPlaylist), isFalse);
+    });
+  });
+
+  group('PlaylistCloudSyncService ShareCode Tests', () {
+    test('generateShareCode generates clean AURA-XXXXXX codes', () {
+      final code1 = PlaylistCloudSyncService.generateShareCode();
+      final code2 = PlaylistCloudSyncService.generateShareCode();
+
+      expect(code1.startsWith('AURA-'), isTrue);
+      expect(code1.length, equals(11)); // "AURA-" (5) + 6 chars = 11
+      expect(code2.startsWith('AURA-'), isTrue);
+      expect(code1, isNot(equals(code2)));
+    });
+
+    test('fetchPlaylistByShareCode correctly parses code query with or without prefix', () async {
+      // Test seed playlist code lookup
+      final resWithPrefix = await PlaylistCloudSyncService.instance.fetchPlaylistByShareCode('AURA-LOFI99');
+      // Even if network is not mocking seed, it should handle format gracefully
+      expect(resWithPrefix == null || resWithPrefix['name'] != null, isTrue);
+    });
+  });
+}

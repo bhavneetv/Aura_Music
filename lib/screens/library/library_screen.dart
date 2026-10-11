@@ -15,6 +15,10 @@ import 'package:flutter/services.dart';
 import '../../services/sharing/playlist_link_share_service.dart';
 import '../sharing/remote_link_share_modal.dart';
 import '../../widgets/playlist_imported_dialog.dart';
+import 'global_playlists_screen.dart';
+import '../../services/sync/playlist_cloud_sync_service.dart';
+import '../../services/auth/auth_service.dart';
+import '../../widgets/auth_dialog.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -66,6 +70,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
         int selectedTab = initialTab;
         String? inlineError;
         bool isLoading = false;
+        bool newPlaylistIsPublic = false;
+        bool newPlaylistIsSyncEnabled = true;
+        final authorController = TextEditingController(text: StorageService.getUserAuthorName());
 
         return StatefulBuilder(
           builder: (sheetContext, setModalState) {
@@ -76,14 +83,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                 top: 20, 
                 bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
               ),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+              ),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1B1B1E) : Colors.white,
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                   Center(
                     child: Container(
                       width: 40,
@@ -340,7 +352,48 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                               });
 
                               try {
-                                // 1. Attempt Aura Link or code decode
+                                // 1. Attempt Cloud Share Code lookup (e.g. AURA-7K9X2B)
+                                final cloudByCode = await PlaylistCloudSyncService.instance.fetchPlaylistByShareCode(input);
+                                if (cloudByCode != null) {
+                                  final List<Track> tracks = List<Track>.from(cloudByCode['tracks'] as List? ?? []);
+                                  final newPl = {
+                                    'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                                    'name': cloudByCode['name']?.toString() ?? 'Shared Playlist',
+                                    'description': cloudByCode['description']?.toString() ?? 'Imported via Playlist Code',
+                                    'authorName': cloudByCode['authorName']?.toString() ?? 'Community Member',
+                                    'ownerId': cloudByCode['ownerId']?.toString() ?? '',
+                                    'ownerName': cloudByCode['authorName']?.toString() ?? '',
+                                    'isImported': true,
+                                    'isPublic': cloudByCode['isPublic'] == true,
+                                    'isSyncEnabled': cloudByCode['isSyncEnabled'] == true,
+                                    'shareCode': cloudByCode['shareCode']?.toString() ?? input.toUpperCase(),
+                                    'syncId': cloudByCode['syncId']?.toString(),
+                                    'trackIds': tracks.map((t) => t.id).toList(),
+                                    'tracks': tracks.map((t) => t.toJson()).toList(),
+                                  };
+                                  final playlists = StorageService.getPlaylists();
+                                  playlists.insert(0, newPl);
+                                  await StorageService.savePlaylists(playlists);
+
+                                  final importEvent = PlaylistImportEvent(
+                                    title: newPl['name'].toString(),
+                                    description: newPl['description'].toString(),
+                                    trackCount: tracks.length,
+                                    tracks: tracks,
+                                    fromQrScan: false,
+                                  );
+
+                                  Navigator.pop(sheetContext);
+                                  _spotifyUrlController.clear();
+                                  _loadPlaylists();
+
+                                  if (context.mounted) {
+                                    PlaylistImportSuccessDialog.show(context, importEvent, ref);
+                                  }
+                                  return;
+                                }
+
+                                // 2. Attempt Aura Link or code decode
                                 final decodedAura = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(input);
                                 if (decodedAura != null && decodedAura.tracks.isNotEmpty) {
                                   final newPl = {
@@ -471,56 +524,202 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                         ),
                       ),
                     ),
-                    const SizedBox(height: 22),
-                    ElevatedButton(
-                      onPressed: () {
-                        final name = _playlistNameController.text.trim();
-                        final desc = _playlistDescController.text.trim();
-                        if (name.isNotEmpty) {
-                          final playlists = StorageService.getPlaylists();
-                          final newPl = {
-                            'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                            'name': name,
-                            'description': desc.isNotEmpty ? desc : 'A custom playlist',
-                            'trackIds': <String>[],
-                            'tracks': <Map<String, dynamic>>[],
-                          };
-                          playlists.add(newPl);
-                          StorageService.savePlaylists(playlists);
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: authorController,
+                      decoration: InputDecoration(
+                        labelText: 'Author Name',
+                        prefixIcon: Icon(Icons.person_rounded, color: accentColor, size: 20),
+                        filled: true,
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: accentColor, width: 1.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
 
-                          _playlistNameController.clear();
-                          _playlistDescController.clear();
-                          _loadPlaylists();
-                          Navigator.pop(sheetContext);
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Created playlist "$name"! 🎉'),
-                              backgroundColor: accentColor,
-                              behavior: SnackBarBehavior.floating,
+                    // Public / Private Switch
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: newPlaylistIsPublic ? accentColor.withValues(alpha: 0.4) : (isDark ? Colors.white10 : Colors.black12)),
+                      ),
+                      child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: newPlaylistIsPublic,
+                        activeThumbColor: accentColor,
+                        title: Row(
+                          children: [
+                            Icon(newPlaylistIsPublic ? Icons.public_rounded : Icons.lock_outline_rounded, size: 18, color: newPlaylistIsPublic ? accentColor : Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(
+                              newPlaylistIsPublic ? 'Public (Global Feed) 🌐' : 'Private (Hidden) 🔒',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             ),
-                          );
-                        }
-                      },
+                          ],
+                        ),
+                        subtitle: Text(
+                          newPlaylistIsPublic ? 'Discoverable in the Global Playlists screen' : 'Only users with your direct link can access',
+                          style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                        onChanged: (val) async {
+                          if (val && !AuthService.instance.isLoggedIn) {
+                            final loggedIn = await AuthModalDialog.show(
+                              context,
+                              featurePrompt: 'Please sign in or create a free account to make playlists public!',
+                            );
+                            if (loggedIn) {
+                              setModalState(() => newPlaylistIsPublic = true);
+                            }
+                            return;
+                          }
+                          setModalState(() => newPlaylistIsPublic = val);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Collaborative Sync Switch
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: newPlaylistIsSyncEnabled ? accentColor.withValues(alpha: 0.4) : (isDark ? Colors.white10 : Colors.black12)),
+                      ),
+                      child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: newPlaylistIsSyncEnabled,
+                        activeThumbColor: accentColor,
+                        title: Row(
+                          children: [
+                            Icon(Icons.sync_rounded, size: 18, color: newPlaylistIsSyncEnabled ? accentColor : Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(
+                              newPlaylistIsSyncEnabled ? 'Allow Collaborative Sync 🔄' : 'Read-Only (No Sync) 🔒',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                        subtitle: Text(
+                          newPlaylistIsSyncEnabled ? 'Others can add songs & sync updates' : 'Collaborators cannot push songs to this playlist',
+                          style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                        onChanged: (val) async {
+                          if (val && !AuthService.instance.isLoggedIn) {
+                            final loggedIn = await AuthModalDialog.show(
+                              context,
+                              featurePrompt: 'Please sign in or create a free account to enable collaborative sync!',
+                            );
+                            if (loggedIn) {
+                              setModalState(() => newPlaylistIsSyncEnabled = true);
+                            }
+                            return;
+                          }
+                          setModalState(() => newPlaylistIsSyncEnabled = val);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    ElevatedButton(
+                      onPressed: isLoading
+                          ? null
+                          : () async {
+                              final name = _playlistNameController.text.trim();
+                              final desc = _playlistDescController.text.trim();
+                              final author = authorController.text.trim().isEmpty ? StorageService.getUserAuthorName() : authorController.text.trim();
+
+                              if (name.isNotEmpty) {
+                                setModalState(() => isLoading = true);
+                                await StorageService.setUserAuthorName(author);
+
+                                final plId = DateTime.now().millisecondsSinceEpoch.toString();
+                                final shareCode = PlaylistCloudSyncService.generateShareCode();
+                                final ownerId = AuthService.instance.currentUserId;
+                                String? syncId;
+
+                                if (newPlaylistIsPublic || newPlaylistIsSyncEnabled) {
+                                  syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
+                                    localId: plId,
+                                    name: name,
+                                    description: desc,
+                                    authorName: author,
+                                    isPublic: newPlaylistIsPublic,
+                                    isSyncEnabled: newPlaylistIsSyncEnabled,
+                                    tracks: [],
+                                    shareCode: shareCode,
+                                    ownerId: ownerId,
+                                  );
+                                }
+
+                                final playlists = StorageService.getPlaylists();
+                                final newPl = {
+                                  'id': plId,
+                                  'name': name,
+                                  'description': desc.isNotEmpty ? desc : 'A custom playlist',
+                                  'authorName': author,
+                                  'ownerId': ownerId,
+                                  'ownerName': author,
+                                  'isPublic': newPlaylistIsPublic,
+                                  'isSyncEnabled': newPlaylistIsSyncEnabled,
+                                  'shareCode': shareCode,
+                                  if (syncId != null) 'syncId': syncId,
+                                  'trackIds': <String>[],
+                                  'tracks': <Map<String, dynamic>>[],
+                                };
+                                playlists.add(newPl);
+                                await StorageService.savePlaylists(playlists);
+
+                                _playlistNameController.clear();
+                                _playlistDescController.clear();
+                                _loadPlaylists();
+                                Navigator.pop(sheetContext);
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Created playlist "$name"! 🎉'),
+                                    backgroundColor: accentColor,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: accentColor,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         elevation: 2,
                       ),
-                      child: const Text(
-                        'Create Playlist',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                            )
+                          : const Text(
+                              'Create Playlist',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
                     ),
                   ],
                 ],
               ),
-            );
+            ),
+          );
           },
         );
       },
@@ -546,25 +745,32 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Your Library 📚',
-                    style: TextStyle(
-                      fontFamily: 'Outfit',
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Your Library 📚',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${_playlists.length} Playlists • ${favTracks.length} Liked • ${downloadedTracks.length} Offline',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_playlists.length} Playlists • ${favTracks.length} Liked • ${downloadedTracks.length} Offline',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Row(
                 children: [
                   IconButton(
@@ -578,6 +784,30 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                     ),
                     tooltip: 'Add / Import Playlist',
                     onPressed: () => _showAddPlaylistModal(initialTab: 0),
+                  ),
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AuthService.instance.isLoggedIn
+                            ? accentColor.withValues(alpha: 0.2)
+                            : (isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.04)),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        AuthService.instance.isLoggedIn ? Icons.cloud_done_rounded : Icons.account_circle_outlined,
+                        color: AuthService.instance.isLoggedIn ? accentColor : (isDark ? Colors.white70 : Colors.black54),
+                        size: 20,
+                      ),
+                    ),
+                    tooltip: AuthService.instance.isLoggedIn ? 'Cloud Account Active' : 'Sign In / Account',
+                    onPressed: () {
+                      AuthModalDialog.show(context, onLoggedIn: () {
+                        setState(() {
+                          _loadPlaylists();
+                        });
+                      });
+                    },
                   ),
                   IconButton(
                     icon: Container(
@@ -628,6 +858,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (context) => const RecentlyPlayedScreen()),
+                  ).then((_) => _loadPlaylists());
+                },
+              ),
+              _buildLibraryShortcutCard(
+                context,
+                'Global 🌐',
+                'Community',
+                Icons.public_rounded,
+                accentColor,
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
                   ).then((_) => _loadPlaylists());
                 },
               ),
@@ -693,20 +936,33 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           decoration: BoxDecoration(
             color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: accentColor.withValues(alpha: 0.2)),
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: accentColor, size: 22),
-              const SizedBox(height: 6),
-              Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              Icon(icon, color: accentColor, size: 20),
+              const SizedBox(height: 5),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 9.5, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -733,6 +989,21 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               label: const Text('Add / Import Playlist', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(backgroundColor: accentColor),
             ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
+                ).then((_) => _loadPlaylists());
+              },
+              icon: Icon(Icons.public_rounded, color: accentColor, size: 18),
+              label: Text('Explore Global Playlists 🌐', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: accentColor),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+            ),
           ],
         ),
       );
@@ -742,12 +1013,45 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
 
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 150, top: 10, left: 20, right: 20),
-      itemCount: _playlists.length,
+      itemCount: _playlists.length + 1,
       itemBuilder: (context, index) {
-        final playlist = _playlists[index];
+        if (index == 0) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [accentColor.withValues(alpha: 0.18), isDark ? const Color(0xFF1E1E24) : Colors.white],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accentColor.withValues(alpha: 0.25)),
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: accentColor, shape: BoxShape.circle),
+                child: const Icon(Icons.public_rounded, color: Colors.black, size: 20),
+              ),
+              title: const Text('Discover Global Playlists 🌐', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, fontFamily: 'Outfit')),
+              subtitle: Text('Browse community public playlists', style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54)),
+              trailing: Icon(Icons.arrow_forward_ios_rounded, size: 13, color: accentColor),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
+                ).then((_) => _loadPlaylists());
+              },
+            ),
+          );
+        }
+
+        final playlist = _playlists[index - 1];
         final List rawTracks = playlist['tracks'] as List? ?? [];
         final List trackIds = playlist['trackIds'] as List? ?? [];
         final int songCount = rawTracks.isNotEmpty ? rawTracks.length : trackIds.length;
+        final author = playlist['authorName']?.toString();
+        final isPublic = playlist['isPublic'] == true;
+        final isSync = playlist['isSyncEnabled'] == true;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
@@ -764,14 +1068,65 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               ),
               child: Icon(Icons.playlist_play_rounded, color: accentColor, size: 30),
             ),
-            title: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-            subtitle: Text('$songCount songs • ${playlist['description'] ?? 'Custom playlist'}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+                if (isPublic) ...[
+                  const SizedBox(width: 4),
+                  Icon(Icons.public_rounded, size: 13, color: Colors.blueAccent),
+                ],
+                if (isSync) ...[
+                  const SizedBox(width: 4),
+                  Icon(Icons.sync_rounded, size: 13, color: Colors.greenAccent),
+                ],
+              ],
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 2),
+                Text(
+                  author != null && author.isNotEmpty
+                      ? '$songCount songs • By $author'
+                      : '$songCount songs • ${playlist['description'] ?? 'Custom playlist'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                if (playlist['shareCode'] != null && playlist['shareCode'].toString().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(Icons.tag_rounded, size: 11, color: accentColor),
+                      const SizedBox(width: 2),
+                      Text(
+                        playlist['shareCode'].toString(),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
+                      ),
+                      if (playlist['isImported'] == true) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('Imported', style: TextStyle(fontSize: 9, color: Colors.amber, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ],
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
                   icon: Icon(Icons.share_rounded, color: accentColor, size: 20),
-                  tooltip: 'Share Playlist via Nearby Share',
+                  tooltip: 'Share Playlist',
                   onPressed: () {
                     final List rawTracks = playlist['tracks'] ?? [];
                     final List<Track> playlistTracks = [];
@@ -803,10 +1158,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               ],
             ),
             onTap: () {
+              final actualIndex = index - 1;
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => PlaylistDetailScreen(playlistIndex: index),
+                  builder: (context) => PlaylistDetailScreen(
+                    playlistIndex: actualIndex,
+                    initialPlaylist: playlist,
+                  ),
                 ),
               ).then((_) => _loadPlaylists());
             },

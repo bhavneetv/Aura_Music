@@ -7,13 +7,20 @@ import '../../services/storage/storage_service.dart';
 import '../../services/download/download_service.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../sharing/remote_link_share_modal.dart';
+import 'package:flutter/services.dart';
+import '../../services/sync/playlist_cloud_sync_service.dart';
+import '../../services/auth/auth_service.dart';
+import '../../widgets/playlist_settings_dialog.dart';
+import '../../widgets/auth_dialog.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
+  final Map<String, dynamic>? initialPlaylist;
 
   const PlaylistDetailScreen({
     super.key,
     required this.playlistIndex,
+    this.initialPlaylist,
   });
 
   @override
@@ -21,12 +28,13 @@ class PlaylistDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
-  late Map<String, dynamic> _playlist;
+  Map<String, dynamic> _playlist = {};
   List<Track> _playlistTracks = [];
   String _searchQuery = '';
   bool _isDownloadingPlaylist = false;
   double _downloadProgress = 0.0;
   bool _isPlaylistDownloaded = false;
+  bool _isSyncing = false;
 
   @override
   void initState() {
@@ -36,37 +44,102 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
   void _loadPlaylistData() {
     final playlists = StorageService.getPlaylists();
-    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      _playlist = playlists[widget.playlistIndex];
-      final List rawTracks = _playlist['tracks'] ?? [];
-      
-      _playlistTracks = [];
-      if (rawTracks.isNotEmpty) {
-        for (final item in rawTracks) {
-          if (item is Map) {
-            _playlistTracks.add(Track.fromJson(Map<String, dynamic>.from(item)));
-          }
-        }
-      } else {
-        final List rawIds = _playlist['trackIds'] ?? [];
-        for (final id in rawIds) {
-          final track = Track.mockTracks.firstWhere(
-            (t) => t.id == id.toString(),
-            orElse: () => Track(
-              id: id.toString(),
-              title: 'Track $id',
-              artist: 'Unknown Artist',
-              album: 'Unknown Album',
-              duration: '3:00',
-              artworkUrl: '',
-              audioUrl: '',
-              genre: '',
-            ),
-          );
-          _playlistTracks.add(track);
+    Map<String, dynamic>? target;
+
+    final targetId = _playlist['id']?.toString() ?? widget.initialPlaylist?['id']?.toString();
+    if (targetId != null && targetId.isNotEmpty) {
+      for (final p in playlists) {
+        if (p['id']?.toString() == targetId) {
+          target = p;
+          break;
         }
       }
     }
+
+    if (target == null && widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+      target = playlists[widget.playlistIndex];
+    }
+
+    target ??= widget.initialPlaylist;
+
+    if (target != null) {
+      _playlist = Map<String, dynamic>.from(target);
+    } else if (playlists.isNotEmpty) {
+      _playlist = Map<String, dynamic>.from(playlists.first);
+    } else {
+      _playlist = {
+        'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+        'name': 'Custom Playlist',
+        'description': '',
+        'tracks': [],
+        'trackIds': [],
+      };
+    }
+
+    if (_playlist['shareCode'] == null || _playlist['shareCode'].toString().isEmpty) {
+      _playlist['shareCode'] = PlaylistCloudSyncService.generateShareCode();
+    }
+    if (_playlist['ownerId'] == null || _playlist['ownerId'].toString().isEmpty) {
+      if (_playlist['isImported'] != true) {
+        _playlist['ownerId'] = AuthService.instance.currentUserId;
+        _playlist['ownerName'] = AuthService.instance.currentUserName;
+      }
+    }
+
+    final List rawTracks = _playlist['tracks'] as List? ?? [];
+    _playlistTracks = [];
+    if (rawTracks.isNotEmpty) {
+      for (final item in rawTracks) {
+        if (item is Map) {
+          _playlistTracks.add(Track.fromJson(Map<String, dynamic>.from(item)));
+        }
+      }
+    } else {
+      final List rawIds = _playlist['trackIds'] as List? ?? [];
+      for (final id in rawIds) {
+        final track = Track.mockTracks.firstWhere(
+          (t) => t.id == id.toString(),
+          orElse: () => Track(
+            id: id.toString(),
+            title: 'Track $id',
+            artist: 'Unknown Artist',
+            album: 'Unknown Album',
+            duration: '3:00',
+            artworkUrl: '',
+            audioUrl: '',
+            genre: '',
+          ),
+        );
+        _playlistTracks.add(track);
+      }
+    }
+  }
+
+  Future<void> _persistPlaylist(Map<String, dynamic> updated) async {
+    final playlists = StorageService.getPlaylists();
+    final targetId = updated['id']?.toString();
+    bool replaced = false;
+
+    if (targetId != null && targetId.isNotEmpty) {
+      for (int i = 0; i < playlists.length; i++) {
+        if (playlists[i]['id']?.toString() == targetId) {
+          playlists[i] = updated;
+          replaced = true;
+          break;
+        }
+      }
+    }
+
+    if (!replaced && widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+      playlists[widget.playlistIndex] = updated;
+      replaced = true;
+    }
+
+    if (!replaced) {
+      playlists.add(updated);
+    }
+
+    await StorageService.savePlaylists(playlists);
   }
 
   void _downloadPlaylist(Color accentColor) async {
@@ -109,51 +182,77 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   void _addSongToPlaylist(Track track) async {
-    final playlists = StorageService.getPlaylists();
-    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
-      final trackMap = track.toJson();
-      
-      if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
-        rawTracks.add(trackMap);
-        playlists[widget.playlistIndex]['tracks'] = rawTracks;
-        await StorageService.savePlaylists(playlists);
-        setState(() {
-          _loadPlaylistData();
-        });
+    final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
+    final trackMap = track.toJson();
+
+    if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
+      rawTracks.add(trackMap);
+      _playlist['tracks'] = rawTracks;
+      _playlist['trackIds'] = rawTracks.map((t) => t['id']?.toString()).whereType<String>().toList();
+      await _persistPlaylist(_playlist);
+      setState(() {
+        _loadPlaylistData();
+      });
+
+      // Push to cloud slot if synced
+      final syncId = _playlist['syncId']?.toString();
+      if (syncId != null && syncId.isNotEmpty) {
+        PlaylistCloudSyncService.instance.updateCloudSlot(
+          syncId: syncId,
+          name: _playlist['name']?.toString() ?? 'Playlist',
+          description: _playlist['description']?.toString() ?? '',
+          authorName: _playlist['authorName']?.toString() ?? StorageService.getUserAuthorName(),
+          isPublic: _playlist['isPublic'] == true,
+          isSyncEnabled: _playlist['isSyncEnabled'] == true,
+          tracks: _playlistTracks,
+          shareCode: _playlist['shareCode']?.toString(),
+          ownerId: _playlist['ownerId']?.toString(),
+        );
       }
     }
   }
 
   void _removeSongFromPlaylist(int index) async {
-    final playlists = StorageService.getPlaylists();
-    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
-      if (index >= 0 && index < rawTracks.length) {
-        rawTracks.removeAt(index);
-        playlists[widget.playlistIndex]['tracks'] = rawTracks;
-        await StorageService.savePlaylists(playlists);
-        setState(() {
-          _loadPlaylistData();
-        });
+    final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
+    if (index >= 0 && index < rawTracks.length) {
+      rawTracks.removeAt(index);
+      _playlist['tracks'] = rawTracks;
+      _playlist['trackIds'] = rawTracks.map((t) => t['id']?.toString()).whereType<String>().toList();
+      await _persistPlaylist(_playlist);
+      setState(() {
+        _loadPlaylistData();
+      });
+
+      // Push to cloud slot if synced
+      final syncId = _playlist['syncId']?.toString();
+      if (syncId != null && syncId.isNotEmpty) {
+        PlaylistCloudSyncService.instance.updateCloudSlot(
+          syncId: syncId,
+          name: _playlist['name']?.toString() ?? 'Playlist',
+          description: _playlist['description']?.toString() ?? '',
+          authorName: _playlist['authorName']?.toString() ?? StorageService.getUserAuthorName(),
+          isPublic: _playlist['isPublic'] == true,
+          isSyncEnabled: _playlist['isSyncEnabled'] == true,
+          tracks: _playlistTracks,
+          shareCode: _playlist['shareCode']?.toString(),
+          ownerId: _playlist['ownerId']?.toString(),
+        );
       }
     }
   }
 
   void _reorderPlaylistSongs(int oldIndex, int newIndex) async {
     if (newIndex > oldIndex) newIndex -= 1;
-    final playlists = StorageService.getPlaylists();
-    if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-      final List rawTracks = List.from(playlists[widget.playlistIndex]['tracks'] ?? []);
-      if (oldIndex >= 0 && oldIndex < rawTracks.length) {
-        final item = rawTracks.removeAt(oldIndex);
-        rawTracks.insert(newIndex, item);
-        playlists[widget.playlistIndex]['tracks'] = rawTracks;
-        await StorageService.savePlaylists(playlists);
-        setState(() {
-          _loadPlaylistData();
-        });
-      }
+    final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
+    if (oldIndex >= 0 && oldIndex < rawTracks.length) {
+      final item = rawTracks.removeAt(oldIndex);
+      rawTracks.insert(newIndex, item);
+      _playlist['tracks'] = rawTracks;
+      _playlist['trackIds'] = rawTracks.map((t) => t['id']?.toString()).whereType<String>().toList();
+      await _persistPlaylist(_playlist);
+      setState(() {
+        _loadPlaylistData();
+      });
     }
   }
 
@@ -232,7 +331,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
             ElevatedButton(
               onPressed: () async {
                 final playlists = StorageService.getPlaylists();
-                if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+                final pId = _playlist['id']?.toString();
+                if (pId != null && pId.isNotEmpty) {
+                  playlists.removeWhere((p) => p['id']?.toString() == pId);
+                  await StorageService.savePlaylists(playlists);
+                } else if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
                   playlists.removeAt(widget.playlistIndex);
                   await StorageService.savePlaylists(playlists);
                 }
@@ -251,6 +354,163 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         );
       },
     );
+  }
+
+  Future<void> _performPlaylistSync(Color accentColor) async {
+    final isSyncEnabled = _playlist['isSyncEnabled'] == true;
+    final isOwner = AuthService.instance.isPlaylistOwner(_playlist);
+
+    // 1. Validation: Collaborative sync must be enabled by the owner
+    if (!isSyncEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isOwner
+                ? 'Collaborative sync is disabled for this playlist. Turn on "Allow Collaboration & Sync" in Settings (⚙️) to sync songs.'
+                : 'The creator has disabled collaborative sync for this playlist.',
+          ),
+          backgroundColor: Colors.orangeAccent.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          action: isOwner
+              ? SnackBarAction(
+                  label: 'SETTINGS',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    PlaylistSettingsModal.show(
+                      context,
+                      playlist: _playlist,
+                      tracks: _playlistTracks,
+                      onUpdated: (updated) {
+                        setState(() {
+                          _playlist = updated;
+                          _loadPlaylistData();
+                        });
+                      },
+                    );
+                  },
+                )
+              : null,
+        ),
+      );
+      return;
+    }
+
+    // 2. Auth check: user needs to be logged in to participate in cloud sync
+    if (!AuthService.instance.isLoggedIn) {
+      final loggedIn = await AuthModalDialog.show(
+        context,
+        featurePrompt: 'Please sign in or create an account to sync songs with other devices!',
+      );
+      if (!loggedIn) return;
+    }
+
+    setState(() => _isSyncing = true);
+
+    try {
+      final currentAuthor = StorageService.getUserAuthorName();
+      String? syncId = _playlist['syncId']?.toString();
+
+      // If owner and syncId is missing, create a cloud sync slot
+      if (syncId == null || syncId.isEmpty) {
+        if (!isOwner) {
+          setState(() => _isSyncing = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Cannot sync: this imported playlist has no cloud sync key attached.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
+
+        final localId = _playlist['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+        syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
+          localId: localId,
+          name: _playlist['name']?.toString() ?? 'Playlist',
+          description: _playlist['description']?.toString() ?? '',
+          authorName: currentAuthor,
+          isPublic: _playlist['isPublic'] == true,
+          isSyncEnabled: true,
+          tracks: _playlistTracks,
+          shareCode: _playlist['shareCode']?.toString(),
+          ownerId: _playlist['ownerId']?.toString() ?? AuthService.instance.currentUserId,
+        );
+
+        if (syncId != null) {
+          _playlist['syncId'] = syncId;
+          await _persistPlaylist(_playlist);
+        }
+      }
+
+      if (syncId != null && syncId.isNotEmpty) {
+        // Sync ONLY this playlist (fetch latest remote songs, push local songs)
+        final result = await PlaylistCloudSyncService.instance.syncPlaylist(
+          syncId: syncId,
+          currentAuthor: currentAuthor,
+          localTracks: _playlistTracks,
+          isSyncEnabled: true,
+          playlistName: _playlist['name']?.toString(),
+          playlistDescription: _playlist['description']?.toString(),
+          shareCode: _playlist['shareCode']?.toString(),
+          ownerId: _playlist['ownerId']?.toString(),
+        );
+
+        if (result.success) {
+          _playlistTracks = result.mergedTracks;
+          _playlist['tracks'] = result.mergedTracks.map((t) => t.toJson()).toList();
+          _playlist['trackIds'] = result.mergedTracks.map((t) => t.id).toList();
+          await StorageService.updatePlaylist(
+            _playlist['id']?.toString() ?? '',
+            _playlist,
+          );
+        }
+
+        if (mounted) {
+          setState(() => _isSyncing = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(
+                    result.success ? Icons.sync_rounded : Icons.info_outline_rounded,
+                    color: Colors.black,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      result.message,
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: result.success ? accentColor : Colors.orangeAccent,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          setState(() => _isSyncing = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not establish cloud connection for this playlist.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sync error: $e'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
   }
 
   @override
@@ -272,59 +532,121 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(_playlist['name'] ?? 'Playlist', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit')),
+        title: Text(
+          _playlist['name'] ?? 'Playlist',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit'),
+        ),
         actions: [
-          if (_isPlaylistDownloaded)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 24),
-            )
-          else if (_isDownloadingPlaylist)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    value: _downloadProgress > 0 ? _downloadProgress : null,
-                    strokeWidth: 2.5,
-                    color: accentColor,
-                  ),
-                ),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.download_for_offline_rounded),
-              tooltip: 'Download Playlist',
-              onPressed: () => _downloadPlaylist(accentColor),
-            ),
+          // 1. Dedicated Playlist Collaborative Sync Button (🔄)
           IconButton(
-            icon: const Icon(Icons.share_rounded),
-            tooltip: 'Share Playlist',
-            onPressed: () {
-              ShareOptionsModal.show(
-                context,
-                tracks: _playlistTracks,
-                title: _playlist['name']?.toString() ?? 'Custom Playlist',
-                description: _playlist['description']?.toString() ?? '',
-              );
-            },
+            icon: _isSyncing
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: accentColor),
+                  )
+                : Icon(
+                    _playlist['isSyncEnabled'] == true ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+                    color: _playlist['isSyncEnabled'] == true ? accentColor : (isDark ? Colors.white38 : Colors.black38),
+                  ),
+            tooltip: _playlist['isSyncEnabled'] == true
+                ? 'Sync Playlist Songs 🔄'
+                : 'Sync Disabled by Owner',
+            onPressed: _isSyncing ? null : () => _performPlaylistSync(accentColor),
           ),
+
+          // 2. Add Songs Button
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded),
             tooltip: 'Add Songs',
             onPressed: _showAddSongsBottomSheet,
           ),
+
+          // 3. Playlist Settings Button (⚙️)
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-            tooltip: 'Delete Playlist',
-            onPressed: () => _showDeletePlaylistDialog(accentColor),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Playlist Settings',
+            onPressed: () {
+              PlaylistSettingsModal.show(
+                context,
+                playlist: _playlist,
+                tracks: _playlistTracks,
+                onUpdated: (updated) {
+                  setState(() {
+                    _playlist = updated;
+                    _loadPlaylistData();
+                  });
+                },
+              );
+            },
+          ),
+
+          // 4. Overflow Safe More Options Menu (Download, Share, Delete)
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            onSelected: (val) {
+              if (val == 'download') {
+                _downloadPlaylist(accentColor);
+              } else if (val == 'share') {
+                ShareOptionsModal.show(
+                  context,
+                  tracks: _playlistTracks,
+                  title: _playlist['name']?.toString() ?? 'Custom Playlist',
+                  description: _playlist['description']?.toString() ?? '',
+                );
+              } else if (val == 'delete') {
+                _showDeletePlaylistDialog(accentColor);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'download',
+                child: Row(
+                  children: [
+                    Icon(
+                      _isPlaylistDownloaded ? Icons.check_circle_rounded : Icons.download_for_offline_rounded,
+                      size: 20,
+                      color: _isPlaylistDownloaded ? Colors.greenAccent : null,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      _isDownloadingPlaylist
+                          ? 'Downloading (${(_downloadProgress * 100).toInt()}%)...'
+                          : (_isPlaylistDownloaded ? 'Downloaded ✓' : 'Download All'),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'share',
+                child: Row(
+                  children: const [
+                    Icon(Icons.share_rounded, size: 20),
+                    SizedBox(width: 10),
+                    Text('Share Playlist'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: const [
+                    Icon(Icons.delete_outline_rounded, size: 20, color: Colors.redAccent),
+                    SizedBox(width: 10),
+                    Text('Delete Playlist', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -379,24 +701,149 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, fontFamily: 'Outfit'),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
-                        _playlist['description'] ?? 'Personalized collection',
+                        'Created by ${_playlist['authorName'] ?? 'Me'} • ${_playlist['description'] ?? 'Personalized collection'}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 12, color: Colors.grey, height: 1.3),
                       ),
                       const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: accentColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '${_playlistTracks.length} Songs',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: accentColor),
-                        ),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          // Unique Share Code Pill
+                          GestureDetector(
+                            onTap: () {
+                              final code = _playlist['shareCode']?.toString() ?? '';
+                              if (code.isNotEmpty) {
+                                Clipboard.setData(ClipboardData(text: code));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Copied Playlist Code "$code" to clipboard! 📋'),
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: accentColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: accentColor.withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.tag_rounded, size: 11, color: accentColor),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    _playlist['shareCode']?.toString() ?? 'CODE',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: accentColor),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.copy_rounded, size: 9, color: accentColor),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          // Owner Status Pill
+                          Builder(
+                            builder: (context) {
+                              final isOwner = AuthService.instance.isPlaylistOwner(_playlist);
+                              final ownerName = _playlist['authorName']?.toString() ?? 'Creator';
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                decoration: BoxDecoration(
+                                  color: isOwner
+                                      ? Colors.purpleAccent.withValues(alpha: 0.15)
+                                      : Colors.amber.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isOwner
+                                        ? Colors.purpleAccent.withValues(alpha: 0.3)
+                                        : Colors.amber.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isOwner ? Icons.workspace_premium_rounded : Icons.person_outline_rounded,
+                                      size: 11,
+                                      color: isOwner ? Colors.purpleAccent : Colors.amber,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      isOwner ? '👑 You (Owner)' : '👤 $ownerName',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10.5,
+                                        color: isOwner ? Colors.purpleAccent : Colors.amber,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2.5),
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${_playlistTracks.length} Songs',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: accentColor),
+                            ),
+                          ),
+                          if (_playlist['isPublic'] == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.blueAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.public_rounded, size: 11, color: Colors.blueAccent),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Public',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Colors.blueAccent),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_playlist['isSyncEnabled'] == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.greenAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.sync_rounded, size: 11, color: Colors.greenAccent),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Sync Ready',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Colors.greenAccent),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -536,6 +983,25 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                               Expanded(
                                 child: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
                               ),
+                              if (track.addedBy != null && track.addedBy!.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: accentColor.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 90),
+                                    child: Text(
+                                      '👤 ${track.addedBy}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 9.5, color: accentColor, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                           trailing: Row(
