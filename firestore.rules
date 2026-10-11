@@ -79,7 +79,8 @@ service cloud.firestore {
       allow read: if resource.data.visibility == 'public'
         || resource.data.isPublic == true
         || (isAuthenticated() && isNotBlocked() && (
-          request.auth.uid in resource.data.memberUids
+          request.auth.uid == resource.data.ownerUid
+          || request.auth.uid in resource.data.memberUids
           || isAdmin()
         ));
 

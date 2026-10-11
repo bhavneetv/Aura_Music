@@ -2,9 +2,15 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../models/app_user.dart';
 import '../../models/user_model.dart';
+import '../../models/playlist.dart';
+import '../../models/playlist_track.dart';
+import '../../models/track.dart';
+import '../storage/storage_service.dart';
+import '../playlist/playlist_repository.dart';
 import '../user_service.dart';
 
 class AuthResult {
@@ -29,6 +35,9 @@ class AuthService {
   // Backward compatibility notifier for existing UI listeners
   final ValueNotifier<bool> authState = ValueNotifier<bool>(false);
   
+  // Notifier to trigger playlist refresh across UI when push/pull or sync occurs
+  final ValueNotifier<int> playlistsChangedNotifier = ValueNotifier<int>(0);
+  
   // Real-time app user cache
   AppUser? _currentAppUser;
   StreamSubscription<User?>? _authSub;
@@ -48,11 +57,30 @@ class AuthService {
       if (firebaseUser != null) {
         _userDocSub = _userService.watchUser(firebaseUser.uid, isEmailVerified: firebaseUser.emailVerified).listen((appUser) {
           _currentAppUser = appUser;
+          if (appUser != null) {
+            _syncLocalProfile(appUser);
+          }
         });
       } else {
         _currentAppUser = null;
       }
     });
+  }
+
+  Future<void> _syncLocalProfile(AppUser appUser) async {
+    final name = appUser.displayName.trim();
+    if (name.isNotEmpty) {
+      await StorageService.setUserAuthorName(name);
+      await StorageService.setUserName(name);
+      await StorageService.saveCurrentUser(UserModel(
+        id: appUser.uid,
+        name: name,
+        email: appUser.email ?? '',
+        passwordHash: '',
+        cloudSlotId: '',
+        createdAt: appUser.createdAt.millisecondsSinceEpoch,
+      ));
+    }
   }
 
   void dispose() {
@@ -109,6 +137,7 @@ class AuthService {
 
       final appUser = await _userService.syncUserOnLogin(user, preferredName: googleUser.displayName);
       _currentAppUser = appUser;
+      await _syncLocalProfile(appUser);
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
@@ -143,6 +172,7 @@ class AuthService {
 
       final appUser = await _userService.syncUserOnLogin(user);
       _currentAppUser = appUser;
+      await _syncLocalProfile(appUser);
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
@@ -178,6 +208,7 @@ class AuthService {
 
       final appUser = await _userService.syncUserOnLogin(user, preferredName: name.trim());
       _currentAppUser = appUser;
+      await _syncLocalProfile(appUser);
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
@@ -207,6 +238,7 @@ class AuthService {
 
       final appUser = await _userService.syncUserOnLogin(user, preferredName: name);
       _currentAppUser = appUser;
+      await _syncLocalProfile(appUser);
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
@@ -363,22 +395,291 @@ class AuthService {
     }
   }
 
-  // --- Backward Compatibility Placeholders for Old Backup/Restore ---
+  // --- Push & Pull Cloud Playlists Backup / Restore ---
+
+  /// Push all local playlists and favorites to Cloud Firestore under current user's UID.
   Future<String> backupUserPlaylists() async {
-    return 'Playlists are now automatically synced live via Firestore!';
+    final uid = currentUserId;
+    if (uid.isEmpty) {
+      return 'Please sign in first to back up your playlists.';
+    }
+
+    try {
+      final repo = PlaylistRepository();
+      final localPlaylists = StorageService.getPlaylists();
+      final localIds = <String>{};
+      int pushedCount = 0;
+
+      for (final raw in localPlaylists) {
+        String id = raw['id']?.toString() ?? '';
+        if (id.isEmpty) {
+          id = DateTime.now().millisecondsSinceEpoch.toString();
+          raw['id'] = id;
+        }
+
+        // If this playlist is imported or joined as a collaborator, do NOT hijack ownership
+        final isImported = raw['isImported'] == true;
+        final rawOwnerId = raw['ownerId']?.toString() ?? '';
+        final isOwner = !isImported && (rawOwnerId.isEmpty || rawOwnerId == uid);
+
+        if (!isOwner) {
+          // If collaborative sync is enabled, sync the tracks to remote without modifying ownership
+          if (raw['isSyncEnabled'] == true && id.isNotEmpty) {
+            try {
+              final rawTracks = raw['tracks'] as List? ?? [];
+              final localTracks = <Track>[];
+              for (final t in rawTracks) {
+                if (t is Map) {
+                  try {
+                    localTracks.add(Track.fromJson(Map<String, dynamic>.from(t)));
+                  } catch (_) {}
+                }
+              }
+              final synced = await repo.syncPlaylistTracks(
+                playlistId: id,
+                callerUid: uid,
+                callerName: currentUserName,
+                localTracks: localTracks,
+                deletedTrackIds: List<String>.from(raw['deletedTrackIds'] as List? ?? []),
+                baseTrackIds: List<String>.from(raw['syncedTrackIds'] as List? ?? []),
+              );
+              raw['syncedTrackIds'] = synced.map((t) => t.id).toList();
+              raw['tracks'] = synced.map((t) => t.toJson()).toList();
+              raw['trackIds'] = synced.map((t) => t.id).toList();
+              raw['deletedTrackIds'] = <String>[];
+            } catch (se) {
+              debugPrint('Failed to sync collaborative tracks for $id: $se');
+            }
+          }
+          continue;
+        }
+
+        localIds.add(id);
+
+        final rawTracks = raw['tracks'] as List? ?? [];
+        final tracks = <PlaylistTrack>[];
+        for (final t in rawTracks) {
+          if (t is Map) {
+            try {
+              final track = Track.fromJson(Map<String, dynamic>.from(t));
+              tracks.add(PlaylistTrack.fromTrack(
+                track,
+                addedByUid: uid,
+                addedByName: currentUserName,
+              ));
+            } catch (_) {}
+          }
+        }
+
+        final pl = Playlist(
+          id: id,
+          name: raw['name']?.toString() ?? 'My Playlist',
+          description: raw['description']?.toString() ?? '',
+          ownerUid: uid,
+          ownerName: currentUserName.isNotEmpty ? currentUserName : (raw['authorName']?.toString() ?? 'Aura User'),
+          memberUids: [uid],
+          visibility: raw['isPublic'] == true ? 'public' : 'private',
+          collabEnabled: raw['isSyncEnabled'] == true,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          trackCount: tracks.length,
+          tracks: tracks,
+          shareCode: raw['shareCode']?.toString(),
+        );
+
+        await repo.saveOrUpdatePlaylist(pl);
+        pushedCount++;
+      }
+
+      if (localPlaylists.isNotEmpty) {
+        await StorageService.savePlaylists(localPlaylists);
+      }
+
+      // --- PRUNE DELETED PLAYLISTS FROM CLOUD ---
+      // Any remote playlist owned by this user that is NOT in localIds was deleted locally,
+      // so delete it from cloud backup as well!
+      try {
+        final remoteOwnedSnap = await FirebaseFirestore.instance
+            .collection('playlists')
+            .where('ownerUid', isEqualTo: uid)
+            .get();
+
+        for (final doc in remoteOwnedSnap.docs) {
+          final data = doc.data();
+          final type = data['type']?.toString() ?? 'custom';
+          if (type == 'favorites') continue;
+
+          if (!localIds.contains(doc.id)) {
+            try {
+              await repo.deletePlaylist(doc.id, uid);
+            } catch (de) {
+              debugPrint('Failed to prune deleted remote playlist ${doc.id}: $de');
+            }
+          }
+        }
+      } catch (pe) {
+        debugPrint('Failed to query remote playlists for pruning: $pe');
+      }
+
+      // Also backup favorites
+      final favTracks = StorageService.getFavoriteTracks();
+      if (favTracks.isNotEmpty) {
+        final favPl = await repo.getOrCreateFavorites(uid, currentUserName);
+        for (final t in favTracks) {
+          try {
+            await repo.addTrack(
+              favPl.id,
+              PlaylistTrack.fromTrack(t, addedByUid: uid, addedByName: currentUserName),
+              uid,
+            );
+          } catch (_) {}
+        }
+      }
+
+      playlistsChangedNotifier.value++;
+
+      return 'Successfully pushed and backed up $pushedCount playlist(s) to cloud! ☁️';
+    } catch (e) {
+      debugPrint('backupUserPlaylists error: $e');
+      return 'Backup error: $e';
+    }
   }
 
+  /// Pull all playlists owned or joined by the current user from Cloud Firestore,
+  /// and merge/restore them into local Hive storage.
   Future<int> restoreUserPlaylists() async {
-    return 0;
+    final uid = currentUserId;
+    if (uid.isEmpty) return 0;
+
+    try {
+      final docMap = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+
+      // 1. Query playlists where current user is in memberUids
+      try {
+        final querySnapshot = await FirebaseFirestore.instance
+            .collection('playlists')
+            .where('memberUids', arrayContains: uid)
+            .get();
+        for (final doc in querySnapshot.docs) {
+          docMap[doc.id] = doc;
+        }
+      } catch (e) {
+        debugPrint('restoreUserPlaylists memberUids query error: $e');
+      }
+
+      // 2. Query playlists where current user is ownerUid
+      try {
+        final ownerSnapshot = await FirebaseFirestore.instance
+            .collection('playlists')
+            .where('ownerUid', isEqualTo: uid)
+            .get();
+        for (final doc in ownerSnapshot.docs) {
+          docMap[doc.id] = doc;
+        }
+      } catch (e) {
+        debugPrint('restoreUserPlaylists ownerUid query error: $e');
+      }
+
+      if (docMap.isEmpty) {
+        return 0;
+      }
+
+      final existingLocal = StorageService.getPlaylists();
+      // Keep local playlists that are NOT owned by the current user (e.g. joined or other author),
+      // or that ARE present in docMap. Any playlist owned by the current user that is no longer
+      // in docMap was pruned/deleted from cloud, so it should not linger locally.
+      final localMap = <String, Map<String, dynamic>>{};
+      for (final p in existingLocal) {
+        final pid = p['id']?.toString() ?? '';
+        if (pid.isEmpty) continue;
+        final ownerId = p['ownerId']?.toString() ?? p['ownerUid']?.toString() ?? '';
+        final isOwnedByCurrentUser = ownerId.isNotEmpty && ownerId == uid;
+        if (isOwnedByCurrentUser) {
+          if (docMap.containsKey(pid)) {
+            localMap[pid] = p;
+          }
+        } else {
+          localMap[pid] = p;
+        }
+      }
+
+      int restoredCount = 0;
+
+      for (final doc in docMap.values) {
+        final data = doc.data() ?? {};
+        final pl = Playlist.fromMap(data, id: doc.id);
+
+        if (pl.type == 'favorites') {
+          final favTracks = pl.tracks.map((pt) => pt.toTrack()).toList();
+          for (final ft in favTracks) {
+            await StorageService.toggleFavoriteTrack(ft);
+          }
+          continue;
+        }
+
+        final convertedTracks = pl.tracks.map((pt) {
+          final t = pt.toTrack();
+          return t.toJson();
+        }).toList();
+
+        final isOwner = pl.isOwner(uid);
+        final playlistMap = <String, dynamic>{
+          'id': pl.id,
+          'name': pl.name,
+          'description': pl.description,
+          'authorName': pl.ownerName,
+          'ownerId': pl.ownerUid,
+          'ownerEmail': isOwner ? (currentUserEmail ?? '') : (data['ownerEmail']?.toString() ?? ''),
+          'ownerName': pl.ownerName,
+          'isImported': !isOwner,
+          'isPublic': pl.isPublic,
+          'isSyncEnabled': pl.collabEnabled,
+          'shareCode': pl.shareCode ?? (data['shareCode']?.toString() ?? ''),
+          'trackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+          'syncedTrackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+          'tracks': convertedTracks,
+        };
+
+        if (!localMap.containsKey(pl.id)) {
+          restoredCount++;
+        }
+        localMap[pl.id] = playlistMap;
+      }
+
+      final updatedPlaylists = <Map<String, dynamic>>[];
+      for (final p in existingLocal) {
+        final pid = p['id']?.toString() ?? '';
+        if (pid.isEmpty) {
+          updatedPlaylists.add(p);
+        }
+      }
+      updatedPlaylists.addAll(localMap.values);
+
+      await StorageService.savePlaylists(updatedPlaylists);
+
+      // Trigger instant UI refresh across the app
+      playlistsChangedNotifier.value++;
+
+      return restoredCount > 0 ? restoredCount : docMap.length;
+    } catch (e) {
+      debugPrint('restoreUserPlaylists error: $e');
+      return 0;
+    }
   }
 
   bool isPlaylistOwner(Map<String, dynamic> playlist) {
+    if (playlist['isImported'] == true) {
+      return false;
+    }
     final ownerId = playlist['ownerId']?.toString() ?? playlist['ownerUid']?.toString();
     if (ownerId != null && ownerId.isNotEmpty && ownerId == currentUserId) {
       return true;
     }
     final ownerEmail = (playlist['ownerEmail'] ?? '').toString().trim().toLowerCase();
-    if (currentUserEmail != null && ownerEmail.isNotEmpty && ownerEmail == currentUserEmail!.toLowerCase()) {
+    if (currentUserEmail != null &&
+        currentUserEmail!.isNotEmpty &&
+        ownerEmail.isNotEmpty &&
+        ownerEmail == currentUserEmail!.toLowerCase()) {
       return true;
     }
     return false;

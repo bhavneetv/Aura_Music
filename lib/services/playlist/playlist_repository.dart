@@ -28,7 +28,7 @@ class PlaylistRepository {
   // -------------------------------------------------------------
 
   /// Creates a new playlist document.
-  /// Cost: 1 write.
+  /// Cost: 1 write (+ 1 optional inviteCodes write).
   Future<Playlist> createPlaylist({
     String? id,
     required String name,
@@ -39,9 +39,17 @@ class PlaylistRepository {
     bool collabEnabled = false,
     String type = 'custom',
     List<PlaylistTrack> initialTracks = const [],
+    String? shareCode,
   }) async {
     final docRef = (id != null && id.isNotEmpty) ? _playlistsCol.doc(id) : _playlistsCol.doc();
     final now = DateTime.now();
+
+    String finalShareCode = (shareCode != null && shareCode.trim().isNotEmpty)
+        ? shareCode.trim().toUpperCase()
+        : '';
+    if (finalShareCode.isEmpty) {
+      finalShareCode = _generateInviteCode();
+    }
 
     final playlist = Playlist(
       id: docRef.id,
@@ -57,18 +65,45 @@ class PlaylistRepository {
       updatedAt: now,
       trackCount: initialTracks.length,
       tracks: initialTracks,
+      shareCode: finalShareCode.isNotEmpty ? finalShareCode : null,
     );
 
     // Cost: 1 write
     await docRef.set(playlist.toFirestore());
+
+    if (finalShareCode.isNotEmpty) {
+      try {
+        await _inviteCodesCol.doc(finalShareCode).set({
+          'playlistId': docRef.id,
+          'createdBy': ownerUid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        debugPrint('createPlaylist invite code write notice: $e');
+      }
+    }
+
     return playlist;
   }
 
   /// Sets or merges playlist document in Firestore.
-  /// Cost: 1 write.
+  /// Cost: 1 write (+ 1 optional invite code write).
   Future<void> saveOrUpdatePlaylist(Playlist playlist) async {
     final docRef = _playlistsCol.doc(playlist.id);
     await docRef.set(playlist.toFirestore(), SetOptions(merge: true));
+
+    final sc = playlist.shareCode?.trim().toUpperCase();
+    if (sc != null && sc.isNotEmpty) {
+      try {
+        await _inviteCodesCol.doc(sc).set({
+          'playlistId': playlist.id,
+          'createdBy': playlist.ownerUid,
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('saveOrUpdatePlaylist invite code notice: $e');
+      }
+    }
   }
 
   /// Gets or creates the user's special "Liked songs" Favorites playlist.
@@ -198,16 +233,29 @@ class PlaylistRepository {
       final data = snapshot.data() ?? {};
       final playlist = Playlist.fromMap(data, id: snapshot.id);
 
-      final trackIndex = playlist.tracks.indexWhere((t) => t.id == trackEntryId);
+      final isOwner = playlist.isOwner(callerUid);
+      final canEdit = playlist.canEditTracks(callerUid);
+      if (!canEdit) {
+        throw Exception('You do not have permission to remove tracks from this playlist.');
+      }
+
+      String cleanId = trackEntryId;
+      if (cleanId.startsWith('yt_')) {
+        cleanId = cleanId.substring(3);
+      }
+
+      final trackIndex = playlist.tracks.indexWhere((t) =>
+        t.id == trackEntryId ||
+        t.trackId == trackEntryId ||
+        t.trackId == cleanId ||
+        'yt_${t.trackId}' == trackEntryId
+      );
       if (trackIndex == -1) return; // Already removed
 
       final targetTrack = playlist.tracks[trackIndex];
-
-      // Authorization check
-      final isOwner = playlist.isOwner(callerUid);
       final isAddedByCaller = targetTrack.addedByUid == callerUid;
-      if (!isOwner && !isAddedByCaller) {
-        throw Exception('You can only remove tracks that you added.');
+      if (!isOwner && !isAddedByCaller && !canEdit) {
+        throw Exception('You do not have permission to remove this track.');
       }
 
       final updatedTracks = List<PlaylistTrack>.from(playlist.tracks)..removeAt(trackIndex);
@@ -340,7 +388,11 @@ class PlaylistRepository {
     final existingCodes = await _inviteCodesCol.where('playlistId', isEqualTo: playlistId).limit(1).get();
     if (existingCodes.docs.isNotEmpty) {
       final code = existingCodes.docs.first.id;
-      await docRef.update({'collabEnabled': true, 'updatedAt': FieldValue.serverTimestamp()});
+      await docRef.update({
+        'collabEnabled': true,
+        'shareCode': code,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
       return code;
     }
 
@@ -354,17 +406,18 @@ class PlaylistRepository {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // Update playlist doc. Cost: 1 write
+    // Update playlist doc with collabEnabled and shareCode
     await docRef.update({
       'collabEnabled': true,
+      'shareCode': code,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
     return code;
   }
 
-  /// Disables collaboration and removes the invite code.
-  /// Cost: 1 read + 2 writes.
+  /// Disables collaboration (sets collabEnabled to false) while preserving the unique shareCode.
+  /// Cost: 1 read + 1 write.
   Future<void> disableCollaboration(String playlistId, String callerUid) async {
     final docRef = _playlistsCol.doc(playlistId);
     final doc = await docRef.get();
@@ -373,13 +426,8 @@ class PlaylistRepository {
       throw Exception('Only the owner can disable collaboration.');
     }
 
-    // Delete invite codes. Cost: query + delete
-    final existingCodes = await _inviteCodesCol.where('playlistId', isEqualTo: playlistId).get();
-    for (final c in existingCodes.docs) {
-      await c.reference.delete();
-    }
-
-    // Update playlist doc
+    // Do NOT delete the invite code or clear shareCode.
+    // The playlist retains its unique share code for discovery / read-only sharing / re-enabling collab.
     await docRef.update({
       'collabEnabled': false,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -389,6 +437,14 @@ class PlaylistRepository {
   /// Fetches existing invite code if collaboration is active.
   /// Cost: 1 read.
   Future<String?> getInviteCodeForPlaylist(String playlistId) async {
+    try {
+      final pDoc = await _playlistsCol.doc(playlistId).get();
+      final codeInDoc = pDoc.data()?['shareCode'] as String?;
+      if (codeInDoc != null && codeInDoc.isNotEmpty) {
+        return codeInDoc;
+      }
+    } catch (_) {}
+
     final query = await _inviteCodesCol.where('playlistId', isEqualTo: playlistId).limit(1).get();
     if (query.docs.isNotEmpty) {
       return query.docs.first.id;
@@ -396,20 +452,258 @@ class PlaylistRepository {
     return null;
   }
 
+  /// Fetches playlist associated with an invite code or share code without joining it.
+  Future<Playlist?> getPlaylistByInviteCode(String rawCode) async {
+    final cleanCode = rawCode.trim().toUpperCase();
+    if (cleanCode.isEmpty) return null;
+
+    // 1. Direct match in inviteCodes collection
+    try {
+      final inviteDoc = await _inviteCodesCol.doc(cleanCode).get();
+      if (inviteDoc.exists) {
+        final playlistId = inviteDoc.data()?['playlistId'] as String?;
+        if (playlistId != null && playlistId.isNotEmpty) {
+          final pl = await getPlaylist(playlistId);
+          if (pl != null) return pl;
+        }
+      }
+    } catch (e) {
+      debugPrint('getPlaylistByInviteCode inviteDoc error: $e');
+    }
+
+    // 2. Query playlists where shareCode == cleanCode
+    try {
+      final byShareCode = await _playlistsCol.where('shareCode', isEqualTo: cleanCode).limit(1).get();
+      if (byShareCode.docs.isNotEmpty) {
+        return Playlist.fromFirestore(byShareCode.docs.first);
+      }
+    } catch (_) {}
+
+    // 3. Strip 'AURA-' prefix if present, e.g. AURA-7KX9Y2A1
+    final stripped = cleanCode.replaceAll('AURA-', '').trim();
+    if (stripped.isNotEmpty && stripped != cleanCode) {
+      try {
+        final strippedDoc = await _inviteCodesCol.doc(stripped).get();
+        if (strippedDoc.exists) {
+          final playlistId = strippedDoc.data()?['playlistId'] as String?;
+          if (playlistId != null) {
+            final pl = await getPlaylist(playlistId);
+            if (pl != null) return pl;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final byStripped = await _playlistsCol.where('shareCode', isEqualTo: stripped).limit(1).get();
+        if (byStripped.docs.isNotEmpty) {
+          return Playlist.fromFirestore(byStripped.docs.first);
+        }
+      } catch (_) {}
+    }
+
+    // 4. Check if cleanCode matches direct playlist ID
+    try {
+      final direct = await getPlaylist(cleanCode);
+      if (direct != null) return direct;
+    } catch (_) {}
+
+    return null;
+  }
+
+  /// Two-way sync with Cloud Firestore: merges local tracks with remote tracks.
+  /// Any local tracks not present remotely are pushed to Firestore (if authorized).
+  /// Deleted tracks are cleanly removed from Firestore and never resurrected.
+  /// Uses [baseTrackIds] as baseline: any track previously synced that is now missing from
+  /// remote was deleted on another device and will NOT be re-uploaded or restored.
+  /// Returns the complete merged list of tracks.
+  Future<List<Track>> syncPlaylistTracks({
+    required String playlistId,
+    required String callerUid,
+    required String callerName,
+    required List<Track> localTracks,
+    List<String> deletedTrackIds = const [],
+    List<String> baseTrackIds = const [],
+  }) async {
+    final docRef = _playlistsCol.doc(playlistId);
+    final snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw Exception('Playlist not found on cloud.');
+    }
+
+    final data = snapshot.data() ?? {};
+    final remotePl = Playlist.fromMap(data, id: snapshot.id);
+
+    final isOwner = remotePl.isOwner(callerUid);
+    if (!isOwner && !remotePl.collabEnabled) {
+      throw Exception('Collaboration has been disabled by the owner for this playlist (Read-Only).');
+    }
+
+    final canEdit = remotePl.canEditTracks(callerUid);
+
+    // Build deleted set including ID variations
+    final deletedSet = <String>{};
+    for (final id in deletedTrackIds) {
+      deletedSet.add(id);
+      if (id.startsWith('yt_')) {
+        deletedSet.add(id.substring(3));
+      } else {
+        deletedSet.add('yt_$id');
+      }
+    }
+
+    // Build base set (synced tracks baseline from last sync)
+    final baseSet = <String>{};
+    for (final id in baseTrackIds) {
+      baseSet.add(id);
+      if (id.startsWith('yt_')) {
+        baseSet.add(id.substring(3));
+      } else {
+        baseSet.add('yt_$id');
+      }
+    }
+
+    bool isMatch(Set<String> set, String id) {
+      if (set.contains(id)) return true;
+      if (id.startsWith('yt_')) {
+        return set.contains(id.substring(3));
+      } else {
+        return set.contains('yt_$id');
+      }
+    }
+
+    List<PlaylistTrack> currentRemoteTracks = List<PlaylistTrack>.from(remotePl.tracks);
+    bool remoteTracksChanged = false;
+
+    // 1. Process deletions: remove deleted tracks from remote if caller has permission
+    if (deletedSet.isNotEmpty && canEdit) {
+      final beforeCount = currentRemoteTracks.length;
+      currentRemoteTracks.removeWhere((t) =>
+        isMatch(deletedSet, t.id) ||
+        isMatch(deletedSet, t.trackId)
+      );
+      if (currentRemoteTracks.length != beforeCount) {
+        remoteTracksChanged = true;
+      }
+    }
+
+    final remoteTracks = currentRemoteTracks.map((pt) => pt.toTrack()).toList();
+    final remoteTrackIds = <String>{};
+    for (final t in remoteTracks) {
+      remoteTrackIds.add(t.id);
+      if (t.id.startsWith('yt_')) {
+        remoteTrackIds.add(t.id.substring(3));
+      } else {
+        remoteTrackIds.add('yt_${t.id}');
+      }
+    }
+
+    // Identify tracks that were added locally and not yet pushed remotely (excluding deleted).
+    // If a track was already in baseSet and is now missing remotely, it was deleted on another device!
+    // Do NOT re-upload it to Firestore.
+    final newLocalTracks = localTracks.where((t) {
+      if (isMatch(deletedSet, t.id)) return false;
+      if (isMatch(remoteTrackIds, t.id)) return false;
+      if (baseSet.isNotEmpty && isMatch(baseSet, t.id)) {
+        // Track was already synced previously and was removed remotely; do not push
+        return false;
+      }
+      return true;
+    }).toList();
+
+    if ((newLocalTracks.isNotEmpty || remoteTracksChanged) && canEdit) {
+      final convertedNew = newLocalTracks.map((t) => PlaylistTrack.fromTrack(
+        t,
+        addedByUid: callerUid,
+        addedByName: (t.addedBy != null && t.addedBy!.isNotEmpty) ? t.addedBy! : callerName,
+      )).toList();
+
+      final combined = List<PlaylistTrack>.from(currentRemoteTracks)..addAll(convertedNew);
+      // Cap at 500 tracks
+      final capped = combined.length > 500 ? combined.sublist(0, 500) : combined;
+
+      await docRef.update({
+        'tracks': capped.map((t) => t.toMap()).toList(),
+        'trackCount': capped.length,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      return capped.map((pt) => pt.toTrack()).toList();
+    }
+
+    // Combine remote and local tracks deduplicating by ID, strictly respecting deletions.
+    // If a track was in baseSet and is missing from remote, discard it locally as well.
+    final mergedMap = <String, Track>{};
+    for (final t in remoteTracks) {
+      if (!isMatch(deletedSet, t.id)) {
+        mergedMap[t.id] = t;
+      }
+    }
+    for (final t in localTracks) {
+      if (isMatch(deletedSet, t.id)) continue;
+      if (isMatch(remoteTrackIds, t.id)) continue;
+      if (baseSet.isNotEmpty && isMatch(baseSet, t.id)) {
+        // Was removed remotely on another device: discard locally
+        continue;
+      }
+      if (!mergedMap.containsKey(t.id)) {
+        mergedMap[t.id] = t;
+      }
+    }
+
+    return mergedMap.values.toList();
+  }
+
   /// Joins a collaborative playlist using an 8-character invite code.
   /// Cost: 1 read (invite code) + 1 transaction (playlist read + write).
   Future<Playlist> joinByInviteCode(String rawCode, String userUid, String userName) async {
     final cleanCode = rawCode.trim().toUpperCase();
 
-    // 1. Read invite code. Cost: 1 read
-    final inviteDoc = await _inviteCodesCol.doc(cleanCode).get();
-    if (!inviteDoc.exists) {
-      throw Exception('Invalid or expired invite code.');
+    // 1. Read invite code with multiple fallback stages
+    String? targetPlaylistId;
+    try {
+      final inviteDoc = await _inviteCodesCol.doc(cleanCode).get();
+      if (inviteDoc.exists) {
+        targetPlaylistId = inviteDoc.data()?['playlistId'] as String?;
+      }
+    } catch (_) {}
+
+    if (targetPlaylistId == null) {
+      final stripped = cleanCode.replaceAll('AURA-', '').trim();
+      if (stripped.isNotEmpty) {
+        try {
+          final strippedDoc = await _inviteCodesCol.doc(stripped).get();
+          if (strippedDoc.exists) {
+            targetPlaylistId = strippedDoc.data()?['playlistId'] as String?;
+          }
+        } catch (_) {}
+      }
+
+      if (targetPlaylistId == null) {
+        try {
+          final byShareCode = await _playlistsCol.where('shareCode', isEqualTo: cleanCode).limit(1).get();
+          if (byShareCode.docs.isNotEmpty) {
+            targetPlaylistId = byShareCode.docs.first.id;
+          } else if (stripped.isNotEmpty) {
+            final byStripped = await _playlistsCol.where('shareCode', isEqualTo: stripped).limit(1).get();
+            if (byStripped.docs.isNotEmpty) {
+              targetPlaylistId = byStripped.docs.first.id;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (targetPlaylistId == null) {
+        try {
+          final directDoc = await _playlistsCol.doc(cleanCode).get();
+          if (directDoc.exists) {
+            targetPlaylistId = directDoc.id;
+          }
+        } catch (_) {}
+      }
     }
 
-    final targetPlaylistId = inviteDoc.data()?['playlistId'] as String?;
     if (targetPlaylistId == null) {
-      throw Exception('Playlist associated with this code was not found.');
+      throw Exception('Invalid or expired invite code.');
     }
 
     final docRef = _playlistsCol.doc(targetPlaylistId);

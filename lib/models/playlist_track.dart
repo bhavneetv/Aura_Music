@@ -111,6 +111,10 @@ class PlaylistTrack {
       }
     } catch (_) {}
 
+    final finalAddedByName = (track.addedBy != null && track.addedBy!.trim().isNotEmpty)
+        ? track.addedBy!.trim()
+        : (addedByName.trim().isNotEmpty ? addedByName.trim() : 'Aura Listener');
+
     return PlaylistTrack(
       id: entryId ?? '${DateTime.now().millisecondsSinceEpoch}_${cleanTrackId.hashCode.abs()}',
       source: isYt ? 'youtube' : 'jiosaavn',
@@ -120,7 +124,7 @@ class PlaylistTrack {
       artworkUrl: track.artworkUrl,
       durationMs: parsedDurationMs,
       addedByUid: addedByUid,
-      addedByName: addedByName,
+      addedByName: finalAddedByName,
       addedAt: DateTime.now(),
     );
   }

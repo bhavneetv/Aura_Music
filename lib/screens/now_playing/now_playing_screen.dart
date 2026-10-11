@@ -24,6 +24,8 @@ import 'dart:io';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
 import 'lyrics_screen.dart';
+import '../../services/auth/auth_service.dart';
+import '../../services/playlist/playlist_repository.dart';
 
 ImageProvider getArtworkImageProvider(Track track) {
   String path = track.artworkUrl.trim();
@@ -3226,11 +3228,51 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 : const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
                             onTap: () async {
                               if (!alreadyContains) {
+                                final authorName = AuthService.instance.currentUserName.isNotEmpty
+                                    ? AuthService.instance.currentUserName
+                                    : StorageService.getUserAuthorName();
+                                final authorUid = AuthService.instance.currentUserId;
+                                final stampedTrack = track.copyWith(
+                                  addedBy: (track.addedBy != null && track.addedBy!.isNotEmpty)
+                                      ? track.addedBy
+                                      : authorName,
+                                );
+                                final trackMap = stampedTrack.toJson();
+                                trackMap['addedBy'] = stampedTrack.addedBy;
+                                trackMap['addedByUid'] = authorUid;
+
                                 trackIds.add(track.id);
-                                tracksList.add(track.toJson());
+                                tracksList.add(trackMap);
                                 playlists[index]['trackIds'] = trackIds;
                                 playlists[index]['tracks'] = tracksList;
                                 await StorageService.savePlaylists(playlists);
+
+                                // If playlist is collaborative, auto sync addition to Firestore
+                                if (pl['isSyncEnabled'] == true && AuthService.instance.isLoggedIn) {
+                                  final pid = pl['id']?.toString() ?? '';
+                                  if (pid.isNotEmpty && authorUid.isNotEmpty) {
+                                    try {
+                                      final currentTracks = tracksList.map((t) => Track.fromJson(Map<String, dynamic>.from(t as Map))).toList();
+                                      final baseIds = List<String>.from(pl['syncedTrackIds'] as List? ?? []);
+                                      PlaylistRepository().syncPlaylistTracks(
+                                        playlistId: pid,
+                                        callerUid: authorUid,
+                                        callerName: authorName,
+                                        localTracks: currentTracks,
+                                        deletedTrackIds: List<String>.from(pl['deletedTrackIds'] as List? ?? []),
+                                        baseTrackIds: baseIds,
+                                      ).then((synced) {
+                                        if (synced.isNotEmpty) {
+                                          pl['syncedTrackIds'] = synced.map((t) => t.id).toList();
+                                          StorageService.updatePlaylist(pid, pl);
+                                        }
+                                      }).catchError((e) {
+                                        debugPrint('NowPlaying auto sync notice: $e');
+                                        return <Track>[];
+                                      });
+                                    } catch (_) {}
+                                  }
+                                }
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(

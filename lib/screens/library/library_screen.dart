@@ -41,11 +41,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _loadPlaylists();
+    AuthService.instance.playlistsChangedNotifier.addListener(_loadPlaylists);
     PlaylistLinkShareService.importEventNotifier.addListener(_loadPlaylists);
   }
 
   @override
   void dispose() {
+    AuthService.instance.playlistsChangedNotifier.removeListener(_loadPlaylists);
     PlaylistLinkShareService.importEventNotifier.removeListener(_loadPlaylists);
     _tabController.dispose();
     _playlistNameController.dispose();
@@ -74,7 +76,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
         bool isLoading = false;
         bool newPlaylistIsPublic = false;
         bool newPlaylistIsSyncEnabled = true;
-        final authorController = TextEditingController(text: StorageService.getUserAuthorName());
+        final accountName = AuthService.instance.currentUserName.isNotEmpty
+            ? AuthService.instance.currentUserName
+            : StorageService.getUserAuthorName();
+        final authorController = TextEditingController(text: accountName);
 
         return StatefulBuilder(
           builder: (sheetContext, setModalState) {
@@ -363,6 +368,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                       AuthService.instance.currentUserId,
                                       AuthService.instance.currentUserName,
                                     );
+                                    await AuthService.instance.restoreUserPlaylists();
                                     if (mounted) {
                                       Navigator.pop(sheetContext);
                                       _loadPlaylists();
@@ -411,6 +417,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                     'shareCode': cloudByCode['shareCode']?.toString() ?? input.toUpperCase(),
                                     'syncId': cloudByCode['syncId']?.toString(),
                                     'trackIds': tracks.map((t) => t.id).toList(),
+                                    'syncedTrackIds': tracks.map((t) => t.id).toList(),
                                     'tracks': tracks.map((t) => t.toJson()).toList(),
                                   };
                                   final playlists = StorageService.getPlaylists();
@@ -569,9 +576,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                     const SizedBox(height: 12),
                     TextField(
                       controller: authorController,
+                      readOnly: true,
                       decoration: InputDecoration(
-                        labelText: 'Author Name',
-                        prefixIcon: Icon(Icons.person_rounded, color: accentColor, size: 20),
+                        labelText: 'Playlist Owner / Author',
+                        helperText: 'Loaded directly from your account name 🔒',
+                        helperStyle: TextStyle(fontSize: 11, color: accentColor.withValues(alpha: 0.8)),
+                        prefixIcon: Icon(Icons.verified_user_rounded, color: accentColor, size: 20),
+                        suffixIcon: const Tooltip(
+                          message: 'Owner name matches your signed-in account profile',
+                          child: Icon(Icons.lock_rounded, size: 18, color: Colors.grey),
+                        ),
                         filled: true,
                         fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -686,7 +700,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                 await StorageService.setUserAuthorName(author);
 
                                 String plId = DateTime.now().millisecondsSinceEpoch.toString();
-                                String shareCode = PlaylistCloudSyncService.generateShareCode();
+                                String shareCode = '';
                                 final ownerId = AuthService.instance.currentUserId;
                                 final ownerEmail = AuthService.instance.currentUserEmail ?? '';
                                 String? syncId;
@@ -707,7 +721,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                     plId = firestorePlaylist.id;
                                     if (newPlaylistIsSyncEnabled) {
                                       try {
-                                        shareCode = await repo.enableCollaboration(plId, ownerId);
+                                        shareCode = firestorePlaylist.shareCode ?? await repo.enableCollaboration(plId, ownerId);
                                       } catch (ce) {
                                         debugPrint('Collaboration code notice: $ce');
                                       }
@@ -718,18 +732,22 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                 }
 
                                 if (newPlaylistIsPublic || newPlaylistIsSyncEnabled) {
-                                  syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
-                                    localId: plId,
-                                    name: name,
-                                    description: desc,
-                                    authorName: author,
-                                    isPublic: newPlaylistIsPublic,
-                                    isSyncEnabled: newPlaylistIsSyncEnabled,
-                                    tracks: [],
-                                    shareCode: shareCode,
-                                    ownerId: ownerId,
-                                    ownerEmail: ownerEmail,
-                                  );
+                                  try {
+                                    syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
+                                      localId: plId,
+                                      name: name,
+                                      description: desc,
+                                      authorName: author,
+                                      isPublic: newPlaylistIsPublic,
+                                      isSyncEnabled: newPlaylistIsSyncEnabled,
+                                      tracks: [],
+                                      shareCode: shareCode,
+                                      ownerId: ownerId,
+                                      ownerEmail: ownerEmail,
+                                    );
+                                  } catch (dioE) {
+                                    debugPrint('Legacy createCloudSyncSlot notice (safe): $dioE');
+                                  }
                                 }
 
                                 final playlists = StorageService.getPlaylists();
@@ -873,12 +891,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                       ),
                     ),
                     tooltip: AuthService.instance.isLoggedIn ? 'Cloud Account Active' : 'Sign In / Account',
-                    onPressed: () {
-                      AuthModalDialog.show(context, onLoggedIn: () {
-                        setState(() {
-                          _loadPlaylists();
-                        });
+                    onPressed: () async {
+                      await AuthModalDialog.show(context, onLoggedIn: () {
+                        if (mounted) _loadPlaylists();
                       });
+                      if (mounted) _loadPlaylists();
                     },
                   ),
                   IconButton(

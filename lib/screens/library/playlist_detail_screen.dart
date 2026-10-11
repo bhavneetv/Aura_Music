@@ -8,13 +8,13 @@ import '../../services/download/download_service.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../sharing/remote_link_share_modal.dart';
 import 'package:flutter/services.dart';
-import '../../services/sync/playlist_cloud_sync_service.dart';
 import '../../services/auth/auth_service.dart';
 import '../../widgets/playlist_settings_dialog.dart';
 import '../../widgets/auth_dialog.dart';
 import '../../models/playlist.dart';
 import '../../models/playlist_track.dart';
 import '../../services/playlist/playlist_repository.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -79,31 +79,48 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       };
     }
 
-    if (_playlist['shareCode'] == null || _playlist['shareCode'].toString().isEmpty) {
-      _playlist['shareCode'] = PlaylistCloudSyncService.generateShareCode();
-    }
+    final bool isImported = _playlist['isImported'] == true;
 
-    if (AuthService.instance.isLoggedIn) {
+    // Only update ownership info if this is NOT an imported/collaborative playlist
+    if (AuthService.instance.isLoggedIn && !isImported) {
       final currentUserId = AuthService.instance.currentUserId;
       final currentUserEmail = (AuthService.instance.currentUserEmail ?? '').trim().toLowerCase();
       final pOwnerId = _playlist['ownerId']?.toString();
       final pOwnerEmail = (_playlist['ownerEmail']?.toString() ?? '').trim().toLowerCase();
       if ((pOwnerId != null && pOwnerId == currentUserId) ||
           (pOwnerEmail.isNotEmpty && pOwnerEmail == currentUserEmail)) {
-        _playlist['isImported'] = false;
         _playlist['ownerId'] = currentUserId;
         _playlist['ownerEmail'] = AuthService.instance.currentUserEmail;
       }
     }
 
     if (_playlist['ownerId'] == null || _playlist['ownerId'].toString().isEmpty) {
-      if (_playlist['isImported'] != true) {
+      if (!isImported) {
         _playlist['ownerId'] = AuthService.instance.currentUserId;
         _playlist['ownerName'] = AuthService.instance.currentUserName;
         if (AuthService.instance.isLoggedIn) {
           _playlist['ownerEmail'] = AuthService.instance.currentUserEmail;
         }
       }
+    }
+
+    // Ensure syncedTrackIds baseline exists if this playlist has already been synced or imported
+    if (_playlist['syncedTrackIds'] == null && _playlist['trackIds'] != null) {
+      if (_playlist['isSyncEnabled'] == true || _playlist['isImported'] == true) {
+        _playlist['syncedTrackIds'] = List<String>.from(_playlist['trackIds'] as List);
+      }
+    }
+
+    // Lazily resolve share code from Firestore if missing
+    final pid = _playlist['id']?.toString() ?? '';
+    if ((_playlist['shareCode'] == null || _playlist['shareCode'].toString().isEmpty) && pid.isNotEmpty) {
+      PlaylistRepository().getInviteCodeForPlaylist(pid).then((code) {
+        if (code != null && code.isNotEmpty && mounted) {
+          setState(() {
+            _playlist['shareCode'] = code;
+          });
+        }
+      }).catchError((_) {});
     }
 
     final List rawTracks = _playlist['tracks'] as List? ?? [];
@@ -165,6 +182,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     if (AuthService.instance.isLoggedIn && targetId != null && targetId.isNotEmpty) {
       try {
         final repo = PlaylistRepository();
+        final isOwner = AuthService.instance.isPlaylistOwner(updated);
         final isPublic = updated['isPublic'] == true;
         final isCollab = updated['isSyncEnabled'] == true;
         final ownerId = updated['ownerId']?.toString() ?? AuthService.instance.currentUserId;
@@ -172,26 +190,33 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
 
         final playlistTracks = _playlistTracks.map((t) => PlaylistTrack.fromTrack(
           t,
-          addedByUid: AuthService.instance.currentUserId,
-          addedByName: AuthService.instance.currentUserName,
+          addedByUid: (t.addedBy != null && t.addedBy!.isNotEmpty && t.addedBy != authorName)
+              ? ''
+              : (ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId),
+          addedByName: (t.addedBy != null && t.addedBy!.isNotEmpty) ? t.addedBy! : authorName,
         )).toList();
 
-        final pl = Playlist(
-          id: targetId,
-          name: updated['name']?.toString() ?? 'My Playlist',
-          description: updated['description']?.toString() ?? '',
-          ownerUid: ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId,
-          ownerName: authorName,
-          memberUids: [ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId],
-          visibility: isPublic ? 'public' : 'private',
-          collabEnabled: isCollab,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-          trackCount: playlistTracks.length,
-          tracks: playlistTracks,
-        );
+        // Only owner should overwrite full playlist metadata doc
+        if (isOwner) {
+          final existing = await repo.getPlaylist(targetId);
+          final pl = Playlist(
+            id: targetId,
+            name: updated['name']?.toString() ?? 'My Playlist',
+            description: updated['description']?.toString() ?? '',
+            ownerUid: ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId,
+            ownerName: authorName,
+            memberUids: existing?.memberUids.isNotEmpty == true ? existing!.memberUids : [ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId],
+            visibility: isPublic ? 'public' : 'private',
+            collabEnabled: isCollab,
+            createdAt: existing?.createdAt ?? DateTime.now(),
+            updatedAt: DateTime.now(),
+            trackCount: playlistTracks.length,
+            tracks: playlistTracks,
+            shareCode: updated['shareCode']?.toString() ?? existing?.shareCode,
+          );
 
-        await repo.saveOrUpdatePlaylist(pl);
+          await repo.saveOrUpdatePlaylist(pl);
+        }
       } catch (e) {
         debugPrint('Firestore _persistPlaylist error: $e');
       }
@@ -238,10 +263,24 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   void _addSongToPlaylist(Track track) async {
-    final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
-    final trackMap = track.toJson();
+    final callerName = AuthService.instance.currentUserName.isNotEmpty
+        ? AuthService.instance.currentUserName
+        : StorageService.getUserAuthorName();
+    final callerUid = AuthService.instance.currentUserId;
 
-    if (!rawTracks.any((t) => t is Map && t['id'] == track.id)) {
+    // Stamp the track with whoever added it so it reflects the collaborator or owner!
+    final stampedTrack = track.copyWith(
+      addedBy: (track.addedBy != null && track.addedBy!.trim().isNotEmpty)
+          ? track.addedBy!.trim()
+          : callerName,
+    );
+
+    final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
+    final trackMap = stampedTrack.toJson();
+    trackMap['addedBy'] = stampedTrack.addedBy;
+    trackMap['addedByUid'] = callerUid;
+
+    if (!rawTracks.any((t) => t is Map && t['id'] == stampedTrack.id)) {
       rawTracks.add(trackMap);
       _playlist['tracks'] = rawTracks;
       _playlist['trackIds'] = rawTracks.map((t) => t['id']?.toString()).whereType<String>().toList();
@@ -250,20 +289,31 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         _loadPlaylistData();
       });
 
-      // Push to cloud slot if synced
-      final syncId = _playlist['syncId']?.toString();
-      if (syncId != null && syncId.isNotEmpty) {
-        PlaylistCloudSyncService.instance.updateCloudSlot(
-          syncId: syncId,
-          name: _playlist['name']?.toString() ?? 'Playlist',
-          description: _playlist['description']?.toString() ?? '',
-          authorName: _playlist['authorName']?.toString() ?? StorageService.getUserAuthorName(),
-          isPublic: _playlist['isPublic'] == true,
-          isSyncEnabled: _playlist['isSyncEnabled'] == true,
-          tracks: _playlistTracks,
-          shareCode: _playlist['shareCode']?.toString(),
-          ownerId: _playlist['ownerId']?.toString(),
-        );
+      // Sync to Firestore if collab sync is active
+      if (_playlist['isSyncEnabled'] == true && AuthService.instance.isLoggedIn) {
+        final pid = _playlist['id']?.toString() ?? '';
+        if (pid.isNotEmpty && callerUid.isNotEmpty) {
+          PlaylistRepository().syncPlaylistTracks(
+            playlistId: pid,
+            callerUid: callerUid,
+            callerName: callerName,
+            localTracks: _playlistTracks,
+            deletedTrackIds: List<String>.from(_playlist['deletedTrackIds'] as List? ?? []),
+            baseTrackIds: List<String>.from(_playlist['syncedTrackIds'] as List? ?? []),
+          ).then((syncedTracks) {
+            if (syncedTracks.isNotEmpty && mounted) {
+              setState(() {
+                _playlistTracks = syncedTracks;
+                _playlist['tracks'] = syncedTracks.map((t) => t.toJson()).toList();
+                _playlist['trackIds'] = syncedTracks.map((t) => t.id).toList();
+                _playlist['syncedTrackIds'] = syncedTracks.map((t) => t.id).toList();
+              });
+              _persistPlaylist(_playlist);
+            }
+          }).catchError((e) {
+            debugPrint('Firestore auto sync notice: $e');
+          });
+        }
       }
     }
   }
@@ -271,28 +321,34 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   void _removeSongFromPlaylist(int index) async {
     final List rawTracks = List.from(_playlist['tracks'] as List? ?? []);
     if (index >= 0 && index < rawTracks.length) {
-      rawTracks.removeAt(index);
+      final removedItem = rawTracks.removeAt(index);
+      final removedTrackId = (removedItem is Map ? removedItem['id'] : null)?.toString() ??
+          (index < _playlistTracks.length ? _playlistTracks[index].id : '');
+
       _playlist['tracks'] = rawTracks;
       _playlist['trackIds'] = rawTracks.map((t) => t['id']?.toString()).whereType<String>().toList();
+
+      // Track deleted ID so sync does not resurrect it
+      final deletedIds = List<String>.from(_playlist['deletedTrackIds'] as List? ?? []);
+      if (removedTrackId.isNotEmpty && !deletedIds.contains(removedTrackId)) {
+        deletedIds.add(removedTrackId);
+        _playlist['deletedTrackIds'] = deletedIds;
+      }
+
       await _persistPlaylist(_playlist);
       setState(() {
         _loadPlaylistData();
       });
 
-      // Push to cloud slot if synced
-      final syncId = _playlist['syncId']?.toString();
-      if (syncId != null && syncId.isNotEmpty) {
-        PlaylistCloudSyncService.instance.updateCloudSlot(
-          syncId: syncId,
-          name: _playlist['name']?.toString() ?? 'Playlist',
-          description: _playlist['description']?.toString() ?? '',
-          authorName: _playlist['authorName']?.toString() ?? StorageService.getUserAuthorName(),
-          isPublic: _playlist['isPublic'] == true,
-          isSyncEnabled: _playlist['isSyncEnabled'] == true,
-          tracks: _playlistTracks,
-          shareCode: _playlist['shareCode']?.toString(),
-          ownerId: _playlist['ownerId']?.toString(),
-        );
+      // Remove from Firestore if authenticated
+      if (AuthService.instance.isLoggedIn) {
+        final pid = _playlist['id']?.toString() ?? '';
+        final uid = AuthService.instance.currentUserId;
+        if (pid.isNotEmpty && uid.isNotEmpty && removedTrackId.isNotEmpty) {
+          PlaylistRepository().removeTrack(pid, removedTrackId, uid).catchError((e) {
+            debugPrint('Firestore removeTrack notice: $e');
+          });
+        }
       }
     }
   }
@@ -369,11 +425,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     );
   }
 
-  void _showDeletePlaylistDialog(Color accentColor) {
+  Future<void> _showDeletePlaylistDialog(Color accentColor) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    showDialog(
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogCtx) {
         return AlertDialog(
           backgroundColor: isDark ? const Color(0xFF1B1B1E) : Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -381,25 +437,11 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           content: Text('Are you sure you want to delete "${_playlist['name']}"? This action cannot be undone.'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogCtx, false),
               child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
-              onPressed: () async {
-                final playlists = StorageService.getPlaylists();
-                final pId = _playlist['id']?.toString();
-                if (pId != null && pId.isNotEmpty) {
-                  playlists.removeWhere((p) => p['id']?.toString() == pId);
-                  await StorageService.savePlaylists(playlists);
-                } else if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
-                  playlists.removeAt(widget.playlistIndex);
-                  await StorageService.savePlaylists(playlists);
-                }
-                if (mounted) {
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                }
-              },
+              onPressed: () => Navigator.pop(dialogCtx, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -410,26 +452,171 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         );
       },
     );
+
+    if (confirmed == true && mounted) {
+      final pId = _playlist['id']?.toString();
+      final playlists = StorageService.getPlaylists();
+      if (pId != null && pId.isNotEmpty) {
+        playlists.removeWhere((p) => p['id']?.toString() == pId);
+        await StorageService.savePlaylists(playlists);
+      } else if (widget.playlistIndex >= 0 && widget.playlistIndex < playlists.length) {
+        playlists.removeAt(widget.playlistIndex);
+        await StorageService.savePlaylists(playlists);
+      }
+
+      AuthService.instance.playlistsChangedNotifier.value++;
+
+      if (pId != null && pId.isNotEmpty && AuthService.instance.isLoggedIn) {
+        try {
+          if (AuthService.instance.isPlaylistOwner(_playlist)) {
+            await PlaylistRepository().deletePlaylist(pId, AuthService.instance.currentUserId);
+          } else {
+            await PlaylistRepository().leavePlaylist(pId, AuthService.instance.currentUserId);
+          }
+        } catch (e) {
+          debugPrint('Remote delete/leave playlist error: $e');
+        }
+      }
+
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    }
   }
 
   Future<void> _performPlaylistSync(Color accentColor) async {
-    final isSyncEnabled = _playlist['isSyncEnabled'] == true;
+    // 0. Connectivity check: verify internet access
+    final connResults = await Connectivity().checkConnectivity();
+    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    if (isOffline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'You are offline. Please connect to the internet to sync songs.',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.redAccent.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    // 1. Auth check: user needs to be logged in to participate in cloud sync
+    if (!AuthService.instance.isLoggedIn) {
+      final loggedIn = await AuthModalDialog.show(
+        context,
+        featurePrompt: 'Please sign in or create an account to sync songs with other devices!',
+      );
+      if (!loggedIn) return;
+    }
+
+    final currentUserId = AuthService.instance.currentUserId;
+    final currentAuthor = AuthService.instance.currentUserName.isNotEmpty
+        ? AuthService.instance.currentUserName
+        : StorageService.getUserAuthorName();
+    final playlistId = _playlist['id']?.toString() ?? '';
     final isOwner = AuthService.instance.isPlaylistOwner(_playlist);
 
-    // 1. Validation: Collaborative sync must be enabled by the owner
-    if (!isSyncEnabled) {
+    if (playlistId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isOwner
-                ? 'Collaborative sync is disabled for this playlist. Turn on "Allow Collaboration & Sync" in Settings (⚙️) to sync songs.'
-                : 'The creator has disabled collaborative sync for this playlist.',
-          ),
-          backgroundColor: Colors.orangeAccent.shade700,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-          action: isOwner
-              ? SnackBarAction(
+        const SnackBar(content: Text('Invalid playlist ID.'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    setState(() => _isSyncing = true);
+
+    try {
+      final repo = PlaylistRepository();
+
+      // 1. Fetch remote playlist document to check live cloud collaboration state
+      final remotePl = await repo.getPlaylist(playlistId);
+
+      // If owner and not yet created on cloud, initialize in Firestore
+      if (isOwner && remotePl == null) {
+        final ptTracks = _playlistTracks
+            .map((t) => PlaylistTrack.fromTrack(
+                  t,
+                  addedByUid: currentUserId,
+                  addedByName: (t.addedBy != null && t.addedBy!.isNotEmpty) ? t.addedBy! : currentAuthor,
+                ))
+            .toList();
+        final created = await repo.createPlaylist(
+          id: playlistId,
+          name: _playlist['name']?.toString() ?? 'Playlist',
+          description: _playlist['description']?.toString() ?? '',
+          ownerUid: currentUserId,
+          ownerName: currentAuthor,
+          visibility: _playlist['isPublic'] == true ? 'public' : 'private',
+          collabEnabled: _playlist['isSyncEnabled'] == true,
+          initialTracks: ptTracks,
+          shareCode: _playlist['shareCode']?.toString(),
+        );
+        _playlist['shareCode'] = created.shareCode ?? await repo.enableCollaboration(playlistId, currentUserId);
+      }
+
+      // Check remote permission status
+      if (remotePl != null) {
+        // Sync shareCode if missing locally
+        if ((_playlist['shareCode'] == null || _playlist['shareCode'].toString().isEmpty) &&
+            remotePl.shareCode != null && remotePl.shareCode!.isNotEmpty) {
+          _playlist['shareCode'] = remotePl.shareCode;
+        }
+
+        // If collaborator device and collaboration is disabled on the remote playlist
+        if (!isOwner && !remotePl.collabEnabled) {
+          _playlist['isSyncEnabled'] = false;
+          await StorageService.updatePlaylist(playlistId, _playlist);
+          if (mounted) {
+            setState(() => _isSyncing = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.lock_outline_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Sync not allowed: The owner has disabled collaboration for this playlist (Read-Only Mode).',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orangeAccent.shade700,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+
+        // If owner has collab turned off and tries to sync, warn owner
+        if (isOwner && !remotePl.collabEnabled && _playlist['isSyncEnabled'] != true) {
+          if (mounted) {
+            setState(() => _isSyncing = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Collaborative sync is disabled for this playlist. Turn on "Allow Collaboration & Sync" in Settings (⚙️) to sync songs.',
+                ),
+                backgroundColor: Colors.orangeAccent.shade700,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 4),
+                action: SnackBarAction(
                   label: 'SETTINGS',
                   textColor: Colors.white,
                   onPressed: () {
@@ -445,127 +632,64 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                       },
                     );
                   },
-                )
-              : null,
-        ),
-      );
-      return;
-    }
-
-    // 2. Auth check: user needs to be logged in to participate in cloud sync
-    if (!AuthService.instance.isLoggedIn) {
-      final loggedIn = await AuthModalDialog.show(
-        context,
-        featurePrompt: 'Please sign in or create an account to sync songs with other devices!',
-      );
-      if (!loggedIn) return;
-    }
-
-    setState(() => _isSyncing = true);
-
-    try {
-      final currentAuthor = StorageService.getUserAuthorName();
-      String? syncId = _playlist['syncId']?.toString();
-
-      // If owner and syncId is missing, create a cloud sync slot
-      if (syncId == null || syncId.isEmpty) {
-        if (!isOwner) {
-          setState(() => _isSyncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Cannot sync: this imported playlist has no cloud sync key attached.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+                ),
+              ),
+            );
+          }
           return;
-        }
-
-        final localId = _playlist['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
-        syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
-          localId: localId,
-          name: _playlist['name']?.toString() ?? 'Playlist',
-          description: _playlist['description']?.toString() ?? '',
-          authorName: currentAuthor,
-          isPublic: _playlist['isPublic'] == true,
-          isSyncEnabled: true,
-          tracks: _playlistTracks,
-          shareCode: _playlist['shareCode']?.toString(),
-          ownerId: _playlist['ownerId']?.toString() ?? AuthService.instance.currentUserId,
-          ownerEmail: _playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail,
-        );
-
-        if (syncId != null) {
-          _playlist['syncId'] = syncId;
-          await _persistPlaylist(_playlist);
         }
       }
 
-      if (syncId != null && syncId.isNotEmpty) {
-        // Sync ONLY this playlist (fetch latest remote songs, push local songs)
-        final result = await PlaylistCloudSyncService.instance.syncPlaylist(
-          syncId: syncId,
-          currentAuthor: currentAuthor,
-          localTracks: _playlistTracks,
-          isSyncEnabled: true,
-          playlistName: _playlist['name']?.toString(),
-          playlistDescription: _playlist['description']?.toString(),
-          shareCode: _playlist['shareCode']?.toString(),
-          ownerId: _playlist['ownerId']?.toString(),
-          ownerEmail: _playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail,
+      // 2. Perform atomic two-way sync with Firestore
+      final deletedIds = List<String>.from(_playlist['deletedTrackIds'] as List? ?? []);
+      final baseIds = List<String>.from(_playlist['syncedTrackIds'] as List? ?? []);
+      final mergedTracks = await repo.syncPlaylistTracks(
+        playlistId: playlistId,
+        callerUid: currentUserId,
+        callerName: currentAuthor,
+        localTracks: _playlistTracks,
+        deletedTrackIds: deletedIds,
+        baseTrackIds: baseIds,
+      );
+
+      _playlistTracks = mergedTracks;
+      _playlist['tracks'] = mergedTracks.map((t) => t.toJson()).toList();
+      _playlist['trackIds'] = mergedTracks.map((t) => t.id).toList();
+      _playlist['syncedTrackIds'] = mergedTracks.map((t) => t.id).toList();
+      _playlist['deletedTrackIds'] = <String>[];
+      if (remotePl != null) {
+        _playlist['isSyncEnabled'] = remotePl.collabEnabled;
+      }
+
+      await StorageService.updatePlaylist(playlistId, _playlist);
+
+      if (mounted) {
+        setState(() => _isSyncing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.cloud_done_rounded, color: Colors.black, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Playlist synced with cloud! (${mergedTracks.length} songs total) ☁️',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: accentColor,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
         );
-
-        if (result.success) {
-          _playlistTracks = result.mergedTracks;
-          _playlist['tracks'] = result.mergedTracks.map((t) => t.toJson()).toList();
-          _playlist['trackIds'] = result.mergedTracks.map((t) => t.id).toList();
-          await StorageService.updatePlaylist(
-            _playlist['id']?.toString() ?? '',
-            _playlist,
-          );
-        }
-
-        if (mounted) {
-          setState(() => _isSyncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  Icon(
-                    result.success ? Icons.sync_rounded : Icons.info_outline_rounded,
-                    color: Colors.black,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      result.message,
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: result.success ? accentColor : Colors.orangeAccent,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          setState(() => _isSyncing = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not establish cloud connection for this playlist.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isSyncing = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync error: $e'), behavior: SnackBarBehavior.floating),
+          SnackBar(content: Text('Sync notice: $e'), behavior: SnackBarBehavior.floating),
         );
       }
     }
@@ -602,7 +726,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, fontFamily: 'Outfit'),
         ),
         actions: [
-          // 1. Dedicated Playlist Collaborative Sync Button (🔄)
+          // 1. Dedicated Playlist Collaborative Sync Button (🔄) - Always enabled / clickable
           IconButton(
             icon: _isSyncing
                 ? SizedBox(
@@ -611,12 +735,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: accentColor),
                   )
                 : Icon(
-                    _playlist['isSyncEnabled'] == true ? Icons.sync_rounded : Icons.sync_disabled_rounded,
-                    color: _playlist['isSyncEnabled'] == true ? accentColor : (isDark ? Colors.white38 : Colors.black38),
+                    Icons.sync_rounded,
+                    color: accentColor,
                   ),
-            tooltip: _playlist['isSyncEnabled'] == true
-                ? 'Sync Playlist Songs 🔄'
-                : 'Sync Disabled by Owner',
+            tooltip: 'Sync Playlist Songs 🔄',
             onPressed: _isSyncing ? null : () => _performPlaylistSync(accentColor),
           ),
 
@@ -631,7 +753,35 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Playlist Settings',
-            onPressed: () {
+            onPressed: () async {
+              final connResults = await Connectivity().checkConnectivity();
+              final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+              if (isOffline) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'You are offline. Playlist cloud settings require an internet connection.',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                      backgroundColor: Colors.redAccent.shade700,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+                return;
+              }
+
+              if (!mounted) return;
               PlaylistSettingsModal.show(
                 context,
                 playlist: _playlist,

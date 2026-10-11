@@ -16,6 +16,18 @@ import '../../models/source_mode.dart';
 import '../../providers/music_source_mode_provider.dart';
 import 'widgets/firebase_settings_widgets.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings screen
+//
+// Layout (top to bottom):
+//   Header → Branding card → Account → Listening stats → Appearance →
+//   Playback → Sound → Downloads & offline → General → Storage → About
+//
+// Every group is a rounded card of rows. Every picker is a bottom sheet built
+// from the same pieces (_SheetFrame + _OptionTile), so the whole page behaves
+// the same way wherever you tap.
+// ─────────────────────────────────────────────────────────────────────────────
+
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -35,6 +47,95 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _is3dSoundEnabled = false;
   String _3dSoundMode = 'Wide Room';
   double _3dSoundIntensity = 0.65;
+
+  // ── Option catalogues (single source for row labels + picker sheets) ──────
+
+  static const List<_Option<String>> _skinOptions = [
+    _Option('vinyl', 'Rotating Vinyl Disc'),
+    _Option('cd', 'Modern Compact CD'),
+    _Option('cassette', 'Classic Cassette Tape'),
+    _Option('neon', 'Neon Cyberpunk Disc'),
+    _Option('amber', 'Glassmorphic Amber Glow'),
+    _Option('minimal', 'Ultra Minimal Artwork'),
+  ];
+
+  static const List<_Option<String>> _screenThemeOptions = [
+    _Option('normal', 'Normal (Classic)',
+        description: 'Full player with top centered title & controls'),
+    _Option('android_11_theme', 'Android 11',
+        description: 'Classic Android 11 media card layout with circle knob'),
+    _Option('android_16_theme', 'Android 16',
+        description: 'Minimalist layout with uppercase top title & dynamic palette'),
+    _Option('apple_music_theme', 'Apple Music',
+        description: 'Full-screen blurred backdrop with sleek glass cards'),
+    _Option('minimal_theme', 'Minimal',
+        description: 'Clean gradient layout with circular artwork & ring progress'),
+  ];
+
+  static const List<_Option<String>> _navBarOptions = [
+    _Option('os_style', 'OS Native Style',
+        description: 'iOS 26 Liquid Glass on iOS / Android 16 Material 3 on Android',
+        icon: Icons.smartphone_rounded),
+    _Option('default', 'Floating Glass Capsule',
+        description: 'Custom sleek floating curved glass bar',
+        icon: Icons.auto_awesome_rounded),
+  ];
+
+  static const List<_Option<String>> _progressBarOptions = [
+    _Option('waveform', 'Waveform', description: 'Voice note style'),
+    _Option('android16', 'Android 16 Wave', description: 'Stock squiggly'),
+    _Option('normal', 'Normal', description: 'Material rounded'),
+    _Option('snake', 'Snake', description: 'Wavy sine wave'),
+    _Option('zigzag', 'Zigzag', description: 'Sawtooth wave'),
+    _Option('neon', 'Neon Glow', description: 'Pulse shader'),
+  ];
+
+  static const List<_Option<double>> _speedOptions = [
+    _Option(0.5, '0.5x'),
+    _Option(0.75, '0.75x'),
+    _Option(1.0, '1.0x', description: 'Normal'),
+    _Option(1.25, '1.25x'),
+    _Option(1.5, '1.5x'),
+    _Option(2.0, '2.0x'),
+  ];
+
+  // 0 means "off".
+  static const List<_Option<int>> _sleepTimerOptions = [
+    _Option(5, '5 minutes'),
+    _Option(15, '15 minutes'),
+    _Option(30, '30 minutes'),
+    _Option(60, '60 minutes'),
+    _Option(0, 'Off', description: 'Cancel the running timer'),
+  ];
+
+  static const List<_Option<String>> _qualityOptions = [
+    _Option('Eco Stream (96kbps)', 'Eco Stream', description: '96 kbps · saves data'),
+    _Option('Standard (160kbps)', 'Standard', description: '160 kbps · balanced'),
+    _Option('HQ Stream (320kbps)', 'HQ Stream', description: '320 kbps · best quality'),
+  ];
+
+  static const List<_Option<String>> _languageOptions = [
+    _Option('en', 'English 🌐', description: 'Full English story & lyric analysis'),
+    _Option('hi', 'Hindi (हिंदी) 🇮🇳', description: 'Pure Devanagari Hindi story & analysis'),
+    _Option('hinglish', 'Hinglish (Hindi + English) 🔤',
+        description: 'Casual Hindi written in English script'),
+  ];
+
+  static const List<_Option<int>> _brandIconOptions = [
+    _Option(0xe056, 'Vinyl', icon: Icons.album_rounded),
+    _Option(0xe410, 'Note', icon: Icons.music_note_rounded),
+    _Option(0xe3a1, 'Library', icon: Icons.library_music_rounded),
+    _Option(0xe25b, 'Heart', icon: Icons.favorite_rounded),
+    _Option(0xe229, 'EQ', icon: Icons.equalizer_rounded),
+  ];
+
+  static const List<_AccentPreset> _accentPresets = [
+    _AccentPreset('Aura Gold', 255, 199, 44),
+    _AccentPreset('Cyberpunk', 0, 240, 255),
+    _AccentPreset('Emerald', 16, 185, 129),
+    _AccentPreset('Purple', 168, 85, 247),
+    _AccentPreset('Crimson', 239, 68, 68),
+  ];
 
   @override
   void initState() {
@@ -57,731 +158,678 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-  // ── Show Customizer dialog/sheet ─────────────────────────────
-
-  void _showCustomizerBottomSheet(BuildContext context) {
-    final customState = ref.watch(customizationProvider);
-    final customNotifier = ref.read(customizationProvider.notifier);
-    _nameController.text = customState.appName;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final icons = [
-      {'code': 0xe056, 'icon': Icons.album_rounded, 'name': 'Vinyl'},
-      {'code': 0xe410, 'icon': Icons.music_note_rounded, 'name': 'Note'},
-      {'code': 0xe3a1, 'icon': Icons.library_music_rounded, 'name': 'Library'},
-      {'code': 0xe25b, 'icon': Icons.favorite_rounded, 'name': 'Heart'},
-      {'code': 0xe229, 'icon': Icons.equalizer_rounded, 'name': 'EQ'},
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final activeCustomState = ref.watch(customizationProvider);
-            
-            return Container(
-              padding: EdgeInsets.only(
-                left: 24, 
-                right: 24, 
-                top: 24, 
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24
-              ),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF161616) : const Color(0xFFFAF8F5),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(28),
-                  topRight: Radius.circular(28),
-                ),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Customize Aura App',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // App Name field
-                  const Text('App Name / Brand', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _nameController,
-                    onChanged: (val) {
-                      customNotifier.updateAppName(val);
-                    },
-                    decoration: InputDecoration(
-                      hintText: 'Enter brand name...',
-                      filled: true,
-                      fillColor: isDark ? Colors.white54.withOpacity(0.04) : Colors.black54.withOpacity(0.04),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Alternate Icon Picker
-                  const Text('App Branding Icon', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: icons.map((item) {
-                      final isSelected = activeCustomState.brandingIconCode == item['code'];
-                      return GestureDetector(
-                        onTap: () {
-                          customNotifier.updateBrandingIcon(item['code'] as int);
-                          setDialogState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isSelected 
-                                ? activeCustomState.accentColor.withOpacity(0.15) 
-                                : Colors.transparent,
-                            border: Border.all(
-                              color: isSelected ? activeCustomState.accentColor : Colors.transparent,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Icon(
-                            item['icon'] as IconData,
-                            color: isSelected ? activeCustomState.accentColor : Colors.grey,
-                            size: 24,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Curated Color Presets
-                  const Text('Theme Preset Palettes', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _buildPresetChip('Aura Gold', 255, 199, 44, activeCustomState, customNotifier, setDialogState),
-                      _buildPresetChip('Cyberpunk', 0, 240, 255, activeCustomState, customNotifier, setDialogState),
-                      _buildPresetChip('Emerald', 16, 185, 129, activeCustomState, customNotifier, setDialogState),
-                      _buildPresetChip('Purple', 168, 85, 247, activeCustomState, customNotifier, setDialogState),
-                      _buildPresetChip('Crimson', 239, 68, 68, activeCustomState, customNotifier, setDialogState),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  if (Platform.isAndroid) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          try {
-                            final corePalette = await DynamicColorPlugin.getCorePalette();
-                            if (corePalette != null) {
-                              final color = Color(corePalette.primary.get(40));
-                              customNotifier.updateAccentColor(color.red, color.green, color.blue);
-                              if (context.mounted) {
-                                Navigator.pop(context); // Close the sheet to see the change
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Phone theme synced successfully!')),
-                                );
-                              }
-                            } else {
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Dynamic color not supported on this device.')),
-                                );
-                              }
-                            }
-                          } catch (e) {
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Failed to get phone theme color.')),
-                              );
-                            }
-                          }
-                        },
-                        icon: const Icon(Icons.sync_rounded, size: 20),
-                        label: const Text('Sync Phone Theme', style: TextStyle(fontWeight: FontWeight.bold)),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: activeCustomState.accentColor.withOpacity(0.5)),
-                          foregroundColor: activeCustomState.accentColor,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // RGB Accent color sliders
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Theme Accent Color (RGB)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      Text(
-                        'R: ${activeCustomState.red} G: ${activeCustomState.green} B: ${activeCustomState.blue}',
-                        style: TextStyle(color: activeCustomState.accentColor, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  
-                  // Red Slider
-                  _buildRGBSlider(
-                    label: 'Red',
-                    value: activeCustomState.red,
-                    color: Colors.redAccent,
-                    onChanged: (val) {
-                      customNotifier.updateAccentColor(val.toInt(), activeCustomState.green, activeCustomState.blue);
-                      setDialogState(() {});
-                    },
-                  ),
-                  
-                  // Green Slider
-                  _buildRGBSlider(
-                    label: 'Green',
-                    value: activeCustomState.green,
-                    color: Colors.greenAccent,
-                    onChanged: (val) {
-                      customNotifier.updateAccentColor(activeCustomState.red, val.toInt(), activeCustomState.blue);
-                      setDialogState(() {});
-                    },
-                  ),
-                  
-                  // Blue Slider
-                  _buildRGBSlider(
-                    label: 'Blue',
-                    value: activeCustomState.blue,
-                    color: Colors.blueAccent,
-                    onChanged: (val) {
-                      customNotifier.updateAccentColor(activeCustomState.red, activeCustomState.green, val.toInt());
-                      setDialogState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Gradient color preview bar
-                  const Text('Accent Gradient Preview', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      gradient: LinearGradient(
-                        colors: [
-                          activeCustomState.accentColor,
-                          activeCustomState.accentColor.withOpacity(0.5),
-                          activeCustomState.accentColor.withOpacity(0.1),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Reset Default Button & Apply Button
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            customNotifier.resetToDefault();
-                            _nameController.text = 'Aura Vinyl';
-                            setDialogState(() {});
-                          },
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.grey),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: const Text('Reset to Default', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: activeCustomState.accentColor,
-                            foregroundColor: isDark ? Colors.black : Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: const Text('Apply Details', style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildRGBSlider({
-    required String label,
-    required int value,
-    required Color color,
-    required ValueChanged<double> onChanged,
-  }) {
-    return Row(
-      children: [
-        SizedBox(width: 50, child: Text(label, style: const TextStyle(fontSize: 12))),
-        Expanded(
-          child: Slider(
-            value: value.toDouble(),
-            min: 0,
-            max: 255,
-            activeColor: color,
-            inactiveColor: color.withOpacity(0.2),
-            onChanged: onChanged,
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _showEditUserNameDialog(BuildContext context) {
-    final controller = TextEditingController(text: StorageService.getUserName());
-    final customBranding = ref.read(customizationProvider);
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Your Display Name'),
-          content: TextField(
-            controller: controller,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              hintText: 'Enter your name (e.g. Bhavneet)...',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final name = controller.text.trim();
-                await StorageService.setUserName(name);
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  setState(() {});
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: customBranding.accentColor,
-                foregroundColor: Colors.black,
-              ),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PAGE
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final customBranding = ref.watch(customizationProvider);
-    final currentSourceMode = ref.watch(sourceModeProvider);
-    
-    final playbackState = ref.watch(playbackProvider);
+    final branding = ref.watch(customizationProvider);
+    final sourceMode = ref.watch(sourceModeProvider);
+    final playback = ref.watch(playbackProvider);
     final playbackNotifier = ref.read(playbackProvider.notifier);
-    
-    final themeNotifier = ref.read(themeModeProvider.notifier);
-
-    final isDark = themeMode == ThemeMode.dark ||
-        (themeMode == ThemeMode.system &&
-            MediaQuery.of(context).platformBrightness == Brightness.dark);
+    final accent = branding.accentColor;
 
     return ListView(
-      padding: EdgeInsets.only(bottom: 150, top: MediaQuery.of(context).padding.top + 16),
+      padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 16, 16, 150),
       children: [
-        // Title
-        Padding(
-          padding: const EdgeInsets.only(left: 24, bottom: 20),
-          child: Text(
-            'Settings',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontFamily: 'Outfit',
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-        ),
+        _buildHeader(branding.appName),
+        _buildBrandingCard(branding),
 
-        // 0. Custom branding card
-        _buildSectionHeader('BRANDING CUSTOMIZER', customBranding.accentColor),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          leading: Icon(customBranding.brandingIcon, color: customBranding.accentColor),
-          title: const Text('Customize App Visuals', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          subtitle: Text('Change app name: "${customBranding.appName}" and RGB colors'),
-          trailing: const Icon(Icons.palette_outlined, color: Colors.grey),
-          onTap: () => _showCustomizerBottomSheet(context),
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // Admin Portal (visible only to verified admin email)
+        // Admin portal (the widget hides itself for non-admin accounts)
         const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
+          padding: EdgeInsets.only(top: 12),
           child: FirebaseAdminPortalTile(),
         ),
 
-        // Firebase Cloud Account Section
-        const SizedBox(height: 12),
-        _buildSectionHeader('ACCOUNT & CLOUD PROFILE', customBranding.accentColor),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
-          child: FirebaseAccountSection(),
-        ),
-        const SizedBox(height: 12),
-        const Divider(indent: 24, endIndent: 24, height: 1),
+        // ── Account ────────────────────────────────────────────
+        _sectionLabel('Account'),
+        const FirebaseAccountSection(),
 
-        // Firebase Cloud Sync Section
-        const SizedBox(height: 12),
-        _buildSectionHeader('CLOUD SYNC', customBranding.accentColor),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
-          child: FirebaseSyncSection(),
-        ),
-        const SizedBox(height: 12),
-        const Divider(indent: 24, endIndent: 24, height: 1),
+        _sectionLabel('Listening stats'),
+        const FirebaseMyStatsSection(),
 
-        // Firebase User Listening Stats Section (fl_chart)
-        const SizedBox(height: 12),
-        _buildSectionHeader('MY LISTENING STATS', customBranding.accentColor),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
-          child: FirebaseMyStatsSection(),
-        ),
-        const SizedBox(height: 12),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 1. Group: Appearance
-        const SizedBox(height: 12),
-        _buildSectionHeader('APPEARANCE', customBranding.accentColor),
-        _buildSwitchTile(
-          'Dark Mode Theme',
-          'Use AMOLED charcoal visual styling',
-          themeMode == ThemeMode.dark,
-          customBranding.accentColor,
-          (val) {
-            themeNotifier.toggleTheme(val);
-          },
-        ),
-        _buildSwitchTile(
-          'System Theme Matching',
-          'Follow your device settings',
-          themeMode == ThemeMode.system,
-          customBranding.accentColor,
-          (val) {
-            if (val) {
-              themeNotifier.setSystemMode();
-            } else {
-              themeNotifier.toggleTheme(isDark);
-            }
-          },
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 2. Group: Audio Player Settings
-        const SizedBox(height: 12),
-        _buildSectionHeader('PLAYER SKIN & CONTROLS', customBranding.accentColor),
-        _buildSelectionTile(
-          'Active Player Skin',
-          playbackState.playerSkin.toUpperCase(),
-          () => _showSkinSelectionDialog(playbackNotifier),
-        ),
-        _buildSelectionTile(
-          'Player Screen Theme',
-          _getPlayerScreenThemeName(playbackState.playerScreenTheme),
-          () => _showScreenThemeDialog(playbackNotifier),
-        ),
-        _buildSelectionTile(
-          'Navigation Bar Style',
-          (customBranding.navBarStyle == 'default') ? 'FLOATING GLASS CAPSULE ✨' : 'OS NATIVE STYLE 📱',
-          () => _showNavigationBarStyleDialog(),
-        ),
-        _buildSelectionTile(
-          'Playback Speed',
-          '${playbackState.playbackSpeed}x',
-          () => _showPlaybackSpeedDialog(playbackNotifier),
+        // ── Appearance ─────────────────────────────────────────
+        _sectionLabel('Appearance'),
+        _SettingsGroup(
+          children: [
+            _buildThemeRow(themeMode, accent),
+            _SettingsRow(
+              icon: Icons.call_to_action_rounded,
+              title: 'Navigation bar',
+              value: _labelFor(
+                _navBarOptions,
+                branding.navBarStyle == 'default' ? 'default' : 'os_style',
+              ),
+              accent: accent,
+              onTap: _showNavigationBarStyleSheet,
+            ),
+            _SettingsRow(
+              icon: Icons.album_rounded,
+              title: 'Player skin',
+              value: _labelFor(_skinOptions, playback.playerSkin),
+              accent: accent,
+              onTap: _showSkinSheet,
+            ),
+            _SettingsRow(
+              icon: Icons.style_rounded,
+              title: 'Player screen theme',
+              value: _labelFor(
+                _screenThemeOptions,
+                playback.playerScreenTheme,
+                fallback: 'Normal (Classic)',
+              ),
+              accent: accent,
+              onTap: _showScreenThemeSheet,
+            ),
+            _SettingsRow(
+              icon: Icons.linear_scale_rounded,
+              title: 'Progress bar style',
+              value: _labelFor(_progressBarOptions, _progressBarStyle),
+              accent: accent,
+              onTap: _showProgressBarStyleSheet,
+            ),
+          ],
         ),
 
-        _buildSwitchTile(
-          'Volume Normalization',
-          'Dampen spikes for a balanced sound',
-          playbackState.volumeNormalization,
-          customBranding.accentColor,
-          (val) {
-            playbackNotifier.toggleVolumeNormalization();
-          },
-        ),
-        _buildSwitchTile(
-          'Gapless Playback',
-          'Transition next tracks immediately without delay',
-          playbackState.gaplessPlayback,
-          customBranding.accentColor,
-          (val) {
-            playbackNotifier.toggleGaplessPlayback();
-          },
-        ),
-        _buildSwitchTile(
-          'Haptic Feedback',
-          'Vibrate on buttons, gestures and playback controls',
-          _hapticsEnabled,
-          customBranding.accentColor,
-          (val) async {
-            setState(() {
-              _hapticsEnabled = val;
-            });
-            await StorageService.setHapticsEnabled(val);
-          },
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 3. Group: Sleep Timer
-        const SizedBox(height: 12),
-        _buildSectionHeader('SLEEP TIMER', customBranding.accentColor),
-        _buildSelectionTile(
-          'Timer Settings',
-          playbackState.sleepTimerMinutes != null 
-              ? '${playbackState.sleepTimerMinutes} mins (${_formatDurationRemaining(playbackState.sleepTimerTimeRemaining)})'
-              : 'OFF',
-          () => _showSleepTimerDialog(playbackNotifier),
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 3.5 Group: AI Intelligence & Summary
-        const SizedBox(height: 12),
-        _buildSectionHeader('AI INTELLIGENCE & SUMMARY', customBranding.accentColor),
-        _buildSelectionTile(
-          'AI Song & Lyrics Summary Language',
-          _getSummaryLanguageLabel(_summaryLanguage),
-          () => _showSummaryLanguageDialog(),
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // Group: Music Streaming Source
-        const SizedBox(height: 12),
-        _buildSectionHeader('MUSIC STREAMING SOURCE', customBranding.accentColor),
-        _buildSelectionTile(
-          'Playback & Search Source',
-          currentSourceMode.label,
-          () => _showMusicSourceDialog(context),
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 4. Group: Audio & Equalizer
-        const SizedBox(height: 12),
-        _buildSectionHeader('AUDIO EFFECTS & SPATIAL SOUND', customBranding.accentColor),
-        _buildNavigationTile(
-          context,
-          'Equalizer & Presets',
-          'Fine-tune 5-band frequency spectrum and gains',
-          const EqualizerScreen(),
-        ),
-        _buildSwitchTile(
-          'Virtual 3D Sound for Headphones',
-          'Binaural 360° spatial audio & expanded headphone soundstage',
-          _is3dSoundEnabled,
-          customBranding.accentColor,
-          (val) async {
-            setState(() {
-              _is3dSoundEnabled = val;
-            });
-            await SpatialAudioService.setEnabled(val);
-          },
-        ),
-        if (_is3dSoundEnabled)
-          _buildSelectionTile(
-            '3D Spatial Preset & Width',
-            '$_3dSoundMode (${(_3dSoundIntensity * 100).toInt()}%)',
-            () => _show3dSoundDialog(customBranding.accentColor),
-          ),
-        _buildSelectionTile(
-          'Progress Bar Visual Style',
-          _progressBarStyle.toUpperCase(),
-          () => _showProgressBarStyleDialog(),
-        ),
-        _buildSwitchTile(
-          'Crossfade Audio',
-          'Smooth equal-power overlap between ending and next song',
-          _crossfadeEnabled,
-          customBranding.accentColor,
-          (val) async {
-            setState(() {
-              _crossfadeEnabled = val;
-            });
-            await StorageService.setCrossfadeEnabled(val);
-          },
-        ),
-        if (_crossfadeEnabled)
-          _buildSelectionTile(
-            'Crossfade Duration',
-            '${_crossfadeDuration.toInt()} seconds',
-            () => _showCrossfadeDurationDialog(),
-          ),
-        _buildSelectionTile(
-          'Download Stream Quality',
-          _audioQuality,
-          () => _showAudioQualityDialog(),
-        ),
-        _buildSwitchTile(
-          'Offline Mode Only',
-          'Only play local downloaded library files',
-          _offlineOnly,
-          customBranding.accentColor,
-          (val) {
-            setState(() {
-              _offlineOnly = val;
-            });
-            StorageService.saveSetting('offline_mode_only', val);
-          },
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 5. Group: Storage Clean
-        const SizedBox(height: 12),
-        _buildSectionHeader('STORAGE MANAGEMENT', customBranding.accentColor),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          title: const Text('Clear Search History', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          subtitle: const Text('Wipes all recent searches cache'),
-          trailing: const Icon(Icons.cleaning_services_rounded, color: Colors.grey),
-          onTap: () async {
-            await StorageService.clearSearchHistory();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Search history cleared successfully!'))
-            );
-          },
-        ),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          title: const Text('Clear Listening Cache', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          subtitle: const Text('Wipes your list history records'),
-          trailing: const Icon(Icons.delete_sweep_rounded, color: Colors.grey),
-          onTap: () async {
-            await StorageService.clearListeningHistory();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Listening history cleared successfully!'))
-            );
-          },
-        ),
-        const Divider(indent: 24, endIndent: 24, height: 1),
-
-        // 6. Group: About & Share
-        const SizedBox(height: 12),
-        _buildSectionHeader('ABOUT', customBranding.accentColor),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          title: const Text('Check for Updates', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          subtitle: const Text('Check GitHub for latest release'),
-          trailing: Icon(Icons.system_update_rounded, color: customBranding.accentColor),
-          onTap: () => UpdateService.checkForUpdates(context, silentIfLatest: true),
-        ),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          title: const Text('Share App', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          subtitle: const Text('Share download link & QR Code'),
-          trailing: Icon(Icons.qr_code_2_rounded, color: customBranding.accentColor),
-          onTap: () => _showShareAppDialog(customBranding.accentColor),
-        ),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-          title: const Text('App Version', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('${AppVersionService.releaseTag} (Premium)', style: const TextStyle(color: Colors.grey, fontSize: 13)),
-        ),
-        const ListTile(
-          contentPadding: EdgeInsets.symmetric(horizontal: 24),
-          title: Text('Developer License', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          trailing: Text('Creative Commons & JioSaavn API', style: TextStyle(color: Colors.grey, fontSize: 13)),
-        ),
-        const SizedBox(height: 28),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () async {
-                final Uri url = Uri.parse('https://www.linkedin.com/in/bhavneet-verma/');
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
+        // ── Playback ───────────────────────────────────────────
+        _sectionLabel('Playback'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.library_music_rounded,
+              title: 'Music source',
+              value: sourceMode.label,
+              accent: accent,
+              onTap: _showMusicSourceSheet,
+            ),
+            _SettingsRow(
+              icon: Icons.speed_rounded,
+              title: 'Playback speed',
+              value: '${playback.playbackSpeed}x',
+              accent: accent,
+              onTap: _showPlaybackSpeedSheet,
+            ),
+            _switchRow(
+              icon: Icons.all_inclusive_rounded,
+              title: 'Gapless playback',
+              subtitle: 'Start the next track immediately, without delay',
+              value: playback.gaplessPlayback,
+              accent: accent,
+              onChanged: (val) {
+                playbackNotifier.toggleGaplessPlayback();
               },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+            ),
+            _withDependent(
+              show: _crossfadeEnabled,
+              parent: _switchRow(
+                icon: Icons.compare_arrows_rounded,
+                title: 'Crossfade',
+                subtitle: 'Smooth equal-power overlap between songs',
+                value: _crossfadeEnabled,
+                accent: accent,
+                onChanged: (val) async {
+                  setState(() {
+                    _crossfadeEnabled = val;
+                  });
+                  await StorageService.setCrossfadeEnabled(val);
+                },
+              ),
+              dependent: _SettingsRow(
+                icon: Icons.timelapse_rounded,
+                title: 'Crossfade duration',
+                value: '${_crossfadeDuration.toInt()} seconds',
+                accent: accent,
+                onTap: _showCrossfadeDurationSheet,
+              ),
+            ),
+            _switchRow(
+              icon: Icons.volume_up_rounded,
+              title: 'Volume normalization',
+              subtitle: 'Dampen spikes for a balanced sound',
+              value: playback.volumeNormalization,
+              accent: accent,
+              onChanged: (val) {
+                playbackNotifier.toggleVolumeNormalization();
+              },
+            ),
+            _SettingsRow(
+              icon: Icons.bedtime_rounded,
+              title: 'Sleep timer',
+              value: playback.sleepTimerMinutes != null
+                  ? '${playback.sleepTimerMinutes} min · ${_formatDurationRemaining(playback.sleepTimerTimeRemaining)} left'
+                  : 'Off',
+              accent: accent,
+              onTap: _showSleepTimerSheet,
+            ),
+          ],
+        ),
+
+        // ── Sound ──────────────────────────────────────────────
+        _sectionLabel('Sound'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.equalizer_rounded,
+              title: 'Equalizer & presets',
+              subtitle: 'Fine-tune the 5-band frequency spectrum and gains',
+              accent: accent,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EqualizerScreen()),
+                );
+              },
+            ),
+            _withDependent(
+              show: _is3dSoundEnabled,
+              parent: _switchRow(
+                icon: Icons.headphones_rounded,
+                title: 'Virtual 3D sound',
+                subtitle: 'Binaural 360° spatial audio for headphones',
+                value: _is3dSoundEnabled,
+                accent: accent,
+                onChanged: (val) async {
+                  setState(() {
+                    _is3dSoundEnabled = val;
+                  });
+                  await SpatialAudioService.setEnabled(val);
+                },
+              ),
+              dependent: _SettingsRow(
+                icon: Icons.tune_rounded,
+                title: 'Spatial preset & width',
+                value: '$_3dSoundMode · ${(_3dSoundIntensity * 100).toInt()}%',
+                accent: accent,
+                onTap: () => _show3dSoundSheet(accent),
+              ),
+            ),
+          ],
+        ),
+
+        // ── Downloads & offline ────────────────────────────────
+        _sectionLabel('Downloads & offline'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.high_quality_rounded,
+              title: 'Download quality',
+              value: _audioQuality,
+              accent: accent,
+              onTap: _showAudioQualitySheet,
+            ),
+            _switchRow(
+              icon: Icons.wifi_off_rounded,
+              title: 'Offline mode only',
+              subtitle: 'Only play downloaded library files',
+              value: _offlineOnly,
+              accent: accent,
+              onChanged: (val) {
+                setState(() {
+                  _offlineOnly = val;
+                });
+                StorageService.saveSetting('offline_mode_only', val);
+              },
+            ),
+          ],
+        ),
+
+        // ── General ────────────────────────────────────────────
+        _sectionLabel('General'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.translate_rounded,
+              title: 'AI summary language',
+              value: _labelFor(_languageOptions, _summaryLanguage, fallback: 'English 🌐'),
+              accent: accent,
+              onTap: _showSummaryLanguageSheet,
+            ),
+            _switchRow(
+              icon: Icons.vibration_rounded,
+              title: 'Haptic feedback',
+              subtitle: 'Vibrate on buttons, gestures and playback controls',
+              value: _hapticsEnabled,
+              accent: accent,
+              onChanged: (val) async {
+                setState(() {
+                  _hapticsEnabled = val;
+                });
+                await StorageService.setHapticsEnabled(val);
+              },
+            ),
+          ],
+        ),
+
+        // ── Storage ────────────────────────────────────────────
+        _sectionLabel('Storage'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.cleaning_services_rounded,
+              title: 'Clear search history',
+              subtitle: 'Remove all recent searches',
+              accent: accent,
+              destructive: true,
+              showChevron: false,
+              onTap: () => _confirmAndClear(
+                title: 'Clear search history?',
+                message: 'All of your recent searches will be removed.',
+                doneMessage: 'Search history cleared successfully!',
+                action: () async {
+                  await StorageService.clearSearchHistory();
+                },
+              ),
+            ),
+            _SettingsRow(
+              icon: Icons.delete_sweep_rounded,
+              title: 'Clear listening history',
+              subtitle: 'Remove your listening history records',
+              accent: accent,
+              destructive: true,
+              showChevron: false,
+              onTap: () => _confirmAndClear(
+                title: 'Clear listening history?',
+                message: 'Your listening history records will be removed.',
+                doneMessage: 'Listening history cleared successfully!',
+                action: () async {
+                  await StorageService.clearListeningHistory();
+                },
+              ),
+            ),
+          ],
+        ),
+
+        // ── About ──────────────────────────────────────────────
+        _sectionLabel('About'),
+        _SettingsGroup(
+          children: [
+            _SettingsRow(
+              icon: Icons.system_update_rounded,
+              title: 'Check for updates',
+              subtitle: 'Check GitHub for the latest release',
+              accent: accent,
+              onTap: () => UpdateService.checkForUpdates(context, silentIfLatest: true),
+            ),
+            _SettingsRow(
+              icon: Icons.qr_code_2_rounded,
+              title: 'Share app',
+              subtitle: 'Download link & QR code',
+              accent: accent,
+              onTap: () => _showShareAppSheet(accent),
+            ),
+            _SettingsRow(
+              icon: Icons.info_outline_rounded,
+              title: 'App version',
+              accent: accent,
+              trailing: _buildPill('${AppVersionService.releaseTag} (Premium)'),
+            ),
+            _SettingsRow(
+              icon: Icons.description_rounded,
+              title: 'Developer license',
+              subtitle: 'Creative Commons & JioSaavn API',
+              accent: accent,
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 24),
+        _buildFooter(accent),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PAGE PIECES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildHeader(String appName) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Settings',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontFamily: 'Outfit',
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tune how $appName looks, sounds and plays',
+            style: TextStyle(fontSize: 13.5, color: _muted(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrandingCard(CustomizationState branding) {
+    final accent = branding.accentColor;
+
+    return Material(
+      color: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              accent.withValues(alpha: 0.26),
+              accent.withValues(alpha: 0.05),
+            ],
+          ),
+        ),
+        child: InkWell(
+          onTap: () => _showCustomizerBottomSheet(context),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Icon(branding.brandingIcon, color: _onColor(accent), size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        branding.appName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Outfit',
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Name, icon and accent color',
+                        style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(
+                    'Customize',
+                    style: TextStyle(
+                      color: _onColor(accent),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 28, 8, 10),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+          color: _muted(context),
+        ),
+      ),
+    );
+  }
+
+  /// Theme row: one System / Light / Dark control instead of two switches.
+  Widget _buildThemeRow(ThemeMode mode, Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _IconBadge(icon: Icons.brightness_6_rounded, color: accent),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text('Theme', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 3),
                     Text(
-                      'Made with ',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const Text(
-                      '❤️',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    Text(
-                      ' by ',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      'Bhavneet Verma',
-                      style: TextStyle(
-                        color: customBranding.accentColor,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.3,
-                        decoration: TextDecoration.underline,
-                      ),
+                      'Dark uses AMOLED charcoal styling',
+                      style: TextStyle(fontSize: 12.5, color: _muted(context)),
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildThemeSegments(mode, accent),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeSegments(ThemeMode current, Color accent) {
+    final notifier = ref.read(themeModeProvider.notifier);
+
+    Widget segment(ThemeMode mode, IconData icon, String label) {
+      final selected = current == mode;
+      final foreground = selected ? _onColor(accent) : _muted(context);
+
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (selected) return;
+            triggerHaptic(HapticFeedbackType.light);
+            switch (mode) {
+              case ThemeMode.system:
+                notifier.setSystemMode();
+                break;
+              case ThemeMode.light:
+                notifier.toggleTheme(false);
+                break;
+              case ThemeMode.dark:
+                notifier.toggleTheme(true);
+                break;
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16, color: foreground),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: foreground,
+                  ),
+                ),
+              ],
             ),
           ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _tint(context, 0.06),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          segment(ThemeMode.system, Icons.brightness_auto_rounded, 'System'),
+          segment(ThemeMode.light, Icons.light_mode_rounded, 'Light'),
+          segment(ThemeMode.dark, Icons.dark_mode_rounded, 'Dark'),
+        ],
+      ),
+    );
+  }
+
+  Widget _switchRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required Color accent,
+    required ValueChanged<bool> onChanged,
+  }) {
+    void handle(bool val) {
+      triggerHaptic(HapticFeedbackType.light);
+      onChanged(val);
+    }
+
+    return _SettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      accent: accent,
+      onTap: () => handle(!value),
+      trailing: Switch(
+        value: value,
+        onChanged: handle,
+        activeTrackColor: accent,
+        thumbColor: WidgetStateProperty.resolveWith<Color?>(
+          (states) => states.contains(WidgetState.selected) ? _onColor(accent) : null,
+        ),
+      ),
+    );
+  }
+
+  /// A row plus a second row that slides in underneath while [show] is true.
+  Widget _withDependent({
+    required bool show,
+    required Widget parent,
+    required Widget dependent,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        parent,
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: show
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [const _RowDivider(), dependent],
+                )
+              : const SizedBox(width: double.infinity),
         ),
       ],
     );
   }
+
+  Widget _buildPill(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _tint(context, 0.06),
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _muted(context)),
+      ),
+    );
+  }
+
+  Widget _buildFooter(Color accent) {
+    return Center(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () async {
+          final Uri url = Uri.parse('https://www.linkedin.com/in/bhavneet-verma/');
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Made with ',
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const Text('❤️', style: TextStyle(fontSize: 14)),
+              Text(
+                ' by ',
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                'Bhavneet Verma',
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.3,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
 
   String _formatDurationRemaining(Duration? dur) {
     if (dur == null) return '0:00';
@@ -790,508 +838,137 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
-  Widget _buildSectionHeader(String title, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 24, top: 12, bottom: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.5,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSwitchTile(String title, String subtitle, bool value, Color activeColor, ValueChanged<bool> onChanged) {
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      activeColor: activeColor,
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
-      value: value,
-      onChanged: (val) {
-        triggerHaptic(HapticFeedbackType.light);
-        onChanged(val);
-      },
-    );
-  }
-
-  Widget _buildNavigationTile(BuildContext context, String title, String subtitle, Widget screen) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
-      trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => screen),
-        );
-      },
-    );
-  }
-
-  Widget _buildSelectionTile(String title, String valuePreview, VoidCallback onTap) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final customBranding = ref.read(customizationProvider);
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 2),
-        child: Text(
-          valuePreview,
-          style: TextStyle(
-            color: customBranding.accentColor,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-      trailing: const Icon(Icons.arrow_drop_down_rounded, color: Colors.grey),
-      onTap: onTap,
-    );
-  }
-
-  // ── Music Source Bottom Sheet ────────────────────────────────
-
-  void _showMusicSourceDialog(BuildContext context) {
-    final currentSourceMode = ref.read(sourceModeProvider);
-    final customBranding = ref.read(customizationProvider);
-    final accentColor = customBranding.accentColor;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).cardColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Select Music Source',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Choose where Aura searches and streams your tracks from',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ...SourceMode.values.map((mode) {
-                  final isSelected = mode == currentSourceMode;
-                  IconData icon;
-                  switch (mode) {
-                    case SourceMode.hybrid:
-                      icon = Icons.auto_awesome_rounded;
-                      break;
-                    case SourceMode.jiosaavn:
-                      icon = Icons.music_note_rounded;
-                      break;
-                    case SourceMode.youtube:
-                      icon = Icons.play_circle_filled_rounded;
-                      break;
-                  }
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? accentColor.withValues(alpha: 0.12)
-                          : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: isSelected ? accentColor : Colors.transparent,
-                        width: 1.5,
-                      ),
-                    ),
-                    child: ListTile(
-                      leading: Icon(
-                        icon,
-                        color: isSelected ? accentColor : Colors.grey,
-                      ),
-                      title: Text(
-                        mode.label,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: isSelected ? accentColor : null,
-                        ),
-                      ),
-                      subtitle: Text(
-                        mode.description,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                        ),
-                      ),
-                      trailing: isSelected
-                          ? Icon(Icons.check_circle_rounded, color: accentColor)
-                          : null,
-                      onTap: () {
-                        ref.read(sourceModeProvider.notifier).setMode(mode);
-                        Navigator.pop(context);
-                      },
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ── Dialog Selectors ────────────────────────────────────────
-
-  void _showSkinSelectionDialog(PlaybackNotifier notifier) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Choose Skin Mode', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('Rotating Vinyl Disc'),
-                onTap: () {
-                  notifier.setPlayerSkin('vinyl');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Modern Compact CD'),
-                onTap: () {
-                  notifier.setPlayerSkin('cd');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Classic Cassette Tape'),
-                onTap: () {
-                  notifier.setPlayerSkin('cassette');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Neon Cyberpunk Disc'),
-                onTap: () {
-                  notifier.setPlayerSkin('neon');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Glassmorphic Amber Glow'),
-                onTap: () {
-                  notifier.setPlayerSkin('amber');
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Ultra Minimal Artwork'),
-                onTap: () {
-                  notifier.setPlayerSkin('minimal');
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  String _getPlayerScreenThemeName(String theme) {
-    switch (theme) {
-      case 'minimal_theme':
-        return 'MINIMAL';
-      case 'android_11_theme':
-        return 'ANDROID 11';
-      case 'android_16_theme':
-        return 'ANDROID 16';
-      case 'apple_music_theme':
-        return 'APPLE MUSIC';
-      case 'normal':
-      default:
-        return 'NORMAL (CLASSIC)';
+  String _labelFor<T>(List<_Option<T>> options, T value, {String? fallback}) {
+    for (final option in options) {
+      if (option.value == value) return option.label;
     }
+    return fallback ?? value.toString();
   }
 
-  void _showScreenThemeDialog(PlaybackNotifier notifier) {
-    final currentTheme = ref.read(playbackProvider).playerScreenTheme;
+  String _hex(int channel) => channel.toRadixString(16).padLeft(2, '0').toUpperCase();
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Player Screen Theme', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RadioListTile<String>(
-                  title: const Text('Normal (Classic)'),
-                  subtitle: const Text('Full player with top centered title & controls', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  value: 'normal',
-                  groupValue: currentTheme,
-                  onChanged: (val) {
-                    if (val != null) {
-                      notifier.setPlayerScreenTheme(val);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-                RadioListTile<String>(
-                  title: const Text('Android 11 Theme'),
-                  subtitle: const Text('Classic Android 11 media card layout with circle knob', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  value: 'android_11_theme',
-                  groupValue: currentTheme,
-                  onChanged: (val) {
-                    if (val != null) {
-                      notifier.setPlayerScreenTheme(val);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-                RadioListTile<String>(
-                  title: const Text('Android 16 Theme'),
-                  subtitle: const Text('Minimalist layout with uppercase top title & dynamic palette', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  value: 'android_16_theme',
-                  groupValue: currentTheme,
-                  onChanged: (val) {
-                    if (val != null) {
-                      notifier.setPlayerScreenTheme(val);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-                RadioListTile<String>(
-                  title: const Text('Apple Music Theme'),
-                  subtitle: const Text('Full-screen blurred backdrop with sleek glass cards', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  value: 'apple_music_theme',
-                  groupValue: currentTheme,
-                  onChanged: (val) {
-                    if (val != null) {
-                      notifier.setPlayerScreenTheme(val);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-                RadioListTile<String>(
-                  title: const Text('Minimal Theme'),
-                  subtitle: const Text('Clean gradient layout with circular artwork & ring progress', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  value: 'minimal_theme',
-                  groupValue: currentTheme,
-                  onChanged: (val) {
-                    if (val != null) {
-                      notifier.setPlayerScreenTheme(val);
-                      Navigator.pop(context);
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+  Widget _accentSlider({required Color color, required Widget child}) {
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 4,
+        activeTrackColor: color,
+        inactiveTrackColor: color.withValues(alpha: 0.18),
+        thumbColor: color,
+        overlayColor: color.withValues(alpha: 0.15),
+      ),
+      child: child,
     );
   }
 
-  void _showPlaybackSpeedDialog(PlaybackNotifier notifier) {
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Playback Speed', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
-              return ListTile(
-                title: Text('${speed}x'),
-                onTap: () {
-                  notifier.setPlaybackSpeed(speed);
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
-          ),
-        );
-      },
+  Widget _primaryButton({
+    required String label,
+    required Color accent,
+    required VoidCallback onPressed,
+  }) {
+    return FilledButton(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: accent,
+        foregroundColor: _onColor(accent),
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+      ),
+      child: Text(label),
     );
   }
 
-  void _showNavigationBarStyleDialog() {
-    final customNotifier = ref.read(customizationProvider.notifier);
-    final currentStyle = ref.read(customizationProvider).navBarStyle;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Navigation Bar Style', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: const Text('OS Native Style 📱'),
-                subtitle: const Text('iOS 26 Liquid Glass on iOS / Android 16 Material 3 on Android'),
-                value: 'os_style',
-                groupValue: (currentStyle == 'default') ? 'default' : 'os_style',
-                onChanged: (val) {
-                  if (val != null) {
-                    customNotifier.updateNavigationBarStyle(val);
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-              RadioListTile<String>(
-                title: const Text('Floating Glass Capsule ✨'),
-                subtitle: const Text('Custom sleek floating curved glass bar'),
-                value: 'default',
-                groupValue: (currentStyle == 'default') ? 'default' : 'os_style',
-                onChanged: (val) {
-                  if (val != null) {
-                    customNotifier.updateNavigationBarStyle(val);
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-            ],
-          ),
-        );
-      },
+  Widget _secondaryButton({required String label, required VoidCallback onPressed}) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
+        side: BorderSide(color: _tint(context, 0.18)),
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+      ),
+      child: Text(label),
     );
   }
 
-  void _showSleepTimerDialog(PlaybackNotifier notifier) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Sleep Timer', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('5 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(5);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('15 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(15);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('30 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(30);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('60 Minutes'),
-                onTap: () {
-                  notifier.startSleepTimer(60);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Turn Timer Off', style: TextStyle(color: Colors.redAccent)),
-                onTap: () {
-                  notifier.cancelSleepTimer();
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  Future<void> _confirmAndClear({
+    required String title,
+    required String message,
+    required String doneMessage,
+    required Future<void> Function() action,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
 
-  void _showAudioQualityDialog() {
-    showDialog(
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).cardColor,
-          title: const Text('Stream Quality', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDialogOption('Eco Stream (96kbps)'),
-              _buildDialogOption('Standard (160kbps)'),
-              _buildDialogOption('HQ Stream (320kbps)'),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDialogOption(String option) {
-    return ListTile(
-      title: Text(option),
-      onTap: () {
-        setState(() {
-          _audioQuality = option;
-        });
-        StorageService.saveSetting('download_quality_label', option);
-        Navigator.pop(context);
-      },
-    );
-  }
-
-  void _showProgressBarStyleDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: const Text('Progress Bar Visual Style', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'Clear',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    await action();
+    messenger.showSnackBar(SnackBar(content: Text(doneMessage)));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PICKER SHEETS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// One picker for every "choose one of these" setting.
+  void _showOptionSheet<T>({
+    required String title,
+    String? subtitle,
+    IconData? icon,
+    required List<_Option<T>> options,
+    required T? selected,
+    required ValueChanged<T> onSelected,
+  }) {
+    final accent = ref.read(customizationProvider).accentColor;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return _SheetFrame(
+          title: title,
+          subtitle: subtitle,
+          icon: icon,
+          accent: accent,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildBarStyleOption('waveform', 'Waveform (Voice Note Style 🎙️)'),
-              _buildBarStyleOption('android16', 'Android 16 Wave (Stock Squiggly)'),
-              _buildBarStyleOption('normal', 'Normal (Material Rounded)'),
-              _buildBarStyleOption('snake', 'Snake (Wavy Sine Wave)'),
-              _buildBarStyleOption('zigzag', 'Zigzag (Sawtooth Wave)'),
-              _buildBarStyleOption('neon', 'Neon Glow (Pulse Shader)'),
+              for (final option in options)
+                _OptionTile(
+                  label: option.label,
+                  description: option.description,
+                  icon: option.icon,
+                  selected: option.value == selected,
+                  accent: accent,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    onSelected(option.value);
+                  },
+                ),
             ],
           ),
         );
@@ -1299,200 +976,241 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildBarStyleOption(String key, String label) {
-    final isSelected = _progressBarStyle == key;
-    return ListTile(
-      title: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-      trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: Colors.amber) : null,
-      onTap: () async {
+  void _showSkinSheet() {
+    final notifier = ref.read(playbackProvider.notifier);
+    _showOptionSheet<String>(
+      title: 'Player Skin',
+      subtitle: 'How the artwork is presented while a song plays',
+      icon: Icons.album_rounded,
+      options: _skinOptions,
+      selected: ref.read(playbackProvider).playerSkin,
+      onSelected: (skin) {
+        notifier.setPlayerSkin(skin);
+      },
+    );
+  }
+
+  void _showScreenThemeSheet() {
+    final notifier = ref.read(playbackProvider.notifier);
+    _showOptionSheet<String>(
+      title: 'Player Screen Theme',
+      subtitle: 'Layout of the full-screen player',
+      icon: Icons.style_rounded,
+      options: _screenThemeOptions,
+      selected: ref.read(playbackProvider).playerScreenTheme,
+      onSelected: (theme) {
+        notifier.setPlayerScreenTheme(theme);
+      },
+    );
+  }
+
+  void _showNavigationBarStyleSheet() {
+    final notifier = ref.read(customizationProvider.notifier);
+    final currentStyle = ref.read(customizationProvider).navBarStyle;
+    _showOptionSheet<String>(
+      title: 'Navigation Bar Style',
+      icon: Icons.call_to_action_rounded,
+      options: _navBarOptions,
+      selected: currentStyle == 'default' ? 'default' : 'os_style',
+      onSelected: (style) {
+        notifier.updateNavigationBarStyle(style);
+      },
+    );
+  }
+
+  void _showProgressBarStyleSheet() {
+    _showOptionSheet<String>(
+      title: 'Progress Bar Style',
+      subtitle: 'The seek bar shown in the player',
+      icon: Icons.linear_scale_rounded,
+      options: _progressBarOptions,
+      selected: _progressBarStyle,
+      onSelected: (key) async {
         setState(() {
           _progressBarStyle = key;
         });
         await StorageService.setProgressBarStyle(key);
-        if (mounted) Navigator.pop(context);
       },
     );
   }
 
-  void _show3dSoundDialog(Color accentColor) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  void _showMusicSourceSheet() {
+    _showOptionSheet<SourceMode>(
+      title: 'Music Source',
+      subtitle: 'Choose where Aura searches and streams your tracks from',
+      icon: Icons.library_music_rounded,
+      options: [
+        for (final mode in SourceMode.values)
+          _Option<SourceMode>(
+            mode,
+            mode.label,
+            description: mode.description,
+            icon: _sourceIcon(mode),
+          ),
+      ],
+      selected: ref.read(sourceModeProvider),
+      onSelected: (mode) {
+        ref.read(sourceModeProvider.notifier).setMode(mode);
+      },
+    );
+  }
 
-    showModalBottomSheet(
+  IconData _sourceIcon(SourceMode mode) {
+    switch (mode) {
+      case SourceMode.hybrid:
+        return Icons.auto_awesome_rounded;
+      case SourceMode.jiosaavn:
+        return Icons.music_note_rounded;
+      case SourceMode.youtube:
+        return Icons.play_circle_filled_rounded;
+    }
+  }
+
+  void _showPlaybackSpeedSheet() {
+    final notifier = ref.read(playbackProvider.notifier);
+    _showOptionSheet<double>(
+      title: 'Playback Speed',
+      icon: Icons.speed_rounded,
+      options: _speedOptions,
+      selected: ref.read(playbackProvider).playbackSpeed.toDouble(),
+      onSelected: (speed) {
+        notifier.setPlaybackSpeed(speed);
+      },
+    );
+  }
+
+  void _showSleepTimerSheet() {
+    final notifier = ref.read(playbackProvider.notifier);
+    _showOptionSheet<int>(
+      title: 'Sleep Timer',
+      subtitle: 'Stop playback automatically after a while',
+      icon: Icons.bedtime_rounded,
+      options: _sleepTimerOptions,
+      selected: ref.read(playbackProvider).sleepTimerMinutes ?? 0,
+      onSelected: (minutes) {
+        if (minutes == 0) {
+          notifier.cancelSleepTimer();
+        } else {
+          notifier.startSleepTimer(minutes);
+        }
+      },
+    );
+  }
+
+  void _showAudioQualitySheet() {
+    _showOptionSheet<String>(
+      title: 'Download Quality',
+      subtitle: 'Higher quality uses more storage and data',
+      icon: Icons.high_quality_rounded,
+      options: _qualityOptions,
+      selected: _audioQuality,
+      onSelected: (option) {
+        setState(() {
+          _audioQuality = option;
+        });
+        StorageService.saveSetting('download_quality_label', option);
+      },
+    );
+  }
+
+  void _showSummaryLanguageSheet() {
+    _showOptionSheet<String>(
+      title: 'AI Summary Language',
+      subtitle: 'Used for AI song stories and lyric analysis',
+      icon: Icons.translate_rounded,
+      options: _languageOptions,
+      selected: _summaryLanguage,
+      onSelected: (code) async {
+        setState(() => _summaryLanguage = code);
+        await StorageService.saveSetting('summary_language', code);
+      },
+    );
+  }
+
+  void _showCrossfadeDurationSheet() {
+    final accent = ref.read(customizationProvider).accentColor;
+    double tempDuration = _crossfadeDuration.clamp(1, 12).toDouble();
+
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              padding: EdgeInsets.only(
-                left: 24,
-                right: 24,
-                top: 20,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 28,
-              ),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF18181B) : const Color(0xFFFAF8F5),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(28),
-                  topRight: Radius.circular(28),
-                ),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
+          builder: (sheetContext, setSheetState) {
+            return _SheetFrame(
+              title: 'Crossfade Duration',
+              subtitle: 'How long two songs overlap while changing',
+              icon: Icons.timelapse_rounded,
+              accent: accent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Text(
+                    '${tempDuration.toInt()} seconds',
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      color: accent,
                     ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: accentColor.withOpacity(0.15),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.headphones_rounded, color: accentColor, size: 24),
-                        ),
-                        const SizedBox(width: 14),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '3D Spatial Audio for Headphones',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, fontFamily: 'Outfit'),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'Binaural 360° virtual soundstage simulation',
-                                style: TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(height: 8),
+                  _accentSlider(
+                    color: accent,
+                    child: Slider(
+                      value: tempDuration,
+                      min: 1,
+                      max: 12,
+                      divisions: 11,
+                      label: '${tempDuration.toInt()}s',
+                      onChanged: (val) {
+                        setSheetState(() {
+                          tempDuration = val;
+                        });
+                      },
                     ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'SPATIAL PRESETS',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 0.5),
-                    ),
-                    const SizedBox(height: 10),
-                    ...SpatialAudioService.presets.entries.map((entry) {
-                      final key = entry.key;
-                      final preset = entry.value;
-                      final isSelected = _3dSoundMode == key;
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: isSelected ? accentColor.withOpacity(0.12) : (isDark ? const Color(0xFF222226) : Colors.white),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isSelected ? accentColor : Colors.grey.withOpacity(0.12),
-                            width: isSelected ? 1.5 : 1.0,
-                          ),
-                        ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                          leading: Icon(
-                            preset.icon,
-                            color: isSelected ? accentColor : Colors.grey,
-                            size: 24,
-                          ),
-                          title: Text(
-                            preset.name,
-                            style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                              fontSize: 14,
-                              color: isSelected ? accentColor : null,
-                            ),
-                          ),
-                          subtitle: Text(
-                            preset.description,
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
-                          ),
-                          trailing: isSelected
-                              ? Icon(Icons.check_circle_rounded, color: accentColor, size: 20)
-                              : null,
-                          onTap: () async {
-                            setModalState(() {
-                              _3dSoundMode = key;
-                              _3dSoundIntensity = preset.defaultIntensity;
-                            });
-                            setState(() {
-                              _3dSoundMode = key;
-                              _3dSoundIntensity = preset.defaultIntensity;
-                            });
-                            await SpatialAudioService.setMode(key);
-                          },
-                        ),
-                      );
-                    }),
-                    const SizedBox(height: 16),
-                    Row(
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'SOUNDSTAGE WIDTH & INTENSITY',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 0.5),
+                        Text('1s', style: TextStyle(fontSize: 12, color: _muted(sheetContext))),
+                        Text('12s', style: TextStyle(fontSize: 12, color: _muted(sheetContext))),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _secondaryButton(
+                            label: 'Cancel',
+                            onPressed: () => Navigator.pop(sheetContext),
+                          ),
                         ),
-                        Text(
-                          '${(_3dSoundIntensity * 100).toInt()}%',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 13),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _primaryButton(
+                            label: 'Save',
+                            accent: accent,
+                            onPressed: () async {
+                              setState(() {
+                                _crossfadeDuration = tempDuration;
+                              });
+                              await StorageService.setCrossfadeDuration(tempDuration.toInt());
+                              if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            },
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: accentColor,
-                        thumbColor: accentColor,
-                        overlayColor: accentColor.withOpacity(0.2),
-                      ),
-                      child: Slider(
-                        value: _3dSoundIntensity,
-                        min: 0.1,
-                        max: 1.0,
-                        divisions: 18,
-                        onChanged: (val) async {
-                          setModalState(() {
-                            _3dSoundIntensity = val;
-                          });
-                          setState(() {
-                            _3dSoundIntensity = val;
-                          });
-                          await SpatialAudioService.setIntensity(val);
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentColor,
-                          foregroundColor: isDark ? Colors.black : Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: const Text('Apply 3D Sound', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },
@@ -1501,7 +1219,95 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _showShareAppDialog(Color accentColor) {
+  void _show3dSoundSheet(Color accent) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            return _SheetFrame(
+              title: '3D Spatial Audio',
+              subtitle: 'Binaural 360° virtual soundstage for headphones',
+              icon: Icons.headphones_rounded,
+              accent: accent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SheetLabel('Spatial presets'),
+                  for (final entry in SpatialAudioService.presets.entries)
+                    _OptionTile(
+                      label: entry.value.name,
+                      description: entry.value.description,
+                      icon: entry.value.icon,
+                      selected: _3dSoundMode == entry.key,
+                      accent: accent,
+                      onTap: () async {
+                        setState(() {
+                          _3dSoundMode = entry.key;
+                          _3dSoundIntensity = entry.value.defaultIntensity;
+                        });
+                        setModalState(() {});
+                        await SpatialAudioService.setMode(entry.key);
+                      },
+                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Expanded(child: _SheetLabel('Soundstage width & intensity')),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          '${(_3dSoundIntensity * 100).toInt()}%',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: accent,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  _accentSlider(
+                    color: accent,
+                    child: Slider(
+                      value: _3dSoundIntensity.clamp(0.1, 1.0).toDouble(),
+                      min: 0.1,
+                      max: 1.0,
+                      divisions: 18,
+                      onChanged: (val) async {
+                        setState(() {
+                          _3dSoundIntensity = val;
+                        });
+                        setModalState(() {});
+                        await SpatialAudioService.setIntensity(val);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: _primaryButton(
+                        label: 'Done',
+                        accent: accent,
+                        onPressed: () => Navigator.pop(sheetContext),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showShareAppSheet(Color accent) {
     const shareUrl = String.fromEnvironment(
       'APP_DOWNLOAD_URL',
       defaultValue: String.fromEnvironment(
@@ -1532,32 +1338,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       }
     }
 
-    showDialog(
+    showModalBottomSheet<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: const Text('Share Aura App', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          content: Column(
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return _SheetFrame(
+          title: 'Share Aura',
+          subtitle: 'Scan the QR code or open the download page',
+          icon: Icons.qr_code_2_rounded,
+          accent: accent,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Tap QR Code or link below to open download page:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               GestureDetector(
                 onTap: launchAppUrl,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4)),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
                     ],
                   ),
                   child: QrImageView(
                     data: shareUrl,
                     version: QrVersions.auto,
-                    size: 180.0,
+                    size: 190.0,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
                       color: Colors.black,
@@ -1569,12 +1382,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               GestureDetector(
                 onTap: launchAppUrl,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: Text(
                     shareUrl,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: accentColor,
+                      color: accent,
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                       decoration: TextDecoration.underline,
@@ -1582,84 +1395,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
               ),
-            ],
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accentColor,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('Close', style: TextStyle(color: Colors.white)),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  String _getSummaryLanguageLabel(String code) {
-    switch (code) {
-      case 'hi':
-        return 'Hindi (हिंदी) 🇮🇳';
-      case 'hinglish':
-        return 'Hinglish (Hindi + English) 🔤';
-      case 'en':
-      default:
-        return 'English 🌐';
-    }
-  }
-
-  void _showSummaryLanguageDialog() {
-    final customBranding = ref.read(customizationProvider);
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: const Text('AI Lyrics & Summary Language', style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: const Text('English 🌐'),
-                subtitle: const Text('Full English story & lyric analysis'),
-                value: 'en',
-                groupValue: _summaryLanguage,
-                activeColor: customBranding.accentColor,
-                onChanged: (val) async {
-                  if (val == null) return;
-                  setState(() => _summaryLanguage = val);
-                  await StorageService.saveSetting('summary_language', val);
-                  if (mounted) Navigator.pop(context);
-                },
-              ),
-              RadioListTile<String>(
-                title: const Text('Hindi (हिंदी) 🇮🇳'),
-                subtitle: const Text('Pure Devanagari Hindi story & analysis'),
-                value: 'hi',
-                groupValue: _summaryLanguage,
-                activeColor: customBranding.accentColor,
-                onChanged: (val) async {
-                  if (val == null) return;
-                  setState(() => _summaryLanguage = val);
-                  await StorageService.saveSetting('summary_language', val);
-                  if (mounted) Navigator.pop(context);
-                },
-              ),
-              RadioListTile<String>(
-                title: const Text('Hinglish (Hindi + English) 🔤'),
-                subtitle: const Text('Casual Hindi written in English script'),
-                value: 'hinglish',
-                groupValue: _summaryLanguage,
-                activeColor: customBranding.accentColor,
-                onChanged: (val) async {
-                  if (val == null) return;
-                  setState(() => _summaryLanguage = val);
-                  await StorageService.saveSetting('summary_language', val);
-                  if (mounted) Navigator.pop(context);
-                },
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: _primaryButton(
+                    label: 'Open download page',
+                    accent: accent,
+                    onPressed: launchAppUrl,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1668,64 +1414,252 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _showCrossfadeDurationDialog() {
-    double tempDuration = _crossfadeDuration;
-    showDialog(
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BRANDING CUSTOMIZER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  void _showCustomizerBottomSheet(BuildContext context) {
+    _nameController.text = ref.read(customizationProvider).appName;
+
+    showModalBottomSheet<void>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final customBranding = ref.read(customizationProvider);
-            return AlertDialog(
-              backgroundColor: Theme.of(context).cardColor,
-              title: const Text('Crossfade Duration', style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${tempDuration.toInt()} seconds',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: customBranding.accentColor,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        // Consumer keeps the sheet in sync with the provider on its own, so
+        // every tap repaints the preview without manual setState calls.
+        return Consumer(
+          builder: (sheetContext, ref, _) {
+            final state = ref.watch(customizationProvider);
+            final notifier = ref.read(customizationProvider.notifier);
+            final accent = state.accentColor;
+            final hex = '#${_hex(state.red)}${_hex(state.green)}${_hex(state.blue)}';
+
+            return _SheetFrame(
+              title: 'Customize Aura',
+              subtitle: 'Changes apply instantly across the app',
+              icon: Icons.palette_rounded,
+              accent: accent,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // App name
+                    const _SheetLabel('App name'),
+                    TextField(
+                      controller: _nameController,
+                      onChanged: (val) {
+                        notifier.updateAppName(val);
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Enter brand name...',
+                        filled: true,
+                        fillColor: _tint(sheetContext, 0.05),
+                        prefixIcon: Icon(state.brandingIcon, color: accent, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: accent, width: 1.5),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Slider(
-                    value: tempDuration,
-                    min: 1,
-                    max: 12,
-                    divisions: 11,
-                    activeColor: customBranding.accentColor,
-                    label: '${tempDuration.toInt()}s',
-                    onChanged: (val) {
-                      setDialogState(() {
-                        tempDuration = val;
-                      });
-                    },
-                  ),
-                ],
+
+                    // Branding icon
+                    const _SheetLabel('App icon'),
+                    Row(
+                      children: [
+                        for (final item in _brandIconOptions)
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 3),
+                              child: _buildIconChoice(
+                                sheetContext,
+                                item: item,
+                                selected: state.brandingIconCode == item.value,
+                                accent: accent,
+                                onTap: () {
+                                  notifier.updateBrandingIcon(item.value);
+                                },
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    // Preset palettes
+                    const _SheetLabel('Accent color'),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final preset in _accentPresets)
+                          Expanded(
+                            child: _buildPresetSwatch(
+                              sheetContext,
+                              preset: preset,
+                              selected: state.red == preset.r &&
+                                  state.green == preset.g &&
+                                  state.blue == preset.b,
+                              onTap: () {
+                                notifier.updateAccentColor(preset.r, preset.g, preset.b);
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    if (Platform.isAndroid) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(sheetContext);
+                            String message;
+                            try {
+                              final corePalette = await DynamicColorPlugin.getCorePalette();
+                              if (corePalette != null) {
+                                final argb = corePalette.primary.get(40);
+                                notifier.updateAccentColor(
+                                  (argb >> 16) & 0xFF,
+                                  (argb >> 8) & 0xFF,
+                                  argb & 0xFF,
+                                );
+                                message = 'Phone theme synced successfully!';
+                              } else {
+                                message = 'Dynamic color not supported on this device.';
+                              }
+                            } catch (e) {
+                              message = 'Failed to get phone theme color.';
+                            }
+                            // Close the sheet so the change is visible.
+                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            messenger.showSnackBar(SnackBar(content: Text(message)));
+                          },
+                          icon: const Icon(Icons.sync_rounded, size: 20),
+                          label: const Text(
+                            'Sync phone theme',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: accent.withValues(alpha: 0.5)),
+                            foregroundColor: accent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    // Custom RGB
+                    Row(
+                      children: [
+                        const Expanded(child: _SheetLabel('Custom color (RGB)')),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _tint(sheetContext, 0.06),
+                              borderRadius: BorderRadius.circular(100),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  hex,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    _buildRGBSlider(
+                      label: 'R',
+                      value: state.red,
+                      color: Colors.redAccent,
+                      onChanged: (val) {
+                        notifier.updateAccentColor(val.toInt(), state.green, state.blue);
+                      },
+                    ),
+                    _buildRGBSlider(
+                      label: 'G',
+                      value: state.green,
+                      color: Colors.greenAccent,
+                      onChanged: (val) {
+                        notifier.updateAccentColor(state.red, val.toInt(), state.blue);
+                      },
+                    ),
+                    _buildRGBSlider(
+                      label: 'B',
+                      value: state.blue,
+                      color: Colors.blueAccent,
+                      onChanged: (val) {
+                        notifier.updateAccentColor(state.red, state.green, val.toInt());
+                      },
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Gradient preview
+                    Container(
+                      height: 36,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: LinearGradient(
+                          colors: [
+                            accent,
+                            accent.withValues(alpha: 0.5),
+                            accent.withValues(alpha: 0.1),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    // Actions
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _secondaryButton(
+                            label: 'Reset',
+                            onPressed: () {
+                              notifier.resetToDefault();
+                              _nameController.text = 'Aura Vinyl';
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _primaryButton(
+                            label: 'Done',
+                            accent: accent,
+                            onPressed: () => Navigator.pop(sheetContext),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    setState(() {
-                      _crossfadeDuration = tempDuration;
-                    });
-                    await StorageService.setCrossfadeDuration(tempDuration.toInt());
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: customBranding.accentColor,
-                    foregroundColor: Colors.black,
-                  ),
-                  child: const Text('Save'),
-                ),
-              ],
             );
           },
         );
@@ -1733,28 +1667,568 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildPresetChip(
-    String label,
-    int r,
-    int g,
-    int b,
-    CustomizationState state,
-    CustomizationNotifier notifier,
-    StateSetter setDialogState,
-  ) {
-    final chipColor = Color.fromARGB(255, r, g, b);
-    final isSelected = state.red == r && state.green == g && state.blue == b;
+  Widget _buildIconChoice(
+    BuildContext sheetContext, {
+    required _Option<int> item,
+    required bool selected,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected ? accent.withValues(alpha: 0.14) : _tint(sheetContext, 0.04),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: selected ? accent : Colors.transparent, width: 1.5),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(item.icon, size: 24, color: selected ? accent : _muted(sheetContext)),
+              const SizedBox(height: 6),
+              Text(
+                item.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? null : _muted(sheetContext),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-    return ActionChip(
-      avatar: CircleAvatar(backgroundColor: chipColor, radius: 6),
-      label: Text(label, style: TextStyle(fontSize: 12, color: isSelected ? chipColor : Colors.grey, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-      backgroundColor: isSelected ? chipColor.withValues(alpha: 0.15) : Colors.transparent,
-      side: BorderSide(color: isSelected ? chipColor : Colors.grey.withValues(alpha: 0.3)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      onPressed: () {
-        notifier.updateAccentColor(r, g, b);
-        setDialogState(() {});
+  Widget _buildPresetSwatch(
+    BuildContext sheetContext, {
+    required _AccentPreset preset,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 46,
+            height: 46,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? preset.color : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: preset.color, shape: BoxShape.circle),
+              child: selected
+                  ? Center(
+                      child: Icon(Icons.check_rounded, size: 18, color: _onColor(preset.color)),
+                    )
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            preset.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? null : _muted(sheetContext),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRGBSlider({
+    required String label,
+    required int value,
+    required Color color,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 18,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: color),
+          ),
+        ),
+        Expanded(
+          child: _accentSlider(
+            color: color,
+            child: Slider(
+              value: value.toDouble(),
+              min: 0,
+              max: 255,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 32,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Kept from the original file (it was not wired to any row there either).
+  // ignore: unused_element
+  void _showEditUserNameDialog(BuildContext context) {
+    final controller = TextEditingController(text: StorageService.getUserName());
+    final accent = ref.read(customizationProvider).accentColor;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text('Edit Your Display Name'),
+          content: TextField(
+            controller: controller,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              hintText: 'Enter your name (e.g. Bhavneet)...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final name = controller.text.trim();
+                await StorageService.setUserName(name);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  setState(() {});
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: _onColor(accent),
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        );
       },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SHARED BUILDING BLOCKS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// One choice in a picker (and the label shown for it on the settings row).
+class _Option<T> {
+  const _Option(this.value, this.label, {this.description, this.icon});
+
+  final T value;
+  final String label;
+  final String? description;
+  final IconData? icon;
+}
+
+class _AccentPreset {
+  const _AccentPreset(this.label, this.r, this.g, this.b);
+
+  final String label;
+  final int r;
+  final int g;
+  final int b;
+
+  Color get color => Color.fromARGB(255, r, g, b);
+}
+
+/// White in dark mode, black in light mode, at the given opacity. Used for
+/// card fills and hairlines so they sit on any background.
+Color _tint(BuildContext context, double alpha) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return (isDark ? Colors.white : Colors.black).withValues(alpha: alpha);
+}
+
+Color _muted(BuildContext context) {
+  return Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+}
+
+/// Readable text/icon color on top of [background] (any accent the user picks).
+Color _onColor(Color background) {
+  return ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+      ? Colors.white
+      : Colors.black;
+}
+
+/// Rounded card that stacks rows with hairline dividers between them.
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) rows.add(const _RowDivider());
+      rows.add(children[i]);
+    }
+
+    return Material(
+      color: _tint(context, 0.045),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: _tint(context, 0.06)),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: rows),
+    );
+  }
+}
+
+class _RowDivider extends StatelessWidget {
+  const _RowDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    // Indent lines the divider up with the row text (16 + 36 badge + 14 gap).
+    return Divider(height: 1, thickness: 1, indent: 66, color: _tint(context, 0.06));
+  }
+}
+
+class _IconBadge extends StatelessWidget {
+  const _IconBadge({required this.icon, required this.color, this.size = 36});
+
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(size * 0.3),
+      ),
+      child: Icon(icon, size: size * 0.55, color: color),
+    );
+  }
+}
+
+/// A single settings row: icon badge, title, optional current value /
+/// description, and either a custom trailing widget or a chevron.
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    required this.accent,
+    this.value,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.showChevron = true,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final Color accent;
+
+  /// Current selection, shown in the accent color under the title.
+  final String? value;
+
+  /// Explanatory text, shown muted under the title.
+  final String? subtitle;
+
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool showChevron;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final badgeColor = destructive ? Colors.redAccent : accent;
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            _IconBadge(icon: icon, color: badgeColor),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: destructive ? Colors.redAccent : null,
+                    ),
+                  ),
+                  if (value != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      value!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: accent,
+                      ),
+                    ),
+                  ],
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 12),
+              trailing!,
+            ] else if (onTap != null && showChevron) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 22, color: _tint(context, 0.35)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared chrome for every bottom sheet: grab handle, icon, title, subtitle,
+/// and a scrollable body that never grows taller than the screen.
+class _SheetFrame extends StatelessWidget {
+  const _SheetFrame({
+    required this.title,
+    required this.child,
+    this.subtitle,
+    this.icon,
+    this.accent,
+  });
+
+  final String title;
+  final String? subtitle;
+  final IconData? icon;
+  final Color? accent;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final media = MediaQuery.of(context);
+    final badgeColor = accent ?? Theme.of(context).colorScheme.primary;
+
+    return Padding(
+      // Lift the sheet above the keyboard.
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: media.size.height * 0.88),
+        child: Material(
+          color: isDark ? const Color(0xFF161618) : const Color(0xFFFAF8F5),
+          clipBehavior: Clip.antiAlias,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 10),
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _tint(context, 0.18),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
+                  child: Row(
+                    children: [
+                      if (icon != null) ...[
+                        _IconBadge(icon: icon!, color: badgeColor, size: 42),
+                        const SizedBox(width: 14),
+                      ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                fontFamily: 'Outfit',
+                                fontSize: 19,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            if (subtitle != null) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                subtitle!,
+                                style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                    child: child,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetLabel extends StatelessWidget {
+  const _SheetLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
+      child: Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.1,
+          color: _muted(context),
+        ),
+      ),
+    );
+  }
+}
+
+/// A selectable card inside a picker sheet.
+class _OptionTile extends StatelessWidget {
+  const _OptionTile({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+    this.description,
+    this.icon,
+  });
+
+  final String label;
+  final String? description;
+  final IconData? icon;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? accent.withValues(alpha: 0.12) : _tint(context, 0.04),
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: selected ? accent : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 22, color: selected ? accent : _muted(context)),
+                  const SizedBox(width: 14),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                        ),
+                      ),
+                      if (description != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          description!,
+                          style: TextStyle(fontSize: 12, color: _muted(context)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 22,
+                  color: selected ? accent : _tint(context, 0.25),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

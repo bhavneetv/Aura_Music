@@ -15,6 +15,7 @@ class Playlist {
   final DateTime updatedAt;
   final int trackCount;
   final List<PlaylistTrack> tracks;
+  final String? shareCode;
 
   const Playlist({
     required this.id,
@@ -30,6 +31,7 @@ class Playlist {
     required this.updatedAt,
     required this.trackCount,
     this.tracks = const [],
+    this.shareCode,
   });
 
   bool get isPublic => visibility == 'public';
@@ -74,6 +76,7 @@ class Playlist {
       updatedAt: parseDate(data['updatedAt']),
       trackCount: (data['trackCount'] as num?)?.toInt() ?? tracks.length,
       tracks: tracks,
+      shareCode: data['shareCode'] as String? ?? data['inviteCode'] as String?,
     );
   }
 
@@ -92,6 +95,7 @@ class Playlist {
       'updatedAt': Timestamp.fromDate(updatedAt),
       'trackCount': tracks.length,
       'tracks': tracks.map((t) => t.toMap()).toList(),
+      if (shareCode != null && shareCode!.isNotEmpty) 'shareCode': shareCode,
     };
   }
 
@@ -109,6 +113,7 @@ class Playlist {
     DateTime? updatedAt,
     int? trackCount,
     List<PlaylistTrack>? tracks,
+    String? shareCode,
   }) {
     return Playlist(
       id: id ?? this.id,
@@ -124,6 +129,7 @@ class Playlist {
       updatedAt: updatedAt ?? this.updatedAt,
       trackCount: trackCount ?? this.trackCount,
       tracks: tracks ?? this.tracks,
+      shareCode: shareCode ?? this.shareCode,
     );
   }
 }

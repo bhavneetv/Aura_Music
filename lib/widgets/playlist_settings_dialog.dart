@@ -62,17 +62,30 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
     _nameController = TextEditingController(text: widget.playlist['name']?.toString() ?? '');
     _descController = TextEditingController(text: widget.playlist['description']?.toString() ?? '');
     
-    final currentAuthor = widget.playlist['authorName']?.toString() ?? StorageService.getUserAuthorName();
+    final currentAuthor = widget.playlist['authorName']?.toString().isNotEmpty == true
+        ? widget.playlist['authorName']!.toString()
+        : (AuthService.instance.currentUserName.isNotEmpty
+            ? AuthService.instance.currentUserName
+            : StorageService.getUserAuthorName());
     _authorController = TextEditingController(text: currentAuthor);
 
     _isPublic = widget.playlist['isPublic'] == true;
     _isSyncEnabled = widget.playlist['isSyncEnabled'] == true;
 
-    _shareCode = widget.playlist['shareCode']?.toString().isNotEmpty == true
-        ? widget.playlist['shareCode'].toString()
-        : PlaylistCloudSyncService.generateShareCode();
-
+    _shareCode = widget.playlist['shareCode']?.toString().trim() ?? '';
     _isOwner = AuthService.instance.isPlaylistOwner(widget.playlist);
+
+    // Resolve canonical invite code from Firestore if missing or collaborative
+    final pid = widget.playlist['id']?.toString() ?? '';
+    if (pid.isNotEmpty) {
+      PlaylistRepository().getInviteCodeForPlaylist(pid).then((code) {
+        if (code != null && code.isNotEmpty && mounted) {
+          setState(() {
+            _shareCode = code;
+          });
+        }
+      }).catchError((_) {});
+    }
   }
 
   @override
@@ -138,37 +151,40 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
       final ownerId = widget.playlist['ownerId']?.toString() ?? AuthService.instance.currentUserId;
       final ownerEmail = widget.playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail ?? '';
 
-      // If sync or public is enabled and no cloud slot exists yet, create one
-      if ((_isSyncEnabled || _isPublic) && (syncId == null || syncId.isEmpty)) {
-        syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
-          localId: playlistId,
-          name: name,
-          description: desc,
-          authorName: author,
-          isPublic: _isPublic,
-          isSyncEnabled: _isSyncEnabled,
-          tracks: widget.tracks,
-          shareCode: _shareCode,
-          ownerId: ownerId,
-          ownerEmail: ownerEmail,
-        );
-      } else if (syncId != null && syncId.isNotEmpty) {
-        // Update existing cloud slot with updated metadata and current tracks
-        await PlaylistCloudSyncService.instance.updateCloudSlot(
-          syncId: syncId,
-          name: name,
-          description: desc,
-          authorName: author,
-          isPublic: _isPublic,
-          isSyncEnabled: _isSyncEnabled,
-          tracks: widget.tracks,
-          shareCode: _shareCode,
-          ownerId: ownerId,
-          ownerEmail: ownerEmail,
-        );
+      // Legacy cloud slot wrapped in try-catch to prevent Dio errors
+      try {
+        if ((_isSyncEnabled || _isPublic) && (syncId == null || syncId.isEmpty)) {
+          syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
+            localId: playlistId,
+            name: name,
+            description: desc,
+            authorName: author,
+            isPublic: _isPublic,
+            isSyncEnabled: _isSyncEnabled,
+            tracks: widget.tracks,
+            shareCode: _shareCode,
+            ownerId: ownerId,
+            ownerEmail: ownerEmail,
+          );
+        } else if (syncId != null && syncId.isNotEmpty) {
+          await PlaylistCloudSyncService.instance.updateCloudSlot(
+            syncId: syncId,
+            name: name,
+            description: desc,
+            authorName: author,
+            isPublic: _isPublic,
+            isSyncEnabled: _isSyncEnabled,
+            tracks: widget.tracks,
+            shareCode: _shareCode,
+            ownerId: ownerId,
+            ownerEmail: ownerEmail,
+          );
+        }
+      } catch (dioE) {
+        debugPrint('Legacy PlaylistCloudSync notice (safe): $dioE');
       }
 
-      // Sync to Firestore (enables public explore and collaborative sync)
+      // Sync to Firestore (primary backend for public explore and collaboration)
       if (AuthService.instance.isLoggedIn) {
         try {
           final repo = PlaylistRepository();
@@ -204,10 +220,11 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
               visibility: _isPublic ? 'public' : 'private',
               collabEnabled: _isSyncEnabled,
               initialTracks: widget.tracks.map((t) => PlaylistTrack.fromTrack(t, addedByUid: ownerId, addedByName: author)).toList(),
+              shareCode: _shareCode.isNotEmpty ? _shareCode : null,
             );
             if (_isSyncEnabled) {
               try {
-                _shareCode = await repo.enableCollaboration(created.id, ownerId);
+                _shareCode = created.shareCode ?? await repo.enableCollaboration(created.id, ownerId);
               } catch (_) {}
             }
           }
@@ -354,11 +371,11 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.lock_rounded, color: Colors.amber, size: 22),
+                    const Icon(Icons.handshake_rounded, color: Colors.amber, size: 22),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Imported playlist created by ${widget.playlist['authorName'] ?? 'Owner'}. Only the creator can modify title, public status, or collaboration rules.',
+                        'Collaborator Mode 🤝: This playlist is owned by ${widget.playlist['authorName'] ?? widget.playlist['ownerName'] ?? 'another user'}. Only the owner can modify playlist title, visibility, or collaboration rules.',
                         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.amber),
                       ),
                     ),
@@ -395,23 +412,54 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
                           'UNIQUE PLAYLIST CODE',
                           style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8),
                         ),
-                        const SizedBox(height: 2),
-                        SelectableText(
-                          _shareCode,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
-                            color: accentColor,
-                          ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: SelectableText(
+                                _shareCode.isNotEmpty
+                                    ? _shareCode
+                                    : 'AURA-CODE',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.2,
+                                  color: accentColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: _isSyncEnabled
+                                    ? Colors.greenAccent.withValues(alpha: 0.15)
+                                    : Colors.orangeAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: _isSyncEnabled
+                                      ? Colors.greenAccent.withValues(alpha: 0.4)
+                                      : Colors.orangeAccent.withValues(alpha: 0.4),
+                                  width: 0.5,
+                                ),
+                              ),
+                              child: Text(
+                                _isSyncEnabled ? 'Collab 🔄' : 'Read-Only 🔒',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isSyncEnabled ? Colors.greenAccent : Colors.orangeAccent,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    onPressed: _copyShareCode,
+                    onPressed: _shareCode.isNotEmpty ? _copyShareCode : null,
                     tooltip: 'Copy Code',
-                    icon: Icon(Icons.copy_rounded, color: accentColor, size: 20),
+                    icon: Icon(Icons.copy_rounded, color: _shareCode.isNotEmpty ? accentColor : Colors.grey, size: 20),
                   ),
                 ],
               ),
@@ -462,13 +510,18 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
             ),
             const SizedBox(height: 14),
 
-            // Author Name Field
+            // Author Name Field (Read Only)
             TextField(
               controller: _authorController,
-              readOnly: !_isOwner,
+              readOnly: true,
               decoration: InputDecoration(
-                labelText: 'Author Name',
-                prefixIcon: Icon(Icons.person_rounded, color: accentColor, size: 20),
+                labelText: 'Playlist Owner / Author',
+                helperText: 'Loaded directly from account profile 🔒',
+                prefixIcon: Icon(Icons.verified_user_rounded, color: accentColor, size: 20),
+                suffixIcon: const Tooltip(
+                  message: 'Owner name matches your signed-in account profile',
+                  child: Icon(Icons.lock_rounded, size: 18, color: Colors.grey),
+                ),
                 filled: true,
                 fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -500,9 +553,13 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
                   children: [
                     Icon(_isPublic ? Icons.public_rounded : Icons.lock_outline_rounded, size: 20, color: _isPublic ? accentColor : Colors.grey),
                     const SizedBox(width: 8),
-                    Text(
-                      _isPublic ? 'Public Playlist (🌐 Discoverable)' : 'Private Playlist (🔒 Hidden)',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                    Expanded(
+                      child: Text(
+                        _isPublic ? 'Public Playlist (🌐 Discoverable)' : 'Private Playlist (🔒 Hidden)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                      ),
                     ),
                   ],
                 ),
@@ -537,9 +594,13 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
                   children: [
                     Icon(Icons.sync_rounded, size: 20, color: _isSyncEnabled ? accentColor : Colors.grey),
                     const SizedBox(width: 8),
-                    Text(
-                      _isSyncEnabled ? 'Allow Collaborative Sync (🔄)' : 'Read-Only Playlist (🔒)',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                    Expanded(
+                      child: Text(
+                        _isSyncEnabled ? 'Allow Collaborative Sync (🔄)' : 'Read-Only Playlist (🔒)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                      ),
                     ),
                   ],
                 ),

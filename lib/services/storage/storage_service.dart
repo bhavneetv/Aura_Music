@@ -288,22 +288,17 @@ class StorageService {
       final currentUser = getCurrentUser();
 
       for (final pl in list) {
-        if (pl['shareCode'] == null || pl['shareCode'].toString().isEmpty) {
-          pl['shareCode'] = PlaylistCloudSyncService.generateShareCode();
-          needsResave = true;
-        }
+        final isImported = pl['isImported'] == true;
 
-        // If user is logged in, normalize and unlock playlists belonging to this user
-        if (currentUser != null) {
+        // If user is logged in, normalize playlists created by this user
+        // NEVER hijack ownership if pl is imported or collaborative member
+        if (currentUser != null && !isImported) {
           final isOwnerById = pl['ownerId'] != null && pl['ownerId'] == currentUser.id;
           final isOwnerByEmail = pl['ownerEmail'] != null &&
+              pl['ownerEmail'].toString().trim().isNotEmpty &&
               pl['ownerEmail'].toString().trim().toLowerCase() == currentUser.email.trim().toLowerCase();
 
           if (isOwnerById || isOwnerByEmail) {
-            if (pl['isImported'] == true) {
-              pl['isImported'] = false;
-              needsResave = true;
-            }
             if (pl['ownerEmail'] != currentUser.email) {
               pl['ownerEmail'] = currentUser.email;
               needsResave = true;
@@ -316,7 +311,7 @@ class StorageService {
         }
 
         if (pl['ownerId'] == null || pl['ownerId'].toString().isEmpty) {
-          if (pl['isImported'] != true) {
+          if (!isImported) {
             pl['ownerId'] = currentUser?.id ?? getDeviceId();
             pl['ownerName'] = currentUser?.name ?? getUserAuthorName();
             if (currentUser != null) pl['ownerEmail'] = currentUser.email;

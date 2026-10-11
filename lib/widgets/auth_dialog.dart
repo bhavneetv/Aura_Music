@@ -115,11 +115,19 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handleBackupPlaylists() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    final accentColor = ref.read(customizationProvider).accentColor;
+
     setState(() => _isLoading = true);
     final msg = await AuthService.instance.backupUserPlaylists();
     if (mounted) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (nav.canPop()) {
+        nav.pop(true);
+      }
+      widget.onLoggedIn?.call();
+      messenger.showSnackBar(
         SnackBar(
           content: Row(
             children: [
@@ -128,7 +136,7 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
               Expanded(child: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
             ],
           ),
-          backgroundColor: ref.read(customizationProvider).accentColor,
+          backgroundColor: accentColor,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -136,12 +144,19 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handlePullPlaylists() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    final accentColor = ref.read(customizationProvider).accentColor;
+
     setState(() => _isLoading = true);
     final count = await AuthService.instance.restoreUserPlaylists();
     if (mounted) {
       setState(() => _isLoading = false);
+      if (nav.canPop()) {
+        nav.pop(true);
+      }
       widget.onLoggedIn?.call();
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Row(
             children: [
@@ -157,7 +172,7 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
               ),
             ],
           ),
-          backgroundColor: ref.read(customizationProvider).accentColor,
+          backgroundColor: accentColor,
           behavior: SnackBarBehavior.floating,
         ),
       );
