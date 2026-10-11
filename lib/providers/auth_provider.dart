@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/admin_config.dart';
 import '../models/app_user.dart';
 import '../services/auth/auth_service.dart';
+import '../services/storage/storage_service.dart';
 import '../services/user_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) {
@@ -36,12 +37,45 @@ final isGuestProvider = Provider<bool>((ref) {
   return authUser?.isAnonymous ?? false;
 });
 
-/// True if the current user matches the verified Admin Email.
+/// True if the current user matches the configured Admin Email.
 final isAdminProvider = Provider<bool>((ref) {
-  final authUser = ref.watch(authStateStreamProvider).value;
-  if (authUser == null || authUser.email == null) return false;
-  
-  final isMatchingEmail = authUser.email!.trim().toLowerCase() == kAdminEmail.trim().toLowerCase();
-  final isVerified = authUser.emailVerified;
-  return isMatchingEmail && isVerified;
+  final streamUser = ref.watch(authStateStreamProvider).value;
+  final authUser = streamUser ??
+      AuthService.instance.currentFirebaseUser ??
+      FirebaseAuth.instance.currentUser;
+
+  // 1. Direct email on Firebase User object
+  if (isConfiguredAdminEmail(authUser?.email)) {
+    return true;
+  }
+
+  // 2. Any provider email (e.g. Google Sign-In)
+  if (authUser != null) {
+    for (final p in authUser.providerData) {
+      if (isConfiguredAdminEmail(p.email)) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Live AppUser document from Firestore
+  final appUser = ref.watch(currentAppUserStreamProvider).value ??
+      AuthService.instance.currentAppUser;
+  if (isConfiguredAdminEmail(appUser?.email)) {
+    return true;
+  }
+
+  // 4. AuthService cached email getter
+  if (isConfiguredAdminEmail(AuthService.instance.currentUserEmail)) {
+    return true;
+  }
+
+  // 5. Saved local user model in storage
+  final localEmail = StorageService.getCurrentUser()?.email;
+  if (isConfiguredAdminEmail(localEmail)) {
+    return true;
+  }
+
+  return false;
 });
+

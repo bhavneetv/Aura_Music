@@ -13,6 +13,7 @@ import '../../models/track.dart';
 import '../storage/storage_service.dart';
 import '../playlist/playlist_repository.dart';
 import '../user_service.dart';
+import '../../config/admin_config.dart';
 
 class AuthResult {
   final bool success;
@@ -95,6 +96,15 @@ class AuthService {
   bool get isLoggedIn => _auth.currentUser != null;
   bool get isGuest => _auth.currentUser?.isAnonymous ?? false;
   bool get canSyncAccountPlaylists => isLoggedIn && !isGuest;
+  bool get isAdmin {
+    if (isConfiguredAdminEmail(_auth.currentUser?.email)) return true;
+    for (final p in (_auth.currentUser?.providerData ?? [])) {
+      if (isConfiguredAdminEmail(p.email)) return true;
+    }
+    if (isConfiguredAdminEmail(_currentAppUser?.email)) return true;
+    if (isConfiguredAdminEmail(StorageService.getCurrentUser()?.email)) return true;
+    return false;
+  }
   String get currentUserId => _auth.currentUser?.uid ?? '';
   String? get currentUserEmail => _auth.currentUser?.email;
   String get currentUserName => 

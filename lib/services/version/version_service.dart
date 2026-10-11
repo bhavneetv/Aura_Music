@@ -1,10 +1,10 @@
 import 'package:flutter/services.dart';
 
 class AppVersionService {
-  static String releaseTag = 'v6.0';
-  static String versionName = '6.0';
-  static String versionCode = '60';
-  static String releaseName = 'Aura Music v6.0';
+  static String releaseTag = 'v6.1';
+  static String versionName = '6.1';
+  static String versionCode = '61';
+  static String releaseName = 'Aura Music v6.1';
 
   static Future<void> init() async {
     try {

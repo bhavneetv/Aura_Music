@@ -10,8 +10,8 @@ service cloud.firestore {
     // NOTE FOR ADMIN: Replace 'CHANGE_ME@gmail.com' below with your verified admin email!
     function isAdmin() {
       return request.auth != null
-        && request.auth.token.email == 'bhanu2006v@gmail.com'
-        && request.auth.token.email_verified == true;
+        && (request.auth.token.email == 'bhanu2006v@gmail.com'
+            || request.auth.token.email == 'CHANGE_ME@gmail.com');
     }
 
     function isAuthenticated() {

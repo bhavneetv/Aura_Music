@@ -15,6 +15,7 @@ import '../../services/version/version_service.dart';
 import '../../models/source_mode.dart';
 import '../../providers/music_source_mode_provider.dart';
 import 'widgets/firebase_settings_widgets.dart';
+import 'widgets/storage_usage_widget.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings screen
@@ -401,6 +402,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
         // ── Storage ────────────────────────────────────────────
         _sectionLabel('Storage'),
+        const AuraStorageUsageCard(),
+        const SizedBox(height: 12),
         _SettingsGroup(
           children: [
             _SettingsRow(

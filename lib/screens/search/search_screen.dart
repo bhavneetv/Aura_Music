@@ -1,5 +1,6 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
@@ -8,8 +9,11 @@ import '../../providers/music_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/ai/ai_service.dart';
+// Replaced by the curating animation at the bottom of this file.
+// ignore: unused_import
 import '../../widgets/ai_search_loading.dart';
 import '../../widgets/app_artwork_image.dart';
+// ignore: unused_import
 import '../../themes/app_theme.dart';
 import '../../services/music_sources/source_manager.dart';
 import 'ai_playlist_review_screen.dart';
@@ -21,7 +25,7 @@ class SearchScreen extends ConsumerStatefulWidget {
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerProviderStateMixin {
+class _SearchScreenState extends ConsumerState<SearchScreen> with TickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -42,7 +46,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   int _typewriterPromptIndex = 0;
   int _typewriterCharIndex = 0;
   bool _typewriterDeleting = false;
-  String _typewriterText = '';
+  int _typewriterPause = 0;
+  final ValueNotifier<String> _typewriter = ValueNotifier<String>('');
+
+  // AI curating animation: which step is running, and on what
+  int _aiStage = 0;
+  String _aiStageDetail = '';
+  String _aiQuery = '';
+  int _aiQueryStep = 0;
+  int _aiQueryTotal = 0;
+  late final AnimationController _aiGlowController;
 
   static const List<String> _typewriterPrompts = [
     'create playlist of punjabi songs',
@@ -117,9 +130,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _aiGlowController = AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
     _searchController.addListener(_onSearchChanged);
     _searchFocusNode.addListener(() {
-      setState(() {});
+      if (mounted) setState(() {});
     });
     _recentSearches = StorageService.getRecentSearches();
   }
@@ -131,39 +145,51 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     _searchFocusNode.dispose();
     _debounceTimer?.cancel();
     _typewriterTimer?.cancel();
+    _aiGlowController.dispose();
+    _typewriter.dispose();
     super.dispose();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AI MODE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Types the example prompts into the search field's hint, one letter at a
+  /// time. It writes to a notifier, so only the hint text repaints (the old
+  /// version rebuilt the whole screen ten times a second).
   void _startTypewriter() {
     _typewriterTimer?.cancel();
-    _typewriterTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+    _typewriterPromptIndex = 0;
+    _typewriterCharIndex = 0;
+    _typewriterDeleting = false;
+    _typewriterPause = 6;
+    _typewriter.value = '';
+
+    _typewriterTimer = Timer.periodic(const Duration(milliseconds: 65), (timer) {
       if (!mounted || !_isAiMode) return;
+      if (_typewriterPause > 0) {
+        _typewriterPause--;
+        return;
+      }
       final currentPrompt = _typewriterPrompts[_typewriterPromptIndex];
 
       if (!_typewriterDeleting) {
         if (_typewriterCharIndex < currentPrompt.length) {
           _typewriterCharIndex++;
-          setState(() {
-            _typewriterText = currentPrompt.substring(0, _typewriterCharIndex);
-          });
+          _typewriter.value = currentPrompt.substring(0, _typewriterCharIndex);
         } else {
-          _typewriterTimer?.cancel();
-          Timer(const Duration(seconds: 2), () {
-            if (mounted && _isAiMode) {
-              _typewriterDeleting = true;
-              _startTypewriter();
-            }
-          });
+          // Hold the finished prompt for about two seconds, then erase it.
+          _typewriterDeleting = true;
+          _typewriterPause = 30;
         }
       } else {
         if (_typewriterCharIndex > 0) {
-          _typewriterCharIndex--;
-          setState(() {
-            _typewriterText = currentPrompt.substring(0, _typewriterCharIndex);
-          });
+          _typewriterCharIndex = math.max(0, _typewriterCharIndex - 2);
+          _typewriter.value = currentPrompt.substring(0, _typewriterCharIndex);
         } else {
           _typewriterDeleting = false;
           _typewriterPromptIndex = (_typewriterPromptIndex + 1) % _typewriterPrompts.length;
+          _typewriterPause = 6;
         }
       }
     });
@@ -176,11 +202,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
       _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
       if (_isAiMode) {
         _startTypewriter();
+        _aiGlowController.repeat();
         if (!StorageService.hasSeenAiTutorial()) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _showAiTutorialOverlay());
         }
       } else {
         _typewriterTimer?.cancel();
+        _typewriter.value = '';
+        _aiGlowController.stop();
       }
     });
   }
@@ -313,6 +342,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SEARCH LOGIC (original, unchanged except where noted)
+  // ═══════════════════════════════════════════════════════════════════════════
+
   void _setSourceFilter(String filter) {
     if (_sourceFilter == filter) return;
     triggerHaptic(HapticFeedbackType.selection);
@@ -322,6 +355,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     });
   }
 
+  /// Applies the source filter, then the chosen sort. (Before, the sort was
+  /// lost whenever the source changed, and "Popularity" could not undo an
+  /// A–Z sort.)
   void _applySourceFilter() {
     if (_allSearchResults.isEmpty) {
       _filteredTracks = [];
@@ -333,6 +369,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
       _filteredTracks = _allSearchResults.where((t) => t.isYouTube).toList();
     } else {
       _filteredTracks = List.from(_allSearchResults);
+    }
+
+    if (_selectedSortFilter == 'Title A-Z') {
+      _filteredTracks.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    } else if (_selectedSortFilter == 'Artist A-Z') {
+      _filteredTracks.sort((a, b) => a.artist.toLowerCase().compareTo(b.artist.toLowerCase()));
     }
   }
 
@@ -434,11 +476,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with SingleTickerPr
     return uniqueMap.values.toList();
   }
 
+  // The AI flow is the original. The only additions are the `_aiStage…`
+  // updates, which tell the curating animation which step is running.
   Future<void> _executeAiSearch(String query) async {
     if (query.trim().isEmpty) return;
     setState(() {
       _isAiLoading = true;
       _aiLoadingText = 'Finding best match for you...';
+      _aiStage = 0;
+      _aiStageDetail = '';
+      _aiQuery = query.trim();
+      _aiQueryStep = 0;
+      _aiQueryTotal = 0;
     });
 
     try {
@@ -463,8 +512,10 @@ Output ONLY valid JSON:
 ''';
 
       final (rawResponse, _) = await AiService.instance.generate(prompt);
+      if (!mounted) return;
       setState(() {
         _aiLoadingText = 'Curating your personalized tracks...';
+        _aiStage = 1;
       });
 
       Map<String, dynamic>? parsedJson;
@@ -495,7 +546,14 @@ Output ONLY valid JSON:
 
       final trackMap = <String, Track>{};
 
+      _aiQueryTotal = searchQueries.length;
       for (final q in searchQueries) {
+        if (mounted) {
+          setState(() {
+            _aiStageDetail = q;
+            _aiQueryStep++;
+          });
+        }
         try {
           List<Track> results;
           try {
@@ -513,6 +571,14 @@ Output ONLY valid JSON:
             }
           }
         } catch (_) {}
+      }
+
+      if (mounted) {
+        setState(() {
+          _aiStage = 2;
+          _aiStageDetail = '';
+          _aiLoadingText = 'Putting your playlist together...';
+        });
       }
 
       List<Track> resultsList = trackMap.values.toList();
@@ -572,1542 +638,6 @@ Output ONLY valid JSON:
     }
   }
 
-  void _showGroupSongsSheet(String tag) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accentColor = ref.read(customizationProvider).accentColor;
-
-    List<Track> sessionTracks = StorageService.getGroupedSessionTracks(tag);
-
-    if (sessionTracks.isEmpty) {
-      try {
-        final cleanTag = tag.replaceAll(RegExp(r'✨|\(\d+\s*songs\)'), '').trim();
-        sessionTracks = await ref.read(musicSourceProvider).searchTracks(cleanTag);
-      } catch (_) {}
-    }
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.65,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF171717) : const Color(0xFFFAF8F5),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(Icons.star_rounded, color: accentColor, size: 22),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      tag,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (sessionTracks.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: 0);
-                          },
-                          icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
-                          label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accentColor,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final name = tag.replaceAll(RegExp(r'✨|\(\d+\s*songs\)'), '').trim();
-                            final playlists = StorageService.getPlaylists();
-                            final newPl = {
-                              'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                              'name': name,
-                              'description': 'AI generated playlist',
-                              'trackIds': sessionTracks.map((t) => t.id).toList(),
-                              'tracks': sessionTracks.map((t) => t.toJson()).toList(),
-                            };
-                            playlists.add(newPl);
-                            await StorageService.savePlaylists(playlists);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Saved "$name" to Playlists Library! ⚡'),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          },
-                          icon: const Icon(Icons.bookmark_add_rounded, size: 18),
-                          label: const Text('Save Playlist'),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: accentColor),
-                            foregroundColor: accentColor,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              Expanded(
-                child: sessionTracks.isEmpty
-                    ? const Center(child: Text('No saved tracks for this session', style: TextStyle(color: Colors.grey)))
-                    : ListView.builder(
-                        itemCount: sessionTracks.length,
-                        itemBuilder: (context, index) {
-                          final track = sessionTracks[index];
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: AppArtworkImage(
-                              artworkUrl: track.artworkUrl,
-                              trackId: track.id,
-                              width: 44,
-                              height: 44,
-                              fit: BoxFit.cover,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            title: Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  decoration: BoxDecoration(
-                                    color: track.isYouTube
-                                        ? Colors.red.withValues(alpha: 0.15)
-                                        : const Color(0xFF00D1B2).withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: track.isYouTube
-                                          ? Colors.red.withValues(alpha: 0.5)
-                                          : const Color(0xFF00D1B2).withValues(alpha: 0.5),
-                                      width: 0.5,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    track.isYouTube ? 'YT' : 'Saavn',
-                                    style: TextStyle(
-                                      color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    '${track.artist} • ${track.genre}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            trailing: const Icon(Icons.play_arrow_rounded, size: 20),
-                            onTap: () {
-                              Navigator.pop(context);
-                              ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: index);
-                            },
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showFilterBottomSheet(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accentColor = ref.read(customizationProvider).accentColor;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF171717) : const Color(0xFFFAF8F5),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('Filter & Sort Results', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-                  const SizedBox(height: 16),
-                  const Text('Sort By', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: ['Popularity', 'Title A-Z', 'Artist A-Z'].map((filter) {
-                      final isSelected = _selectedSortFilter == filter;
-                      return ChoiceChip(
-                        label: Text(filter),
-                        selected: isSelected,
-                        selectedColor: accentColor.withValues(alpha: 0.2),
-                        checkmarkColor: accentColor,
-                        labelStyle: TextStyle(
-                          color: isSelected ? accentColor : Colors.grey,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                        onSelected: (val) {
-                          setModalState(() => _selectedSortFilter = filter);
-                          setState(() {
-                            _selectedSortFilter = filter;
-                            if (filter == 'Title A-Z') {
-                              _filteredTracks.sort((a, b) => a.title.compareTo(b.title));
-                            } else if (filter == 'Artist A-Z') {
-                              _filteredTracks.sort((a, b) => a.artist.compareTo(b.artist));
-                            }
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accentColor,
-                      foregroundColor: isDark ? Colors.black : Colors.white,
-                      minimumSize: const Size(double.infinity, 48),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: const Text('Apply Filters', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildSourceSliderBar({
-    required BuildContext context,
-    required Color accentColor,
-    required bool isDark,
-  }) {
-    final int allCount = _allSearchResults.length;
-    final int saavnCount = _allSearchResults.where((t) => t.isJioSaavn).length;
-    final int ytCount = _allSearchResults.where((t) => t.isYouTube).length;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.all(3.5),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C22) : const Color(0xFFE8E8EE),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.08),
-            width: 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            _buildSliderSegment(
-              label: 'All',
-              filterKey: 'All',
-              count: allCount,
-              icon: Icons.all_inclusive_rounded,
-              activeColor: accentColor,
-              activeTextColor: Colors.black,
-              isDark: isDark,
-            ),
-            const SizedBox(width: 4),
-            _buildSliderSegment(
-              label: 'Saavn',
-              filterKey: 'Saavn',
-              count: saavnCount,
-              icon: Icons.graphic_eq_rounded,
-              activeColor: const Color(0xFF00D1B2),
-              activeTextColor: Colors.black,
-              isDark: isDark,
-            ),
-            const SizedBox(width: 4),
-            _buildSliderSegment(
-              label: 'YT',
-              filterKey: 'YT',
-              count: ytCount,
-              icon: Icons.smart_display_rounded,
-              activeColor: const Color(0xFFFF0033),
-              activeTextColor: Colors.white,
-              isDark: isDark,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSliderSegment({
-    required String label,
-    required String filterKey,
-    required int count,
-    required IconData icon,
-    required Color activeColor,
-    required Color activeTextColor,
-    required bool isDark,
-  }) {
-    final isSelected = _sourceFilter == filterKey;
-    final showCount = _allSearchResults.isNotEmpty;
-
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _setSourceFilter(filterKey),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isSelected ? activeColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: activeColor.withValues(alpha: 0.35),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 14,
-                color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
-                  fontFamily: 'Outfit',
-                  color: isSelected ? activeTextColor : (isDark ? Colors.white70 : Colors.black87),
-                ),
-              ),
-              if (showCount) ...[
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? (activeTextColor == Colors.black ? Colors.black.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.25))
-                        : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$count',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? activeTextColor : (isDark ? Colors.white60 : Colors.black54),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final customBranding = ref.watch(customizationProvider);
-    final accentColor = customBranding.accentColor;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    if (_isAiLoading) {
-      return Scaffold(
-        body: AiSearchLoading(statusText: _aiLoadingText),
-      );
-    }
-
-    final showBackButton = _searchController.text.isNotEmpty || _filteredTracks.isNotEmpty || _searchFocusNode.hasFocus || _isSearching;
-
-    return Column(
-      children: [
-        // Premium Header & Search Bar Container
-        Padding(
-          padding: EdgeInsets.only(left: 20, right: 20, top: MediaQuery.of(context).padding.top + 8, bottom: 8),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  if (showBackButton) ...[
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded, size: 22),
-                      tooltip: 'Back to Discovery',
-                      onPressed: () {
-                        FocusScope.of(context).unfocus();
-                        _resetSearch();
-                      },
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  Expanded(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: _isAiMode
-                            ? accentColor.withValues(alpha: 0.12)
-                            : (isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.04)),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: _isAiMode ? accentColor : (_searchFocusNode.hasFocus ? accentColor.withValues(alpha: 0.5) : Colors.transparent),
-                          width: 1.5,
-                        ),
-                        boxShadow: _isAiMode
-                            ? [BoxShadow(color: accentColor.withValues(alpha: 0.25), blurRadius: 12, spreadRadius: 1)]
-                            : null,
-                      ),
-                      child: TextField(
-                        controller: _searchController,
-                        focusNode: _searchFocusNode,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                        onSubmitted: (query) async {
-                          if (_isAiMode) {
-                            await _executeAiSearch(query);
-                          } else {
-                            await StorageService.addSearchQuery(query);
-                            setState(() {
-                              _recentSearches = StorageService.getRecentSearches();
-                            });
-                          }
-                        },
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          hintText: _isAiMode
-                              ? (_searchController.text.isEmpty && _typewriterText.isNotEmpty ? 'Try "$_typewriterText"' : 'Ask AI for songs or playlist...')
-                              : 'Search songs, albums, artists...',
-                          hintStyle: TextStyle(
-                            fontSize: 13,
-                            color: _isAiMode ? accentColor.withValues(alpha: 0.8) : Colors.grey,
-                          ),
-                          prefixIcon: Icon(
-                            _isAiMode ? Icons.auto_awesome_rounded : Icons.search_rounded,
-                            size: 20,
-                            color: _isAiMode ? accentColor : Colors.grey,
-                          ),
-                          suffixIcon: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_searchController.text.isNotEmpty)
-                                IconButton(
-                                  icon: const Icon(Icons.clear_rounded, size: 18),
-                                  onPressed: () => _searchController.clear(),
-                                ),
-                              if (_filteredTracks.isNotEmpty)
-                                IconButton(
-                                  icon: const Icon(Icons.tune_rounded, size: 18),
-                                  tooltip: 'Filter & Sort',
-                                  onPressed: () => _showFilterBottomSheet(context),
-                                ),
-                              IconButton(
-                                icon: Icon(
-                                  _isAiMode ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
-                                  color: _isAiMode ? accentColor : Colors.grey,
-                                  size: 20,
-                                ),
-                                tooltip: 'Toggle AI Music Curator Mode',
-                                onPressed: _toggleAiMode,
-                              ),
-                            ],
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-
-              // AI Mode Pill Banner
-              if (_isAiMode)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: accentColor.withValues(alpha: 0.4)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.auto_awesome_rounded, color: accentColor, size: 14),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'AI Curator Mode • Enter any prompt or mood to generate instant playlists',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: _toggleAiMode,
-                        child: Icon(Icons.close_rounded, size: 14, color: accentColor),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
-
-        // Floating Segmented Tab Selector
-        Container(
-          height: 38,
-          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: TabBar(
-            controller: _tabController,
-            indicator: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            indicatorSize: TabBarIndicatorSize.tab,
-            labelColor: Colors.black,
-            unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
-            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
-            dividerColor: Colors.transparent,
-            tabs: const [
-              Tab(text: 'Songs'),
-              Tab(text: 'Albums'),
-              Tab(text: 'Artists'),
-              Tab(text: 'Playlists'),
-            ],
-          ),
-        ),
-
-        // Main Tab Content Area
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              _buildSongsTab(accentColor),
-              _buildAlbumsTab(accentColor),
-              _buildArtistsTab(accentColor),
-              _buildPlaylistsTab(accentColor),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSongsTab(Color accentColor) {
-    if (_searchController.text.isEmpty && _filteredTracks.isEmpty) {
-      final isFocused = _searchFocusNode.hasFocus;
-
-      if (isFocused) {
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 150, top: 12),
-          children: [
-            _buildChipSection(
-              _isAiMode ? 'AI Recent Prompts' : 'Recent Searches',
-              _recentSearches,
-              true,
-              accentColor,
-            ),
-            const SizedBox(height: 20),
-            _buildTrendingSection(accentColor),
-          ],
-        );
-      }
-
-      final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
-      final historyTracks = _getHistoryTracksList();
-
-      return ListView(
-        padding: const EdgeInsets.only(bottom: 150, top: 12),
-        children: [
-          if (aiSessionsMap.isNotEmpty) ...[
-            _buildAiPlaylistGroupsSection(aiSessionsMap, accentColor),
-            const SizedBox(height: 24),
-          ],
-          _buildTrendingArtistsCarousel(accentColor),
-          const SizedBox(height: 24),
-          _buildRecentlyPlayedSongsSection(historyTracks, accentColor),
-        ],
-      );
-    }
-
-    if (_isSearching) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
-            const SizedBox(height: 16),
-            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
-          ],
-        ),
-      );
-    }
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    if (_filteredTracks.isEmpty) {
-      if (_allSearchResults.isNotEmpty) {
-        return Column(
-          children: [
-            _buildSourceSliderBar(
-              context: context,
-              accentColor: accentColor,
-              isDark: isDark,
-            ),
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _sourceFilter == 'YT' ? Icons.smart_display_outlined : Icons.graphic_eq_rounded,
-                        size: 54,
-                        color: Colors.grey.withValues(alpha: 0.5),
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'No $_sourceFilter tracks found for this search',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Found ${_allSearchResults.length} total songs in other sources.',
-                        style: const TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () => _setSourceFilter('All'),
-                        icon: const Icon(Icons.all_inclusive_rounded, size: 16),
-                        label: Text('Show All (${_allSearchResults.length}) Songs'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentColor,
-                          foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      }
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey.withValues(alpha: 0.5)),
-            const SizedBox(height: 16),
-            const Text('No tracks found for query', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: _resetSearch,
-              child: Text('Back to Music Discovery', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final showAiBanner = _isAiMode && _filteredTracks.isNotEmpty;
-
-    return Consumer(
-      builder: (context, ref, child) {
-        final notifier = ref.read(playbackProvider.notifier);
-        return Column(
-          children: [
-            // Slide filter bar ONLY shown here inside searched songs page!
-            _buildSourceSliderBar(
-              context: context,
-              accentColor: accentColor,
-              isDark: isDark,
-            ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.only(bottom: 150, top: 4),
-          itemCount: _filteredTracks.length + (showAiBanner ? 1 : 0),
-          itemBuilder: (context, index) {
-            if (showAiBanner && index == 0) {
-              return _buildAiPlaylistBannerCard(context, notifier, accentColor);
-            }
-            final trackIndex = showAiBanner ? index - 1 : index;
-            final track = _filteredTracks[trackIndex];
-            return Dismissible(
-              key: Key('search_${track.id}_$trackIndex'),
-              direction: DismissDirection.startToEnd,
-              confirmDismiss: (direction) async {
-                notifier.addToQueue(track);
-                triggerHaptic(HapticFeedbackType.medium);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Added "${track.title}" to Queue 🎵'),
-                    duration: const Duration(seconds: 1),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                return false;
-              },
-              background: Container(
-                alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.only(left: 24),
-                color: accentColor.withValues(alpha: 0.85),
-                child: const Row(
-                  children: [
-                    Icon(Icons.queue_music_rounded, color: Colors.black),
-                    SizedBox(width: 8),
-                    Text('Add to Queue', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                leading: AppArtworkImage(
-                  artworkUrl: track.artworkUrl,
-                  trackId: track.id,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                title: Text(
-                  track.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                subtitle: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(
-                        color: track.isYouTube
-                            ? Colors.red.withValues(alpha: 0.15)
-                            : const Color(0xFF00D1B2).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color: track.isYouTube
-                              ? Colors.red.withValues(alpha: 0.5)
-                              : const Color(0xFF00D1B2).withValues(alpha: 0.5),
-                          width: 0.5,
-                        ),
-                      ),
-                      child: Text(
-                        track.isYouTube ? 'YT' : 'Saavn',
-                        style: TextStyle(
-                          color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        '${track.artist} • ${track.genre}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ),
-                  ],
-                ),
-                trailing: IconButton(
-                  icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
-                  onPressed: () async {
-                    await StorageService.addSearchedAndPlayedTrack(track);
-                    notifier.playTrack(track);
-                  },
-                ),
-                onTap: () async {
-                  await StorageService.addSearchedAndPlayedTrack(track);
-                  notifier.playTrack(track);
-                },
-              ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  },
-);
-}
-
-  Widget _buildAlbumsTab(Color accentColor) {
-    if (_isSearching) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
-            const SizedBox(height: 16),
-            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
-          ],
-        ),
-      );
-    }
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final Map<String, List<Track>> albumsMap = {};
-    for (final track in _filteredTracks) {
-      final albumName = track.album.trim().isNotEmpty ? track.album.trim() : 'Singles';
-      albumsMap.putIfAbsent(albumName, () => []).add(track);
-    }
-
-    if (albumsMap.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        children: [
-          const Text('Top Albums & Collections', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          const SizedBox(height: 12),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.85,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: _genreCards.length,
-            itemBuilder: (context, index) {
-              final card = _genreCards[index];
-              return GestureDetector(
-                onTap: () => _executeSearchQuery(card['query'] as String),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: card['colors'] as List<Color>,
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 4))],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Icon(card['icon'] as IconData, size: 28, color: Colors.white),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(card['title'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                          const SizedBox(height: 2),
-                          const Text('Top Album Mix', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Found ${albumsMap.keys.length} Albums', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        const SizedBox(height: 12),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.82,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-          ),
-          itemCount: albumsMap.keys.length,
-          itemBuilder: (context, index) {
-            final albumName = albumsMap.keys.elementAt(index);
-            final tracks = albumsMap[albumName]!;
-            final firstTrack = tracks.first;
-
-            return GestureDetector(
-              onTap: () => _executeSearchQuery(albumName),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1C1C1F) : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: accentColor.withValues(alpha: 0.2)),
-                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: AppArtworkImage(
-                          artworkUrl: firstTrack.artworkUrl,
-                          trackId: firstTrack.id,
-                          width: double.infinity,
-                          height: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(albumName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('${firstTrack.artist} • ${tracks.length} songs', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildArtistsTab(Color accentColor) {
-    if (_isSearching) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
-            const SizedBox(height: 16),
-            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
-          ],
-        ),
-      );
-    }
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final Map<String, List<Track>> artistsMap = {};
-    for (final track in _filteredTracks) {
-      final artistName = track.artist.split(',').first.trim();
-      if (artistName.isNotEmpty) {
-        artistsMap.putIfAbsent(artistName, () => []).add(track);
-      }
-    }
-
-    if (artistsMap.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const Text('Popular Artists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          const SizedBox(height: 14),
-          ..._trendingArtists.map((artist) {
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(vertical: 4),
-              leading: CircleAvatar(
-                radius: 24,
-                backgroundColor: accentColor.withValues(alpha: 0.2),
-                child: Text(
-                  artist.substring(0, 1),
-                  style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 18),
-                ),
-              ),
-              title: Text(artist, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              subtitle: const Text('Artist • Top Hits Available', style: TextStyle(fontSize: 12, color: Colors.grey)),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
-              onTap: () => _executeSearchQuery(artist),
-            );
-          }),
-        ],
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Found ${artistsMap.keys.length} Artists', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        const SizedBox(height: 12),
-        ...artistsMap.keys.map((artistName) {
-          final tracks = artistsMap[artistName]!;
-          final sampleTrack = tracks.first;
-
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            color: isDark ? const Color(0xFF1E1E22) : Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              leading: CircleAvatar(
-                radius: 26,
-                backgroundColor: Colors.grey.shade800,
-                child: AppArtworkImage(
-                  artworkUrl: sampleTrack.artworkUrl,
-                  trackId: sampleTrack.id,
-                  width: 52,
-                  height: 52,
-                  fit: BoxFit.cover,
-                  borderRadius: BorderRadius.circular(26),
-                ),
-              ),
-              title: Text(artistName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              subtitle: Text('${tracks.length} Tracks in search result', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              trailing: IconButton(
-                icon: Icon(Icons.play_circle_fill_rounded, color: accentColor, size: 32),
-                onPressed: () {
-                  ref.read(playbackProvider.notifier).playCustomQueue(tracks, initialIndex: 0);
-                },
-              ),
-              onTap: () => _executeSearchQuery(artistName),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildPlaylistsTab(Color accentColor) {
-    if (_isSearching) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(accentColor)),
-            const SizedBox(height: 16),
-            Text('Loading tracks for "${_searchController.text.trim()}"...', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500, fontSize: 14)),
-          ],
-        ),
-      );
-    }
-
-    final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Row(
-          children: [
-            Icon(Icons.auto_awesome_rounded, color: accentColor, size: 20),
-            const SizedBox(width: 8),
-            const Text('AI Curated Playlists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (aiSessionsMap.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1C1C1F) : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: accentColor.withValues(alpha: 0.3)),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.auto_awesome_outlined, size: 36, color: accentColor),
-                const SizedBox(height: 8),
-                const Text('No AI Playlists Yet', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('Switch to AI Curator mode and type any mood or genre to create custom playlists!', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.grey)),
-                const SizedBox(height: 12),
-                ElevatedButton.icon(
-                  onPressed: _toggleAiMode,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                  label: const Text('Try AI Curator'),
-                  style: ElevatedButton.styleFrom(backgroundColor: accentColor, foregroundColor: Colors.black),
-                ),
-              ],
-            ),
-          )
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.9,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: aiSessionsMap.keys.length,
-            itemBuilder: (context, index) {
-              final key = aiSessionsMap.keys.elementAt(index);
-              final rawTracks = aiSessionsMap[key] as List?;
-              final count = rawTracks?.length ?? 0;
-              final titleCapitalized = key.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
-
-              return GestureDetector(
-                onTap: () => _showGroupSongsSheet(key),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF24221E) : const Color(0xFFFFF9EE),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: accentColor.withValues(alpha: 0.3)),
-                    boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Icon(Icons.auto_awesome_rounded, color: accentColor, size: 24),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(color: accentColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                            child: Text('$count songs', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: accentColor)),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(titleCapitalized, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          const SizedBox(height: 2),
-                          const Text('AI Playlist', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTrendingSection(Color accentColor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Trending Searches', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _trendingArtists.map((artist) {
-              return ActionChip(
-                label: Text(artist),
-                backgroundColor: accentColor.withValues(alpha: 0.12),
-                labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: accentColor),
-                avatar: Icon(Icons.trending_up_rounded, size: 14, color: accentColor),
-                onPressed: () => _executeSearchQuery(artist),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTrendingArtistsCarousel(Color accentColor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Trending Artists', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit')),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 90,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _trendingArtists.length,
-              itemBuilder: (context, index) {
-                final artist = _trendingArtists[index];
-                return GestureDetector(
-                  onTap: () => _executeSearchQuery(artist),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 14),
-                    child: Column(
-                      children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundColor: accentColor.withValues(alpha: 0.2),
-                          child: Text(
-                            artist.substring(0, 1),
-                            style: TextStyle(fontWeight: FontWeight.bold, color: accentColor, fontSize: 20),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(artist, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAiPlaylistBannerCard(BuildContext context, PlaybackNotifier notifier, Color accentColor) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final playlistTitle = _currentAiPlaylistName.isEmpty
-        ? '${_searchController.text.trim()} Playlist'
-        : _currentAiPlaylistName;
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF24221E) : const Color(0xFFFFF9EE),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accentColor.withValues(alpha: 0.4), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded, color: accentColor, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  playlistTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, fontFamily: 'Outfit'),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${_filteredTracks.length} Tracks',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: accentColor),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    notifier.playCustomQueue(_filteredTracks, initialIndex: 0);
-                  },
-                  icon: const Icon(Icons.play_arrow_rounded, color: Colors.black),
-                  label: const Text('Play All', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentColor,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AiPlaylistReviewScreen(
-                          suggestedName: playlistTitle,
-                          tracks: List.from(_filteredTracks),
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.bookmark_add_rounded, size: 18),
-                  label: const Text('Save / Edit'),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: accentColor),
-                    foregroundColor: accentColor,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChipSection(String title, List<String> items, bool isRecent, Color accentColor) {
-    if (items.isEmpty) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-              if (isRecent)
-                TextButton(
-                  onPressed: () async {
-                    if (_isAiMode) {
-                      await StorageService.clearAiSearchHistory();
-                    } else {
-                      await StorageService.clearSearchHistory();
-                    }
-                    setState(() {
-                      _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
-                    });
-                  },
-                  child: Text('Clear All', style: TextStyle(color: accentColor, fontSize: 12)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: items.map((tag) {
-              final double maxTextWidth = (MediaQuery.of(context).size.width - 120).clamp(80.0, 400.0);
-              return Container(
-                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 48),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: AppTheme.glassDecoration(
-                  context: context,
-                  opacity: 0.06,
-                  radius: 20,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GestureDetector(
-                      onTap: () => _executeSearchQuery(tag),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(_isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded, size: 14, color: _isAiMode ? accentColor : Colors.grey),
-                          const SizedBox(width: 6),
-                          ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: maxTextWidth),
-                            child: Text(
-                              tag,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () async {
-                        if (_isAiMode) {
-                          final list = StorageService.getAiRecentSearches()..remove(tag);
-                          await StorageService.saveSetting('ai_searches', list);
-                        } else {
-                          final list = StorageService.getRecentSearches()..remove(tag);
-                          await StorageService.saveSetting('searches', list);
-                        }
-                        setState(() {
-                          _recentSearches = _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
-                        });
-                      },
-                      child: const Icon(Icons.close_rounded, size: 14, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAiPlaylistGroupsSection(Map<String, dynamic> aiSessionsMap, Color accentColor) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.auto_awesome_rounded, size: 18, color: accentColor),
-              const SizedBox(width: 8),
-              const Text(
-                'AI Playlist Groups',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, fontFamily: 'Outfit'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 155,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: aiSessionsMap.keys.length,
-              itemBuilder: (context, index) {
-                final key = aiSessionsMap.keys.elementAt(index);
-                final rawTracks = aiSessionsMap[key] as List?;
-                final count = rawTracks?.length ?? 0;
-                final firstTrackMap = (rawTracks != null && rawTracks.isNotEmpty) ? Map<String, dynamic>.from(rawTracks.first as Map) : null;
-                final artUrl = firstTrackMap?['artworkUrl']?.toString() ?? '';
-                final trackId = firstTrackMap?['id']?.toString() ?? '';
-
-                final titleCapitalized = key.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
-
-                return Container(
-                  width: 150,
-                  margin: const EdgeInsets.only(right: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1F1F23) : Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AppArtworkImage(
-                        artworkUrl: artUrl,
-                        trackId: trackId,
-                        width: double.infinity,
-                        height: 70,
-                        fit: BoxFit.cover,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        titleCapitalized,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '$count tracks',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
-                          ),
-                          GestureDetector(
-                            onTap: () => _showGroupSongsSheet(key),
-                            child: CircleAvatar(
-                              radius: 12,
-                              backgroundColor: accentColor,
-                              child: const Icon(Icons.play_arrow_rounded, size: 16, color: Colors.black),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   List<Track> _getHistoryTracksList() {
     final rawHistory = StorageService.getSearchedAndPlayedTracks();
     final List<Track> historyTracks = [];
@@ -2130,138 +660,2746 @@ Output ONLY valid JSON:
     return historyTracks;
   }
 
-  Widget _buildRecentlyPlayedSongsSection(List<Track> historyTracks, Color accentColor) {
-    if (historyTracks.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
+  Future<void> _playSearched(Track track) async {
+    await StorageService.addSearchedAndPlayedTrack(track);
+    ref.read(playbackProvider.notifier).playTrack(track);
+  }
+
+  void _addToQueue(Track track) {
+    ref.read(playbackProvider.notifier).addToQueue(track);
+    triggerHaptic(HapticFeedbackType.medium);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Added "${track.title}" to Queue 🎵'),
+        duration: const Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _capitalize(String text) {
+    return text.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+  }
+
+  /// "Artist • Genre", or just the artist when there is no genre.
+  String _artistLine(Track track) {
+    final genre = '${track.genre}'.trim();
+    return (genre.isEmpty || genre == 'null') ? track.artist : '${track.artist} • $genre';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SHEETS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  void _showGroupSongsSheet(String tag) async {
+    final accentColor = ref.read(customizationProvider).accentColor;
+
+    List<Track> sessionTracks = StorageService.getGroupedSessionTracks(tag);
+
+    if (sessionTracks.isEmpty) {
+      try {
+        final cleanTag = tag.replaceAll(RegExp(r'✨|\(\d+\s*songs\)'), '').trim();
+        sessionTracks = await ref.read(musicSourceProvider).searchTracks(cleanTag);
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+
+        return Container(
+          height: MediaQuery.of(sheetContext).size.height * 0.72,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF161618) : const Color(0xFFFAF8F5),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+          ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.search_rounded, size: 48, color: Colors.grey.withValues(alpha: 0.4)),
+              const SizedBox(height: 10),
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: _tint(sheetContext, 0.18),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.auto_awesome_rounded, color: accentColor, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _capitalize(tag),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, fontFamily: 'Outfit'),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${sessionTracks.length} ${sessionTracks.length == 1 ? 'song' : 'songs'}',
+                            style: TextStyle(fontSize: 12.5, color: _muted(sheetContext)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (sessionTracks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: 0);
+                          },
+                          icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                          label: const Text('Play All'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accentColor,
+                            foregroundColor: _onColor(accentColor),
+                            minimumSize: const Size(0, 48),
+                            shape: const StadiumBorder(),
+                            textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () async {
+                            final name = tag.replaceAll(RegExp(r'✨|\(\d+\s*songs\)'), '').trim();
+                            final playlists = StorageService.getPlaylists();
+                            final newPl = {
+                              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                              'name': name,
+                              'description': 'AI generated playlist',
+                              'trackIds': sessionTracks.map((t) => t.id).toList(),
+                              'tracks': sessionTracks.map((t) => t.toJson()).toList(),
+                            };
+                            playlists.add(newPl);
+                            await StorageService.savePlaylists(playlists);
+                            // Close first: a snackbar would sit hidden behind the sheet.
+                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Saved "$name" to Playlists Library! ⚡'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.bookmark_add_rounded, size: 19),
+                          label: const Text('Save Playlist'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _tint(sheetContext, 0.09),
+                            foregroundColor: Theme.of(sheetContext).colorScheme.onSurface,
+                            minimumSize: const Size(0, 48),
+                            shape: const StadiumBorder(),
+                            textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: sessionTracks.isEmpty
+                    ? Center(
+                        child: Text('No saved tracks for this session', style: TextStyle(color: _muted(sheetContext))),
+                      )
+                    : ListView.builder(
+                        physics: const BouncingScrollPhysics(),
+                        padding: EdgeInsets.fromLTRB(8, 4, 8, MediaQuery.of(sheetContext).padding.bottom + 16),
+                        itemCount: sessionTracks.length,
+                        itemBuilder: (context, index) {
+                          final track = sessionTracks[index];
+                          return ListTile(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            leading: AppArtworkImage(
+                              artworkUrl: track.artworkUrl,
+                              trackId: track.id,
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            title: Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Row(
+                              children: [
+                                _SourceTag(isYouTube: track.isYouTube),
+                                Expanded(
+                                  child: Text(
+                                    _artistLine(track),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: Icon(Icons.play_arrow_rounded, size: 22, color: _tint(context, 0.5)),
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              ref.read(playbackProvider.notifier).playCustomQueue(sessionTracks, initialIndex: index);
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFilterBottomSheet(BuildContext context) {
+    final accentColor = ref.read(customizationProvider).accentColor;
+    const options = [
+      ('Popularity', 'As ranked by the source', Icons.trending_up_rounded),
+      ('Title A-Z', 'Song name, alphabetical', Icons.sort_by_alpha_rounded),
+      ('Artist A-Z', 'Artist name, alphabetical', Icons.person_rounded),
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF161618) : const Color(0xFFFAF8F5),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 38,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: _tint(sheetContext, 0.18),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(8, 18, 8, 14),
+                    child: Text(
+                      'Sort Results',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, fontFamily: 'Outfit'),
+                    ),
+                  ),
+                  for (final (filter, description, icon) in options)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Material(
+                        color: _selectedSortFilter == filter
+                            ? accentColor.withValues(alpha: 0.12)
+                            : _tint(sheetContext, 0.04),
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                            color: _selectedSortFilter == filter ? accentColor : Colors.transparent,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: InkWell(
+                          // One tap applies it; no separate Apply step.
+                          onTap: () {
+                            triggerHaptic(HapticFeedbackType.selection);
+                            setState(() {
+                              _selectedSortFilter = filter;
+                              _applySourceFilter();
+                            });
+                            Navigator.pop(sheetContext);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  icon,
+                                  size: 21,
+                                  color: _selectedSortFilter == filter ? accentColor : _muted(sheetContext),
+                                ),
+                                const SizedBox(width: 13),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(filter, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                                      const SizedBox(height: 2),
+                                      Text(description, style: TextStyle(fontSize: 12, color: _muted(sheetContext))),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  _selectedSortFilter == filter
+                                      ? Icons.check_circle_rounded
+                                      : Icons.radio_button_unchecked_rounded,
+                                  size: 21,
+                                  color: _selectedSortFilter == filter ? accentColor : _tint(sheetContext, 0.25),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCREEN
+  //
+  //   Fixed      search field + AI toggle · AI banner · tabs
+  //   Scrolling  the selected tab
+  //
+  // Responsive: content is capped and centered on wide screens, song lists go
+  // from one card per row to two or three, and every grid adds columns.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Content never grows wider than this; extra space becomes side margins.
+  static const double _maxContentWidth = 1100;
+
+  /// Side margin for the current screen width, set at the top of each build.
+  double _side = 20;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = ref.watch(customizationProvider).accentColor;
+
+    // The search UI stays mounted underneath (so scroll positions and the
+    // typed prompt survive) and the curating animation fades in over it.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        TickerMode(
+          enabled: !_isAiLoading,
+          child: ExcludeSemantics(
+            excluding: _isAiLoading,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _side = math.max(20.0, (constraints.maxWidth - _maxContentWidth) / 2);
+                return _buildBody(context, accentColor);
+              },
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: !_isAiLoading,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 320),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeIn,
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ...previousChildren,
+                    if (currentChild != null) currentChild,
+                  ],
+                );
+              },
+              child: _isAiLoading
+                  ? _AiCuratingView(
+                      key: const ValueKey('ai-curating'),
+                      accent: accentColor,
+                      status: _aiLoadingText,
+                      prompt: _aiQuery,
+                      stage: _aiStage,
+                      detail: _aiStageDetail,
+                      step: _aiQueryStep,
+                      total: _aiQueryTotal,
+                    )
+                  : const SizedBox.shrink(key: ValueKey('ai-idle')),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody(BuildContext context, Color accentColor) {
+    final showBackButton =
+        _searchController.text.isNotEmpty || _filteredTracks.isNotEmpty || _searchFocusNode.hasFocus || _isSearching;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(_side, MediaQuery.of(context).padding.top + 14, _side, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  // Back button slides in when a search is active
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: showBackButton
+                        ? Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: IconButton(
+                              icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                              tooltip: 'Back to Discovery',
+                              onPressed: () {
+                                FocusScope.of(context).unfocus();
+                                _resetSearch();
+                              },
+                            ),
+                          )
+                        : const SizedBox(height: 48),
+                  ),
+                  Expanded(child: _buildSearchField(accentColor)),
+                  const SizedBox(width: 10),
+                  _buildAiToggle(accentColor),
+                ],
+              ),
+
+              // AI mode banner
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: _isAiMode
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.13),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: accentColor.withValues(alpha: 0.35)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.auto_awesome_rounded, color: accentColor, size: 15),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'AI Curator · describe a mood, artist or playlist and press send',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Turn off AI mode',
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+                                padding: EdgeInsets.zero,
+                                icon: Icon(Icons.close_rounded, size: 16, color: _muted(context)),
+                                onPressed: _toggleAiMode,
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
               const SizedBox(height: 12),
-              const Text(
-                'Search for your favorite songs & artists',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey),
+              _buildTabBar(accentColor),
+            ],
+          ),
+        ),
+
+        // Main Tab Content Area
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildSongsTab(accentColor),
+              _buildAlbumsTab(accentColor),
+              _buildArtistsTab(accentColor),
+              _buildPlaylistsTab(accentColor),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Search field ───────────────────────────────────────────────────────────
+
+  Widget _buildSearchField(Color accentColor) {
+    final hasFocus = _searchFocusNode.hasFocus;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+      height: 52,
+      decoration: BoxDecoration(
+        color: _isAiMode ? accentColor.withValues(alpha: 0.12) : _tint(context, 0.07),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _isAiMode
+              ? accentColor.withValues(alpha: 0.35)
+              : accentColor.withValues(alpha: hasFocus ? 0.55 : 0),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: _isAiMode ? 0.24 : 0),
+            blurRadius: 16,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      // In AI mode a highlight travels around the border. It is painted
+      // straight from the animation, so nothing rebuilds while it runs.
+      child: CustomPaint(
+        foregroundPainter: _isAiMode ? _AiBorderPainter(progress: _aiGlowController, color: accentColor) : null,
+        child: Row(
+          children: [
+            const SizedBox(width: 14),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 260),
+              transitionBuilder: (child, animation) {
+                return RotationTransition(
+                  turns: Tween<double>(begin: 0.75, end: 1.0).animate(animation),
+                  child: ScaleTransition(scale: animation, child: child),
+                );
+              },
+              child: Icon(
+                _isAiMode ? Icons.auto_awesome_rounded : Icons.search_rounded,
+                key: ValueKey(_isAiMode),
+                size: 21,
+                color: _isAiMode ? accentColor : _muted(context),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  // Hint, hidden as soon as there is text
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _searchController,
+                    builder: (context, value, _) {
+                      if (value.text.isNotEmpty) return const SizedBox.shrink();
+                      return IgnorePointer(child: _buildHint(accentColor));
+                    },
+                  ),
+                  TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    textInputAction: TextInputAction.search,
+                    style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500),
+                    onSubmitted: (query) async {
+                      if (_isAiMode) {
+                        await _executeAiSearch(query);
+                      } else {
+                        await StorageService.addSearchQuery(query);
+                        setState(() {
+                          _recentSearches = StorageService.getRecentSearches();
+                        });
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 15),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Clear / send, following the text as it is typed
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _searchController,
+              builder: (context, value, _) {
+                final hasText = value.text.trim().isNotEmpty;
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (value.text.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Clear',
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.clear_rounded, size: 19, color: _muted(context)),
+                        onPressed: () => _searchController.clear(),
+                      ),
+                    if (_isAiMode)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 2, right: 2),
+                        child: AnimatedScale(
+                          scale: hasText ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutBack,
+                          child: Material(
+                            color: accentColor,
+                            shape: const CircleBorder(),
+                            clipBehavior: Clip.antiAlias,
+                            child: IconButton(
+                              tooltip: 'Ask AI',
+                              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                              padding: EdgeInsets.zero,
+                              icon: Icon(Icons.arrow_upward_rounded, size: 20, color: _onColor(accentColor)),
+                              onPressed: hasText
+                                  ? () {
+                                      FocusScope.of(context).unfocus();
+                                      _executeAiSearch(_searchController.text.trim());
+                                    }
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(width: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHint(Color accentColor) {
+    if (!_isAiMode) {
+      return Text(
+        'Search songs, albums, artists...',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 14, color: _muted(context)),
+      );
+    }
+    return ValueListenableBuilder<String>(
+      valueListenable: _typewriter,
+      builder: (context, typed, _) {
+        return Text(
+          typed.isEmpty ? 'Ask AI for songs or a playlist...' : 'Try "$typed"',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+          ),
+        );
+      },
+    );
+  }
+
+  /// The AI switch, next to the field so it is always one tap away.
+  Widget _buildAiToggle(Color accentColor) {
+    return Tooltip(
+      message: 'Toggle AI Music Curator Mode',
+      child: GestureDetector(
+        onTap: _toggleAiMode,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: _isAiMode ? accentColor : _tint(context, 0.07),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: _isAiMode ? 0.4 : 0),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: AnimatedRotation(
+            turns: _isAiMode ? 0.25 : 0,
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeOutBack,
+            child: Icon(
+              _isAiMode ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+              size: 22,
+              color: _isAiMode ? _onColor(accentColor) : _muted(context),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabBar(Color accentColor) {
+    Widget tab(String label) {
+      return Tab(child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1)));
+    }
+
+    return Container(
+      height: 46,
+      decoration: BoxDecoration(
+        color: _tint(context, 0.07),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        indicator: BoxDecoration(
+          color: accentColor,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.32),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicatorPadding: const EdgeInsets.all(4),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+        labelColor: _onColor(accentColor),
+        unselectedLabelColor: _muted(context),
+        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, fontFamily: 'Outfit'),
+        unselectedLabelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, fontFamily: 'Outfit'),
+        dividerColor: Colors.transparent,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        splashFactory: NoSplash.splashFactory,
+        tabs: [tab('Songs'), tab('Albums'), tab('Artists'), tab('Playlists')],
+      ),
+    );
+  }
+
+  // ── Shared pieces ──────────────────────────────────────────────────────────
+
+  EdgeInsets get _listPadding => EdgeInsets.fromLTRB(_side, 14, _side, 150);
+
+  /// Cards per row for a list that is [width] wide.
+  int _columnsFor(double width) {
+    if (width >= 980) return 3;
+    if (width >= 620) return 2;
+    return 1;
+  }
+
+  Widget _sectionTitle(String title, {IconData? icon, Color? iconColor, Widget? trailing}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 19, color: iconColor),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, fontFamily: 'Outfit', letterSpacing: -0.2),
+            ),
+          ),
+          if (trailing != null) trailing,
+        ],
+      ),
+    );
+  }
+
+  /// A song as a card. Swipe right to add it to the queue.
+  Widget _buildSwipeSongCard({
+    required Key key,
+    required Track track,
+    required Color accentColor,
+    required VoidCallback onPlay,
+  }) {
+    return ClipRRect(
+      key: key,
+      borderRadius: BorderRadius.circular(20),
+      child: Dismissible(
+        key: key,
+        direction: DismissDirection.startToEnd,
+        confirmDismiss: (direction) async {
+          _addToQueue(track);
+          return false;
+        },
+        background: Container(
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.only(left: 20),
+          color: accentColor,
+          child: Row(
+            children: [
+              Icon(Icons.queue_music_rounded, color: _onColor(accentColor)),
+              const SizedBox(width: 8),
+              Text(
+                'Add to Queue',
+                style: TextStyle(color: _onColor(accentColor), fontWeight: FontWeight.w800),
               ),
             ],
           ),
         ),
+        child: Material(
+          // Solid, so the swipe background stays hidden until you swipe.
+          color: Color.alphaBlend(_tint(context, 0.05), Theme.of(context).scaffoldBackgroundColor),
+          child: InkWell(
+            onTap: onPlay,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
+              child: Row(
+                children: [
+                  AppArtworkImage(
+                    artworkUrl: track.artworkUrl,
+                    trackId: track.id,
+                    width: 52,
+                    height: 52,
+                    fit: BoxFit.cover,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          track.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            _SourceTag(isYouTube: track.isYouTube),
+                            Expanded(
+                              child: Text(
+                                _artistLine(track),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Play',
+                    onPressed: onPlay,
+                    icon: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.play_arrow_rounded, size: 22, color: accentColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Source filter (All / Saavn / YT) plus the sort button.
+  Widget _buildResultsBar(Color accentColor) {
+    final isSorted = _selectedSortFilter != 'Popularity';
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(_side, 12, _side, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SourceSegments(
+              selected: _sourceFilter,
+              accent: accentColor,
+              showCounts: _allSearchResults.isNotEmpty,
+              allCount: _allSearchResults.length,
+              saavnCount: _allSearchResults.where((t) => t.isJioSaavn).length,
+              ytCount: _allSearchResults.where((t) => t.isYouTube).length,
+              onSelected: _setSourceFilter,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Tooltip(
+            message: 'Filter & Sort',
+            child: Material(
+              color: isSorted ? accentColor.withValues(alpha: 0.16) : _tint(context, 0.07),
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: isSorted ? accentColor.withValues(alpha: 0.5) : Colors.transparent),
+              ),
+              child: InkWell(
+                onTap: () => _showFilterBottomSheet(context),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Icon(Icons.tune_rounded, size: 20, color: isSorted ? accentColor : _muted(context)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessage({
+    required IconData icon,
+    required String title,
+    String? message,
+    Widget? action,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(_side + 12, 24, _side + 12, 150),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: math.max(0.0, constraints.maxHeight - 174)),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(color: _tint(context, 0.06), shape: BoxShape.circle),
+                      child: Icon(icon, size: 36, color: _muted(context)),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontFamily: 'Outfit', fontSize: 19, fontWeight: FontWeight.w800),
+                    ),
+                    if (message != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13.5, height: 1.45, color: _muted(context)),
+                      ),
+                    ],
+                    if (action != null) ...[
+                      const SizedBox(height: 18),
+                      action,
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _pillButton({
+    required String label,
+    required IconData icon,
+    required Color accentColor,
+    required VoidCallback onPressed,
+  }) {
+    return FilledButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 19),
+      label: Text(label),
+      style: FilledButton.styleFrom(
+        backgroundColor: accentColor,
+        foregroundColor: _onColor(accentColor),
+        minimumSize: const Size(0, 46),
+        shape: const StadiumBorder(),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+      ),
+    );
+  }
+
+  // ── Songs tab ──────────────────────────────────────────────────────────────
+
+  Widget _buildSongsTab(Color accentColor) {
+    if (_searchController.text.isEmpty && _filteredTracks.isEmpty) {
+      final isFocused = _searchFocusNode.hasFocus;
+
+      if (isFocused) {
+        return ListView(
+          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+          padding: _listPadding,
+          children: [
+            if (_isAiMode) ...[
+              _buildAiPromptIdeas(accentColor),
+              const SizedBox(height: 24),
+            ],
+            _buildChipSection(
+              _isAiMode ? 'AI Recent Prompts' : 'Recent Searches',
+              _recentSearches,
+              true,
+              accentColor,
+            ),
+            _buildTrendingSection(accentColor),
+          ],
+        );
+      }
+
+      final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
+      final historyTracks = _getHistoryTracksList();
+
+      return ListView(
+        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+        padding: const EdgeInsets.only(top: 18, bottom: 150),
+        children: [
+          if (aiSessionsMap.isNotEmpty) ...[
+            _buildAiPlaylistGroupsSection(aiSessionsMap, accentColor),
+            const SizedBox(height: 28),
+          ],
+          _buildTrendingArtistsCarousel(accentColor),
+          const SizedBox(height: 28),
+          _buildRecentlyPlayedSongsSection(historyTracks, accentColor),
+        ],
       );
     }
 
-    return Consumer(
-      builder: (context, ref, child) {
-        final notifier = ref.read(playbackProvider.notifier);
+    if (_isSearching) {
+      return _SkeletonList(padding: _listPadding);
+    }
+
+    if (_filteredTracks.isEmpty) {
+      if (_allSearchResults.isNotEmpty) {
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              child: Text(
-                'Recently Played Songs',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontFamily: 'Outfit',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
+            _buildResultsBar(accentColor),
+            Expanded(
+              child: _buildMessage(
+                icon: _sourceFilter == 'YT' ? Icons.smart_display_outlined : Icons.graphic_eq_rounded,
+                title: 'No $_sourceFilter tracks found for this search',
+                message: 'Found ${_allSearchResults.length} total songs in other sources.',
+                action: _pillButton(
+                  label: 'Show All (${_allSearchResults.length}) Songs',
+                  icon: Icons.all_inclusive_rounded,
+                  accentColor: accentColor,
+                  onPressed: () => _setSourceFilter('All'),
+                ),
               ),
             ),
-            ...historyTracks.map((track) {
-              return Dismissible(
-                key: Key('recent_swipe_${track.id}'),
-                direction: DismissDirection.startToEnd,
-                confirmDismiss: (direction) async {
-                  notifier.addToQueue(track);
-                  triggerHaptic(HapticFeedbackType.medium);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Added "${track.title}" to Queue 🎵'),
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                  return false;
-                },
-                background: Container(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.only(left: 24),
-                  color: accentColor.withValues(alpha: 0.85),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.queue_music_rounded, color: Colors.black),
-                      SizedBox(width: 8),
-                      Text('Add to Queue', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                  leading: AppArtworkImage(
-                    artworkUrl: track.artworkUrl,
-                    trackId: track.id,
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  title: Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  subtitle: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          color: track.isYouTube
-                              ? Colors.red.withValues(alpha: 0.15)
-                              : const Color(0xFF00D1B2).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: track.isYouTube
-                                ? Colors.red.withValues(alpha: 0.5)
-                                : const Color(0xFF00D1B2).withValues(alpha: 0.5),
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Text(
-                          track.isYouTube ? 'YT' : 'Saavn',
-                          style: TextStyle(
-                            color: track.isYouTube ? Colors.redAccent : const Color(0xFF00D1B2),
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          '${track.artist} • ${track.genre}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ),
-                    ],
-                  ),
-                  trailing: IconButton(
-                    icon: Icon(Icons.play_circle_fill_rounded, size: 30, color: accentColor),
-                    onPressed: () {
-                      notifier.playTrack(track);
+          ],
+        );
+      }
+      // AI mode, prompt typed but not sent yet
+      if (_isAiMode && _currentAiPlaylistName.isEmpty) {
+        return _buildMessage(
+          icon: Icons.auto_awesome_rounded,
+          title: 'Ready when you are',
+          message: 'Press send and AI will build a playlist from your prompt.',
+          action: _pillButton(
+            label: 'Ask AI',
+            icon: Icons.auto_awesome_rounded,
+            accentColor: accentColor,
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              _executeAiSearch(_searchController.text.trim());
+            },
+          ),
+        );
+      }
+      return _buildMessage(
+        icon: Icons.search_off_rounded,
+        title: 'No tracks found',
+        message: 'Try a different spelling, or search for the artist instead.',
+        action: _pillButton(
+          label: 'Back to Music Discovery',
+          icon: Icons.explore_rounded,
+          accentColor: accentColor,
+          onPressed: _resetSearch,
+        ),
+      );
+    }
+
+    final showAiBanner = _isAiMode && _filteredTracks.isNotEmpty;
+    final notifier = ref.read(playbackProvider.notifier);
+
+    return Column(
+      children: [
+        _buildResultsBar(accentColor),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _columnsFor(constraints.maxWidth - _side * 2);
+              final rows = (_filteredTracks.length / columns).ceil();
+
+              return ListView.builder(
+                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                padding: EdgeInsets.fromLTRB(_side, 12, _side, 150),
+                itemCount: rows + (showAiBanner ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (showAiBanner && index == 0) {
+                    return _buildAiPlaylistBannerCard(context, notifier, accentColor);
+                  }
+                  final row = showAiBanner ? index - 1 : index;
+                  return _cardRow(
+                    columns: columns,
+                    first: row * columns,
+                    itemCount: _filteredTracks.length,
+                    itemBuilder: (trackIndex) {
+                      final track = _filteredTracks[trackIndex];
+                      return _buildSwipeSongCard(
+                        key: Key('search_${track.id}_$trackIndex'),
+                        track: track,
+                        accentColor: accentColor,
+                        onPlay: () => _playSearched(track),
+                      );
                     },
-                  ),
-                  onTap: () {
-                    notifier.playTrack(track);
-                  },
-                ),
+                  );
+                },
               );
-            }),
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Example prompts, shown in AI mode before anything is typed.
+  Widget _buildAiPromptIdeas(Color accentColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Try asking', icon: Icons.auto_awesome_rounded, iconColor: accentColor),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final prompt in _typewriterPrompts)
+              Material(
+                color: accentColor.withValues(alpha: 0.12),
+                clipBehavior: Clip.antiAlias,
+                shape: StadiumBorder(side: BorderSide(color: accentColor.withValues(alpha: 0.35))),
+                child: InkWell(
+                  onTap: () {
+                    FocusScope.of(context).unfocus();
+                    _executeSearchQuery(prompt);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+                    child: Text(
+                      prompt,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Albums tab ─────────────────────────────────────────────────────────────
+
+  /// A grid that adds columns as the screen widens (about [targetWidth] each).
+  Widget _adaptiveGrid({
+    required Widget header,
+    required int itemCount,
+    required double targetWidth,
+    required double Function(double tileWidth, double textScale) extentFor,
+    required Widget Function(BuildContext context, int index, double tileWidth) itemBuilder,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const spacing = 14.0;
+        final width = constraints.maxWidth - _side * 2;
+        final columns = (width / targetWidth).floor().clamp(2, 6).toInt();
+        final tileWidth = (width - spacing * (columns - 1)) / columns;
+        final textScale = MediaQuery.textScalerOf(context).scale(100) / 100;
+
+        return CustomScrollView(
+          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(_side, 18, _side, 0),
+              sliver: SliverToBoxAdapter(child: header),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(_side, 0, _side, 150),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  mainAxisExtent: extentFor(tileWidth, textScale),
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => itemBuilder(context, index, tileWidth),
+                  childCount: itemCount,
+                ),
+              ),
+            ),
           ],
         );
       },
     );
   }
+
+  Widget _buildAlbumsTab(Color accentColor) {
+    if (_isSearching) {
+      return _SkeletonList(padding: _listPadding);
+    }
+
+    final Map<String, List<Track>> albumsMap = {};
+    for (final track in _filteredTracks) {
+      final albumName = track.album.trim().isNotEmpty ? track.album.trim() : 'Singles';
+      albumsMap.putIfAbsent(albumName, () => []).add(track);
+    }
+
+    if (albumsMap.isEmpty) {
+      return _adaptiveGrid(
+        header: _sectionTitle('Top Albums & Collections'),
+        itemCount: _genreCards.length,
+        targetWidth: 170,
+        extentFor: (tileWidth, textScale) => math.max(118.0, 76 + 44 * textScale),
+        itemBuilder: (context, index, tileWidth) {
+          final card = _genreCards[index];
+          return Material(
+            color: Colors.transparent,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            child: Ink(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: card['colors'] as List<Color>,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: InkWell(
+                onTap: () => _executeSearchQuery(card['query'] as String),
+                child: Stack(
+                  children: [
+                    Positioned(
+                      right: -10,
+                      top: -10,
+                      child: Icon(
+                        card['icon'] as IconData,
+                        size: 72,
+                        color: Colors.white.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    Positioned(
+                      left: 14,
+                      right: 14,
+                      bottom: 12,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            card['title'] as String,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontFamily: 'Outfit',
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15.5,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text('Top Album Mix', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    final albumNames = albumsMap.keys.toList();
+
+    return _adaptiveGrid(
+      header: _sectionTitle('Found ${albumNames.length} Albums'),
+      itemCount: albumNames.length,
+      targetWidth: 170,
+      extentFor: (tileWidth, textScale) => tileWidth + 10 + 40 * textScale,
+      itemBuilder: (context, index, tileWidth) {
+        final albumName = albumNames[index];
+        final tracks = albumsMap[albumName]!;
+        final firstTrack = tracks.first;
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _executeSearchQuery(albumName),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppArtworkImage(
+                artworkUrl: firstTrack.artworkUrl,
+                trackId: firstTrack.id,
+                width: tileWidth,
+                height: tileWidth,
+                fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                albumName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${firstTrack.artist} • ${tracks.length} songs',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: _muted(context)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Artists tab ────────────────────────────────────────────────────────────
+
+  Widget _artistCard({
+    required Widget avatar,
+    required String name,
+    required String subtitle,
+    required VoidCallback onTap,
+    Widget? trailing,
+  }) {
+    return Material(
+      color: _tint(context, 0.045),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: _tint(context, 0.06)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+          child: Row(
+            children: [
+              avatar,
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                    ),
+                  ],
+                ),
+              ),
+              trailing ?? Icon(Icons.chevron_right_rounded, size: 22, color: _tint(context, 0.3)),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _initialAvatar(String name, Color accentColor, double size) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accentColor.withValues(alpha: 0.38), accentColor.withValues(alpha: 0.14)],
+        ),
+      ),
+      child: Text(
+        name.isEmpty ? '?' : name.substring(0, 1),
+        style: TextStyle(
+          fontFamily: 'Outfit',
+          fontWeight: FontWeight.w800,
+          color: accentColor,
+          fontSize: size * 0.38,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildArtistsTab(Color accentColor) {
+    if (_isSearching) {
+      return _SkeletonList(padding: _listPadding);
+    }
+
+    final Map<String, List<Track>> artistsMap = {};
+    for (final track in _filteredTracks) {
+      final artistName = track.artist.split(',').first.trim();
+      if (artistName.isNotEmpty) {
+        artistsMap.putIfAbsent(artistName, () => []).add(track);
+      }
+    }
+
+    final hasResults = artistsMap.isNotEmpty;
+    final names = hasResults ? artistsMap.keys.toList() : _trendingArtists;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = _columnsFor(constraints.maxWidth - _side * 2);
+        final rows = (names.length / columns).ceil();
+
+        return ListView.builder(
+          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+          padding: EdgeInsets.fromLTRB(_side, 18, _side, 150),
+          itemCount: rows + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return _sectionTitle(hasResults ? 'Found ${names.length} Artists' : 'Popular Artists');
+            }
+            return _cardRow(
+              columns: columns,
+              first: (index - 1) * columns,
+              itemCount: names.length,
+              itemBuilder: (i) {
+                final artistName = names[i];
+
+                if (!hasResults) {
+                  return _artistCard(
+                    avatar: _initialAvatar(artistName, accentColor, 52),
+                    name: artistName,
+                    subtitle: 'Artist • Top Hits Available',
+                    onTap: () => _executeSearchQuery(artistName),
+                  );
+                }
+
+                final tracks = artistsMap[artistName]!;
+                final sampleTrack = tracks.first;
+
+                return _artistCard(
+                  avatar: AppArtworkImage(
+                    artworkUrl: sampleTrack.artworkUrl,
+                    trackId: sampleTrack.id,
+                    width: 52,
+                    height: 52,
+                    fit: BoxFit.cover,
+                    borderRadius: BorderRadius.circular(26),
+                  ),
+                  name: artistName,
+                  subtitle: '${tracks.length} ${tracks.length == 1 ? 'track' : 'tracks'} in search result',
+                  onTap: () => _executeSearchQuery(artistName),
+                  trailing: IconButton(
+                    tooltip: 'Play',
+                    onPressed: () {
+                      ref.read(playbackProvider.notifier).playCustomQueue(tracks, initialIndex: 0);
+                    },
+                    icon: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.play_arrow_rounded, size: 22, color: accentColor),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Playlists tab ──────────────────────────────────────────────────────────
+
+  Widget _buildPlaylistsTab(Color accentColor) {
+    if (_isSearching) {
+      return _SkeletonList(padding: _listPadding);
+    }
+
+    final aiSessionsMap = StorageService.getGroupedAiSessionsMap();
+
+    if (aiSessionsMap.isEmpty) {
+      return _buildMessage(
+        icon: Icons.auto_awesome_outlined,
+        title: 'No AI Playlists Yet',
+        message: 'Switch to AI Curator mode and type any mood or genre to create custom playlists!',
+        action: _pillButton(
+          label: 'Try AI Curator',
+          icon: Icons.auto_awesome_rounded,
+          accentColor: accentColor,
+          onPressed: _toggleAiMode,
+        ),
+      );
+    }
+
+    final keys = aiSessionsMap.keys.toList();
+
+    return _adaptiveGrid(
+      header: _sectionTitle('AI Curated Playlists', icon: Icons.auto_awesome_rounded, iconColor: accentColor),
+      itemCount: keys.length,
+      targetWidth: 170,
+      extentFor: (tileWidth, textScale) => tileWidth + 10 + 40 * textScale,
+      itemBuilder: (context, index, tileWidth) {
+        return _buildAiPlaylistTile(aiSessionsMap, keys[index], tileWidth, accentColor);
+      },
+    );
+  }
+
+  /// Cover (first song's artwork), name and song count for one AI playlist.
+  Widget _buildAiPlaylistTile(Map<String, dynamic> aiSessionsMap, String key, double size, Color accentColor) {
+    final rawTracks = aiSessionsMap[key] as List?;
+    final count = rawTracks?.length ?? 0;
+    final firstTrackMap =
+        (rawTracks != null && rawTracks.isNotEmpty) ? Map<String, dynamic>.from(rawTracks.first as Map) : null;
+    final artUrl = firstTrackMap?['artworkUrl']?.toString() ?? '';
+    final trackId = firstTrackMap?['id']?.toString() ?? '';
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showGroupSongsSheet(key),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            children: [
+              artUrl.isNotEmpty
+                  ? AppArtworkImage(
+                      artworkUrl: artUrl,
+                      trackId: trackId,
+                      width: size,
+                      height: size,
+                      fit: BoxFit.cover,
+                      borderRadius: BorderRadius.circular(22),
+                    )
+                  : Container(
+                      width: size,
+                      height: size,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [accentColor.withValues(alpha: 0.4), accentColor.withValues(alpha: 0.14)],
+                        ),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Icon(Icons.auto_awesome_rounded, color: accentColor, size: size * 0.3),
+                    ),
+              // "AI" mark
+              Positioned(
+                left: 8,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.auto_awesome_rounded, size: 11, color: Colors.white),
+                      SizedBox(width: 3),
+                      Text('AI', style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: accentColor,
+                    shape: BoxShape.circle,
+                    boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))],
+                  ),
+                  child: Icon(Icons.play_arrow_rounded, color: _onColor(accentColor), size: 22),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _capitalize(key),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '$count ${count == 1 ? 'song' : 'songs'} · AI Playlist',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: _muted(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Discovery sections ─────────────────────────────────────────────────────
+
+  Widget _buildTrendingSection(Color accentColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Trending Searches'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _trendingArtists.map((artist) {
+            return Material(
+              color: _tint(context, 0.06),
+              clipBehavior: Clip.antiAlias,
+              shape: StadiumBorder(side: BorderSide(color: _tint(context, 0.07))),
+              child: InkWell(
+                onTap: () => _executeSearchQuery(artist),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.trending_up_rounded, size: 15, color: accentColor),
+                      const SizedBox(width: 6),
+                      Text(artist, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTrendingArtistsCarousel(Color accentColor) {
+    final textScale = MediaQuery.textScalerOf(context).scale(100) / 100;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: _side),
+          child: _sectionTitle('Trending Artists'),
+        ),
+        SizedBox(
+          height: 68 + 8 + 32 * textScale,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.symmetric(horizontal: _side),
+            itemCount: _trendingArtists.length,
+            separatorBuilder: (context, index) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final artist = _trendingArtists[index];
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _executeSearchQuery(artist),
+                child: SizedBox(
+                  width: 78,
+                  child: Column(
+                    children: [
+                      _initialAvatar(artist, accentColor, 68),
+                      const SizedBox(height: 8),
+                      Text(
+                        artist,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.2),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAiPlaylistBannerCard(BuildContext context, PlaybackNotifier notifier, Color accentColor) {
+    final playlistTitle = _currentAiPlaylistName.isEmpty
+        ? '${_searchController.text.trim()} Playlist'
+        : _currentAiPlaylistName;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [accentColor.withValues(alpha: 0.26), accentColor.withValues(alpha: 0.05)],
+          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: accentColor.withValues(alpha: 0.32), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(color: accentColor, borderRadius: BorderRadius.circular(13)),
+                  child: Icon(Icons.auto_awesome_rounded, color: _onColor(accentColor), size: 21),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        playlistTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, fontFamily: 'Outfit'),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_filteredTracks.length} Tracks · curated by AI',
+                        style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      notifier.playCustomQueue(_filteredTracks, initialIndex: 0);
+                    },
+                    icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                    label: const Text('Play All'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accentColor,
+                      foregroundColor: _onColor(accentColor),
+                      minimumSize: const Size(0, 46),
+                      shape: const StadiumBorder(),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AiPlaylistReviewScreen(
+                            suggestedName: playlistTitle,
+                            tracks: List.from(_filteredTracks),
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.bookmark_add_rounded, size: 19),
+                    label: const Text('Save / Edit'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _tint(context, 0.09),
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      minimumSize: const Size(0, 46),
+                      shape: const StadiumBorder(),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChipSection(String title, List<String> items, bool isRecent, Color accentColor) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(
+            title,
+            trailing: isRecent
+                ? TextButton(
+                    onPressed: () async {
+                      if (_isAiMode) {
+                        await StorageService.clearAiSearchHistory();
+                      } else {
+                        await StorageService.clearSearchHistory();
+                      }
+                      setState(() {
+                        _recentSearches =
+                            _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
+                      });
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: _muted(context),
+                      minimumSize: const Size(0, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Clear All', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  )
+                : null,
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: items.map((tag) {
+              return Material(
+                color: _tint(context, 0.06),
+                clipBehavior: Clip.antiAlias,
+                shape: StadiumBorder(side: BorderSide(color: _tint(context, 0.07))),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Wrap gives each chip at most the row width, so long
+                    // prompts shorten with "…" instead of overflowing.
+                    Flexible(
+                      child: InkWell(
+                        onTap: () => _executeSearchQuery(tag),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isAiMode ? Icons.auto_awesome_rounded : Icons.history_rounded,
+                                size: 15,
+                                color: _isAiMode ? accentColor : _muted(context),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  tag,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () async {
+                        if (_isAiMode) {
+                          final list = StorageService.getAiRecentSearches()..remove(tag);
+                          await StorageService.saveSetting('ai_searches', list);
+                        } else {
+                          final list = StorageService.getRecentSearches()..remove(tag);
+                          await StorageService.saveSetting('searches', list);
+                        }
+                        setState(() {
+                          _recentSearches =
+                              _isAiMode ? StorageService.getAiRecentSearches() : StorageService.getRecentSearches();
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(6, 9, 11, 9),
+                        child: Icon(Icons.close_rounded, size: 15, color: _muted(context)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiPlaylistGroupsSection(Map<String, dynamic> aiSessionsMap, Color accentColor) {
+    final textScale = MediaQuery.textScalerOf(context).scale(100) / 100;
+    final keys = aiSessionsMap.keys.toList();
+    const size = 140.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: _side),
+          child: _sectionTitle('AI Playlist Groups', icon: Icons.auto_awesome_rounded, iconColor: accentColor),
+        ),
+        SizedBox(
+          height: size + 10 + 40 * textScale,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.symmetric(horizontal: _side),
+            itemCount: keys.length,
+            separatorBuilder: (context, index) => const SizedBox(width: 14),
+            itemBuilder: (context, index) {
+              return SizedBox(
+                width: size,
+                child: _buildAiPlaylistTile(aiSessionsMap, keys[index], size, accentColor),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentlyPlayedSongsSection(List<Track> historyTracks, Color accentColor) {
+    if (historyTracks.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(color: _tint(context, 0.06), shape: BoxShape.circle),
+              child: Icon(Icons.search_rounded, size: 36, color: _muted(context)),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Search for your favorite songs & artists',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _muted(context)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final notifier = ref.read(playbackProvider.notifier);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = _columnsFor(constraints.maxWidth - _side * 2);
+
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: _side),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle('Recently Played Songs'),
+              for (var first = 0; first < historyTracks.length; first += columns)
+                _cardRow(
+                  columns: columns,
+                  first: first,
+                  itemCount: historyTracks.length,
+                  itemBuilder: (index) {
+                    final track = historyTracks[index];
+                    return _buildSwipeSongCard(
+                      key: Key('recent_swipe_${track.id}_$index'),
+                      track: track,
+                      accentColor: accentColor,
+                      onPlay: () => notifier.playTrack(track),
+                    );
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// White in dark mode, black in light mode, at the given opacity.
+Color _tint(BuildContext context, double alpha) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return (isDark ? Colors.white : Colors.black).withValues(alpha: alpha);
+}
+
+Color _muted(BuildContext context) {
+  return Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+}
+
+/// Readable text/icon color on top of [background] (any accent the user picks).
+Color _onColor(Color background) {
+  return ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+      ? Colors.white
+      : Colors.black;
+}
+
+/// One row of up to [columns] cards, starting at item [first]. No fixed
+/// heights, so cards grow with the system font size.
+Widget _cardRow({
+  required int columns,
+  required int first,
+  required int itemCount,
+  required Widget Function(int index) itemBuilder,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: columns == 1
+        ? itemBuilder(first)
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var column = 0; column < columns; column++) ...[
+                if (column > 0) const SizedBox(width: 10),
+                Expanded(
+                  child: first + column < itemCount ? itemBuilder(first + column) : const SizedBox.shrink(),
+                ),
+              ],
+            ],
+          ),
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PIECES
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// "YT" / "Saavn" mark in front of the artist name.
+class _SourceTag extends StatelessWidget {
+  const _SourceTag({required this.isYouTube});
+
+  final bool isYouTube;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = isYouTube
+        ? (isDark ? const Color(0xFFFF6B6B) : const Color(0xFFD32F2F))
+        : (isDark ? const Color(0xFF00D1B2) : const Color(0xFF00897B));
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      margin: const EdgeInsets.only(right: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        isYouTube ? 'YT' : 'Saavn',
+        style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.4, height: 1.3),
+      ),
+    );
+  }
+}
+
+/// All / Saavn / YT, with a pill that slides (and changes color) between them.
+class _SourceSegments extends StatelessWidget {
+  const _SourceSegments({
+    required this.selected,
+    required this.accent,
+    required this.showCounts,
+    required this.allCount,
+    required this.saavnCount,
+    required this.ytCount,
+    required this.onSelected,
+  });
+
+  final String selected;
+  final Color accent;
+  final bool showCounts;
+  final int allCount;
+  final int saavnCount;
+  final int ytCount;
+  final ValueChanged<String> onSelected;
+
+  static const Color _saavn = Color(0xFF00D1B2);
+  static const Color _youtube = Color(0xFFFF0033);
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = [
+      ('All', 'All', Icons.all_inclusive_rounded, accent, allCount),
+      ('Saavn', 'Saavn', Icons.graphic_eq_rounded, _saavn, saavnCount),
+      ('YT', 'YT', Icons.smart_display_rounded, _youtube, ytCount),
+    ];
+    var index = segments.indexWhere((s) => s.$1 == selected);
+    if (index < 0) index = 0;
+    final activeColor = segments[index].$4;
+
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _tint(context, 0.07),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: AnimatedAlign(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment(-1 + index.toDouble(), 0),
+              child: FractionallySizedBox(
+                widthFactor: 1 / 3,
+                heightFactor: 1,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 240),
+                  decoration: BoxDecoration(
+                    color: activeColor,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: activeColor.withValues(alpha: 0.32),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (var i = 0; i < segments.length; i++)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: i == index,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onSelected(segments[i].$1),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: _label(context, segments[i], i == index),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _label(BuildContext context, (String, String, IconData, Color, int) segment, bool isSelected) {
+    final foreground = isSelected ? _onColor(segment.$4) : _muted(context);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(segment.$3, size: 15, color: foreground),
+        const SizedBox(width: 5),
+        Text(
+          segment.$2,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            fontFamily: 'Outfit',
+            color: foreground,
+          ),
+        ),
+        if (showCounts) ...[
+          const SizedBox(width: 5),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: foreground.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '${segment.$5}',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: foreground),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Placeholder cards that gently pulse while results load.
+class _SkeletonList extends StatefulWidget {
+  const _SkeletonList({required this.padding});
+
+  final EdgeInsets padding;
+
+  @override
+  State<_SkeletonList> createState() => _SkeletonListState();
+}
+
+class _SkeletonListState extends State<_SkeletonList> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 950))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final block = _tint(context, 0.09);
+
+    Widget bar(double widthFactor, double height) {
+      return FractionallySizedBox(
+        widthFactor: widthFactor,
+        child: Container(
+          height: height,
+          decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(6)),
+        ),
+      );
+    }
+
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.45, end: 1.0).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
+      child: ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: widget.padding,
+        itemCount: 8,
+        itemBuilder: (context, index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _tint(context, 0.045),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(color: block, borderRadius: BorderRadius.circular(14)),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Varied widths read as text rather than stripes.
+                        bar(index.isEven ? 0.62 : 0.48, 13),
+                        const SizedBox(height: 9),
+                        bar(index.isEven ? 0.38 : 0.55, 11),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(color: block, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A highlight that travels around the search field's border in AI mode.
+class _AiBorderPainter extends CustomPainter {
+  _AiBorderPainter({required this.progress, required this.color}) : super(repaint: progress);
+
+  final Animation<double> progress;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final shape = RRect.fromRectAndRadius(rect.deflate(0.75), const Radius.circular(18));
+    final bright = Color.lerp(color, Colors.white, 0.55)!;
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..shader = SweepGradient(
+        colors: [
+          color.withValues(alpha: 0),
+          color.withValues(alpha: 0),
+          color,
+          bright,
+          color,
+          color.withValues(alpha: 0),
+          color.withValues(alpha: 0),
+        ],
+        stops: const [0.0, 0.55, 0.72, 0.8, 0.88, 0.97, 1.0],
+        transform: GradientRotation(progress.value * math.pi * 2),
+      ).createShader(rect);
+
+    canvas.drawRRect(shape, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _AiBorderPainter oldDelegate) => oldDelegate.color != color;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AI CURATING ANIMATION
+//
+// Shown while the AI builds a playlist: an orb with orbiting sparks, the
+// prompt, and three steps that tick off as the real work moves along
+// (understanding the request → searching each query → building the list).
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _AiCuratingView extends StatefulWidget {
+  const _AiCuratingView({
+    super.key,
+    required this.accent,
+    required this.status,
+    required this.prompt,
+    required this.stage,
+    required this.detail,
+    required this.step,
+    required this.total,
+  });
+
+  final Color accent;
+
+  /// Plain status line, read out by screen readers as it changes.
+  final String status;
+  final String prompt;
+
+  /// 0 understanding · 1 searching · 2 building.
+  final int stage;
+
+  /// The search term being looked up right now (stage 1).
+  final String detail;
+  final int step;
+  final int total;
+
+  @override
+  State<_AiCuratingView> createState() => _AiCuratingViewState();
+}
+
+class _AiCuratingViewState extends State<_AiCuratingView> with SingleTickerProviderStateMixin {
+  late final AnimationController _loop;
+
+  static const List<String> _stageLabels = [
+    'Understanding your request',
+    'Searching the music catalog',
+    'Putting your playlist together',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loop = AnimationController(vsync: this, duration: const Duration(milliseconds: 4200));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Hold still when the system asks for reduced motion.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _loop.stop();
+      _loop.value = 0.2;
+    } else if (!_loop.isAnimating) {
+      _loop.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _loop.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accent;
+
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Semantics(
+        liveRegion: true,
+        label: widget.status,
+        child: _buildContent(context, accent),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, Color accent) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The orb shrinks on short screens so the steps always fit.
+        final orbSize = (constraints.maxHeight * 0.3).clamp(120.0, 200.0).toDouble();
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(28, MediaQuery.of(context).padding.top + 24, 28, 150),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: math.max(0.0, constraints.maxHeight - MediaQuery.of(context).padding.top - 174),
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: orbSize,
+                      height: orbSize,
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: _AiOrbPainter(progress: _loop, color: accent),
+                          child: Center(
+                            child: ScaleTransition(
+                              scale: TweenSequence<double>([
+                                TweenSequenceItem(tween: Tween(begin: 0.92, end: 1.08), weight: 1),
+                                TweenSequenceItem(tween: Tween(begin: 1.08, end: 0.92), weight: 1),
+                              ]).animate(_loop),
+                              child: Icon(
+                                Icons.auto_awesome_rounded,
+                                size: orbSize * 0.2,
+                                color: _onColor(accent),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 26),
+                    const Text(
+                      'Curating your playlist',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontFamily: 'Outfit', fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                    ),
+                    if (widget.prompt.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '"${widget.prompt}"',
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, height: 1.4, fontStyle: FontStyle.italic, color: _muted(context)),
+                      ),
+                    ],
+                    const SizedBox(height: 26),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      decoration: BoxDecoration(
+                        color: _tint(context, 0.045),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: _tint(context, 0.06)),
+                      ),
+                      child: Column(
+                        children: [
+                          for (var i = 0; i < _stageLabels.length; i++)
+                            _AiStageRow(
+                              label: _stageLabels[i],
+                              detail: (i == 1 && widget.stage == 1 && widget.detail.isNotEmpty)
+                                  ? (widget.total > 1
+                                      ? '"${widget.detail}" · ${widget.step} of ${widget.total}'
+                                      : '"${widget.detail}"')
+                                  : null,
+                              isDone: i < widget.stage,
+                              isActive: i == widget.stage,
+                              accent: accent,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AiStageRow extends StatelessWidget {
+  const _AiStageRow({
+    required this.label,
+    required this.detail,
+    required this.isDone,
+    required this.isActive,
+    required this.accent,
+  });
+
+  final String label;
+  final String? detail;
+  final bool isDone;
+  final bool isActive;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget marker;
+    if (isDone) {
+      marker = Icon(Icons.check_circle_rounded, key: const ValueKey('done'), size: 22, color: accent);
+    } else if (isActive) {
+      marker = SizedBox(
+        key: const ValueKey('active'),
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2.4, color: accent),
+      );
+    } else {
+      marker = Icon(Icons.circle_outlined, key: const ValueKey('pending'), size: 16, color: _tint(context, 0.25));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 24,
+            height: 22,
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 280),
+                transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+                child: marker,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 250),
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    height: 1.5,
+                    fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                    color: (isDone || isActive)
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.45),
+                  ),
+                  child: Text(label),
+                ),
+                // The term being searched, swapping as each one starts
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  alignment: Alignment.topLeft,
+                  child: detail == null
+                      ? const SizedBox(width: double.infinity)
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            layoutBuilder: (currentChild, previousChildren) {
+                              return Stack(
+                                alignment: Alignment.centerLeft,
+                                children: [
+                                  ...previousChildren,
+                                  if (currentChild != null) currentChild,
+                                ],
+                              );
+                            },
+                            child: Text(
+                              detail!,
+                              key: ValueKey(detail),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Glowing core, three tilted orbits with a spark on each, and twinkles.
+/// Every speed is a whole number of turns per loop, so the loop is seamless.
+class _AiOrbPainter extends CustomPainter {
+  _AiOrbPainter({required this.progress, required this.color}) : super(repaint: progress);
+
+  final Animation<double> progress;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = progress.value;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
+    final breathe = math.sin(t * math.pi * 2);
+    final bright = Color.lerp(color, Colors.white, 0.5)!;
+
+    // Halo
+    final haloRadius = radius * (0.92 + 0.05 * breathe);
+    canvas.drawCircle(
+      center,
+      haloRadius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [color.withValues(alpha: 0.34), color.withValues(alpha: 0.08), color.withValues(alpha: 0)],
+          stops: const [0.0, 0.55, 1.0],
+        ).createShader(Rect.fromCircle(center: center, radius: haloRadius)),
+    );
+
+    // Orbits
+    const tilts = [0.0, math.pi / 3, -math.pi / 3];
+    const speeds = [1, 2, 1];
+    const phases = [0.0, 0.35, 0.7];
+    final orbitA = radius * 0.86;
+    final orbitB = radius * 0.34;
+
+    for (var i = 0; i < tilts.length; i++) {
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(tilts[i]); // the rings stay put; only the sparks travel
+      canvas.drawOval(
+        Rect.fromCenter(center: Offset.zero, width: orbitA * 2, height: orbitB * 2),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.1
+          ..color = color.withValues(alpha: 0.26),
+      );
+
+      final angle = (t * speeds[i] + phases[i]) * math.pi * 2;
+      final spark = Offset(math.cos(angle) * orbitA, math.sin(angle) * orbitB);
+      // Fades slightly at the back of the orbit for a sense of depth.
+      final depth = 0.65 + 0.35 * math.sin(angle);
+      canvas.drawCircle(
+        spark,
+        radius * 0.085,
+        Paint()
+          ..color = color.withValues(alpha: 0.28 * depth)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawCircle(spark, radius * 0.038, Paint()..color = bright.withValues(alpha: 0.55 + 0.45 * depth));
+      canvas.restore();
+    }
+
+    // Core
+    final coreRadius = radius * (0.3 + 0.018 * breathe);
+    canvas.drawCircle(
+      center,
+      coreRadius * 1.25,
+      Paint()
+        ..color = color.withValues(alpha: 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+    );
+    canvas.drawCircle(
+      center,
+      coreRadius,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-0.35, -0.4),
+          colors: [bright, color],
+        ).createShader(Rect.fromCircle(center: center, radius: coreRadius)),
+    );
+
+    // Twinkles: four-point stars that swell and fade in turn
+    const twinkles = [
+      Offset(-0.78, -0.56),
+      Offset(0.7, -0.72),
+      Offset(0.86, 0.5),
+      Offset(-0.62, 0.74),
+      Offset(0.1, -0.94),
+    ];
+    for (var i = 0; i < twinkles.length; i++) {
+      final wave = math.sin((t * 2 + i / twinkles.length) * math.pi * 2);
+      if (wave <= 0) continue;
+      final position = center + Offset(twinkles[i].dx * radius, twinkles[i].dy * radius);
+      final arm = radius * 0.07 * wave;
+      final star = Path()
+        ..moveTo(position.dx, position.dy - arm)
+        ..quadraticBezierTo(position.dx, position.dy, position.dx + arm, position.dy)
+        ..quadraticBezierTo(position.dx, position.dy, position.dx, position.dy + arm)
+        ..quadraticBezierTo(position.dx, position.dy, position.dx - arm, position.dy)
+        ..quadraticBezierTo(position.dx, position.dy, position.dx, position.dy - arm)
+        ..close();
+      canvas.drawPath(star, Paint()..color = bright.withValues(alpha: 0.9 * wave));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AiOrbPainter oldDelegate) => oldDelegate.color != color;
 }

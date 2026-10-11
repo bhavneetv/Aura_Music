@@ -96,6 +96,33 @@ class FirebaseAccountSection extends ConsumerWidget {
     }
   }
 
+  Future<void> _linkGoogle(BuildContext context) async {
+    final res = await AuthService.instance.linkGoogleAccount();
+    if (context.mounted) {
+      if (res.success) {
+        _showSuccess(context, 'Google account linked successfully!');
+      } else {
+        _showError(context, res.message ?? 'Failed to link Google account');
+      }
+    }
+  }
+
+  Future<void> _sendVerification(BuildContext context) async {
+    final res = await AuthService.instance.sendEmailVerification();
+    if (context.mounted) {
+      if (res.success) {
+        _showSuccess(context, 'Verification email sent!');
+      } else {
+        _showError(context, res.message ?? 'Failed to send verification email');
+      }
+    }
+  }
+
+  Future<void> _signOut(BuildContext context) async {
+    await AuthService.instance.signOut();
+    if (context.mounted) context.go('/login');
+  }
+
   Future<void> _confirmDeleteAccount(BuildContext context) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -131,193 +158,342 @@ class FirebaseAccountSection extends ConsumerWidget {
     final accent = ref.watch(customizationProvider).accentColor;
     final appUser = ref.watch(currentAppUserStreamProvider).value;
     final isGuest = ref.watch(isGuestProvider);
+    final isAdmin = ref.watch(isAdminProvider);
     final user = AuthService.instance.currentFirebaseUser;
 
     if (user == null) {
-      return Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: ListTile(
-          leading: const Icon(Icons.account_circle_outlined, size: 36),
-          title: const Text('Not Signed In'),
-          subtitle: const Text('Sign in to sync your playlists and collaborate.'),
-          trailing: FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.black),
-            onPressed: () => context.go('/login'),
-            child: const Text('Sign In'),
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF161616) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
           ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.account_circle_outlined, size: 22, color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Not Signed In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 1),
+                  Text('Sign in to sync your library', style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white54 : Colors.black54)),
+                ],
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: ThemeData.estimateBrightnessForColor(accent) == Brightness.dark ? Colors.white : Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => context.go('/login'),
+              child: const Text('Sign In', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
       );
     }
 
     final hasGoogle = appUser?.providers.contains('google') ?? false;
     final hasPassword = appUser?.providers.contains('password') ?? false;
+    final displayName = appUser?.displayName.isNotEmpty == true
+        ? appUser!.displayName
+        : (user.displayName?.isNotEmpty == true ? user.displayName! : 'Aura Listener');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Guest Warning Banner
-        if (isGuest) ...[
-          Container(
-            padding: const EdgeInsets.all(14),
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: Colors.amber.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.amber.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 24),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Guest Account Active',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.amber),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Link Google or Email to protect your playlists from data loss.',
-                        style: TextStyle(fontSize: 11, color: isDark ? Colors.amber.shade200 : Colors.amber.shade900),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF151515) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
-
-        // User Profile Card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF161616) : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
-          ),
-          child: Column(
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: accent.withOpacity(0.2),
-                    backgroundImage: user.photoURL != null ? NetworkImage(user.photoURL!) : null,
-                    child: user.photoURL == null
-                        ? Text(
-                            (appUser?.displayName.isNotEmpty == true ? appUser!.displayName[0] : 'A').toUpperCase(),
-                            style: TextStyle(color: accent, fontWeight: FontWeight.bold, fontSize: 20),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              // Sleek Avatar
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: accent.withValues(alpha: 0.18),
+                backgroundImage: user.photoURL != null ? NetworkImage(user.photoURL!) : null,
+                child: user.photoURL == null
+                    ? Text(
+                        (displayName.isNotEmpty ? displayName[0] : 'A').toUpperCase(),
+                        style: TextStyle(color: accent, fontWeight: FontWeight.bold, fontSize: 16),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              // User Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                appUser?.displayName ?? user.displayName ?? 'Aura Listener',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined, size: 16),
-                              onPressed: () => _editDisplayName(context),
-                              tooltip: 'Edit Name',
-                            ),
-                          ],
+                        Flexible(
+                          child: Text(
+                            displayName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        Text(
-                          isGuest ? 'Guest Session' : (user.email ?? 'No email'),
-                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                        if (user.email != null && !user.emailVerified) ...[
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              const Text('Unverified', style: TextStyle(fontSize: 11, color: Colors.orange)),
-                              const SizedBox(width: 6),
-                              InkWell(
-                                onTap: () async {
-                                  final res = await AuthService.instance.sendEmailVerification();
-                                  if (context.mounted) {
-                                    if (res.success) {
-                                      _showSuccess(context, 'Verification email sent!');
-                                    } else {
-                                      _showError(context, res.message ?? 'Failed to send');
-                                    }
-                                  }
-                                },
-                                child: Text('Send verification', style: TextStyle(fontSize: 11, color: accent, decoration: TextDecoration.underline)),
-                              ),
-                            ],
+                        if (isAdmin) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF7C3AED),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.shield_rounded, size: 9, color: Colors.white),
+                                SizedBox(width: 2.5),
+                                Text(
+                                  'ADMIN',
+                                  style: TextStyle(
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
+                        const SizedBox(width: 4),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => _editDisplayName(context),
+                          child: Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: Icon(Icons.edit_outlined, size: 14, color: isDark ? Colors.white54 : Colors.black45),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            isGuest ? 'Guest Session' : (user.email ?? 'No email'),
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: isGuest
+                                  ? Colors.amber.shade700
+                                  : (isDark ? Colors.white54 : Colors.black54),
+                              fontWeight: isGuest ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (user.email != null && !user.emailVerified) ...[
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: () => _sendVerification(context),
+                            child: Text(
+                              'Verify',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: accent,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // More Actions Menu Button
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert_rounded, size: 20, color: isDark ? Colors.white54 : Colors.black54),
+                tooltip: 'Account Options',
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                onSelected: (val) {
+                  if (val == 'edit') _editDisplayName(context);
+                  if (val == 'admin') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+                    );
+                  }
+                  if (val == 'logout') _signOut(context);
+                  if (val == 'delete') _confirmDeleteAccount(context);
+                },
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    height: 38,
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 17, color: isDark ? Colors.white70 : Colors.black87),
+                        const SizedBox(width: 10),
+                        const Text('Edit Name', style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  if (isAdmin)
+                    PopupMenuItem(
+                      value: 'admin',
+                      height: 38,
+                      child: Row(
+                        children: const [
+                          Icon(Icons.admin_panel_settings_rounded, size: 17, color: Color(0xFF7C3AED)),
+                          SizedBox(width: 10),
+                          Text('Admin Portal', style: TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  PopupMenuItem(
+                    value: 'logout',
+                    height: 38,
+                    child: Row(
+                      children: const [
+                        Icon(Icons.logout_rounded, size: 17, color: Colors.redAccent),
+                        SizedBox(width: 10),
+                        Text('Sign Out', style: TextStyle(fontSize: 13, color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    height: 38,
+                    child: Row(
+                      children: const [
+                        Icon(Icons.delete_forever_rounded, size: 17, color: Colors.grey),
+                        SizedBox(width: 10),
+                        Text('Delete Account', style: TextStyle(fontSize: 13, color: Colors.grey)),
                       ],
                     ),
                   ),
                 ],
               ),
-              const Divider(height: 24),
-
-              // Account Linking Actions
-              if (isGuest || !hasGoogle) ...[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                  title: Text(isGuest ? 'Upgrade with Google' : 'Link Google Account'),
-                  subtitle: const Text('Keep the same UID & cloud playlists', style: TextStyle(fontSize: 11)),
-                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
-                  onTap: () async {
-                    final res = await AuthService.instance.linkGoogleAccount();
-                    if (context.mounted) {
-                      if (res.success) {
-                        _showSuccess(context, 'Google account linked successfully!');
-                      } else {
-                        _showError(context, res.message ?? 'Failed to link');
-                      }
-                    }
-                  },
-                ),
-              ],
-              if (isGuest || !hasPassword) ...[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.email_outlined),
-                  title: Text(isGuest ? 'Upgrade with Email & Password' : 'Add Email & Password'),
-                  subtitle: const Text('Add password login capability', style: TextStyle(fontSize: 11)),
-                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
-                  onTap: () => _linkEmail(context),
-                ),
-              ],
-
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.logout_rounded, color: Colors.red),
-                title: const Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
-                onTap: () async {
-                  await AuthService.instance.signOut();
-                  if (context.mounted) context.go('/login');
-                },
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.delete_forever_rounded, color: Colors.grey),
-                title: const Text('Delete My Account', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                onTap: () => _confirmDeleteAccount(context),
-              ),
             ],
           ),
-        ),
-      ],
+
+          // If Guest or missing provider, show a sleek mini link row
+          if (isGuest || !hasGoogle || !hasPassword) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isGuest
+                    ? Colors.amber.withValues(alpha: 0.1)
+                    : (isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03)),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isGuest
+                      ? Colors.amber.withValues(alpha: 0.25)
+                      : (isDark ? Colors.white10 : Colors.black12),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isGuest ? Icons.cloud_off_rounded : Icons.link_rounded,
+                    size: 14,
+                    color: isGuest ? Colors.amber.shade700 : (isDark ? Colors.white54 : Colors.black45),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      isGuest ? 'Link to sync & save library:' : 'Link accounts:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isGuest
+                            ? (isDark ? Colors.amber.shade200 : Colors.amber.shade900)
+                            : (isDark ? Colors.white60 : Colors.black54),
+                        fontWeight: isGuest ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  if (!hasGoogle) ...[
+                    InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _linkGoogle(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.g_mobiledata_rounded, size: 16, color: accent),
+                            const SizedBox(width: 1),
+                            Text('Google', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: accent)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                  ],
+                  if (!hasPassword) ...[
+                    InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _linkEmail(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white10 : Colors.black12,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.email_outlined, size: 12, color: isDark ? Colors.white70 : Colors.black87),
+                            const SizedBox(width: 3),
+                            Text('Email', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -638,8 +814,6 @@ class FirebaseAdminPortalTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isAdmin = ref.watch(isAdminProvider);
     if (!isAdmin) return const SizedBox.shrink();
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
