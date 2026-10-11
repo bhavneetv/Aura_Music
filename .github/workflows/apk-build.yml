@@ -47,70 +47,9 @@ jobs:
         env:
           FIREBASE_SECRET: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          if [ -n "$FIREBASE_SECRET" ]; then
-            echo "Decoding google-services.json from secret..."
-            python3 -c "import base64, os; open('android/app/google-services.json', 'wb').write(base64.b64decode(os.environ['FIREBASE_SECRET'].strip()))"
-            echo "Firebase Android config restored successfully from secret."
-          else
-            echo "::warning::FIREBASE_GOOGLE_SERVICES_JSON_BASE64 secret not found! Writing fallback config so Android build succeeds."
-            cat << 'EOF' > android/app/google-services.json
-{
-  "project_info": {
-    "project_number": "99053788865",
-    "firebase_url": "https://aura-c0ef9-default-rtdb.asia-southeast1.firebasedatabase.app",
-    "project_id": "aura-c0ef9",
-    "storage_bucket": "aura-c0ef9.firebasestorage.app"
-  },
-  "client": [
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:99053788865:android:c037a580f2acd5ea16be40",
-        "android_client_info": {
-          "package_name": "com.example.music_app"
-        }
-      },
-      "oauth_client": [
-        {
-          "client_id": "99053788865-oij6ue1m50finaf1nmuni0hsl6naa13j.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.example.music_app",
-            "certificate_hash": "765340f62eb57fb2c83d9b5d373971b49a251f0c"
-          }
-        },
-        {
-          "client_id": "99053788865-89nobspq91is6u3b6rghlrm6t53omhpf.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
-      "api_key": [
-        {
-          "current_key": "AIzaSyBfiieR2gKzNBgRYawZsaaAtB3-vMy2cy0"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "99053788865-89nobspq91is6u3b6rghlrm6t53omhpf.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "99053788865-j1anpma0qnk4p9opab4v25dgpn3j3u68.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.example.musicApp"
-              }
-            }
-          ]
-        }
-      }
-    }
-  ],
-  "configuration_version": "1"
-}
-EOF
-          fi
+          FALLBACK_B64="ewogICJwcm9qZWN0X2luZm8iOiB7CiAgICAicHJvamVjdF9udW1iZXIiOiAiOTkwNTM3ODg4NjUiLAogICAgImZpcmViYXNlX3VybCI6ICJodHRwczovL2F1cmEtYzBlZjktZGVmYXVsdC1ydGRiLmFzaWEtc291dGhlYXN0MS5maXJlYmFzZWRhdGFiYXNlLmFwcCIsCiAgICAicHJvamVjdF9pZCI6ICJhdXJhLWMwZWY5IiwKICAgICJzdG9yYWdlX2J1Y2tldCI6ICJhdXJhLWMwZWY5LmZpcmViYXNlc3RvcmFnZS5hcHAiCiAgfSwKICAiY2xpZW50IjogWwogICAgewogICAgICAiY2xpZW50X2luZm8iOiB7CiAgICAgICAgIm1vYmlsZXNka19hcHBfaWQiOiAiMTo5OTA1Mzc4ODg2NTphbmRyb2lkOmMwMzdhNTgwZjJhY2Q1ZWExNmJlNDAiLAogICAgICAgICJhbmRyb2lkX2NsaWVudF9pbmZvIjogewogICAgICAgICAgInBhY2thZ2VfbmFtZSI6ICJjb20uZXhhbXBsZS5tdXNpY19hcHAiCiAgICAgICAgfQogICAgICB9LAogICAgICAib2F1dGhfY2xpZW50IjogWwogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiOTkwNTM3ODg4NjUtb2lqNnVlMW01MGZpbmFmMW5tdW5pMGhzbDZuYWExM2ouYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLAogICAgICAgICAgImNsaWVudF90eXBlIjogMSwKICAgICAgICAgICJhbmRyb2lkX2luZm8iOiB7CiAgICAgICAgICAgICJwYWNrYWdlX25hbWUiOiAiY29tLmV4YW1wbGUubXVzaWNfYXBwIiwKICAgICAgICAgICAgImNlcnRpZmljYXRlX2hhc2giOiAiNzY1MzQwZjYyZWI1N2ZiMmM4M2Q5YjVkMzczOTcxYjQ5YTI1MWYwYyIKICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiOTkwNTM3ODg4NjUtODlub2JzcHE5MWlzNnUzYjZyZ2hscm02dDUzb21ocGYuYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLAogICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgIH0KICAgICAgXSwKICAgICAgImFwaV9rZXkiOiBbCiAgICAgICAgewogICAgICAgICAgImN1cnJlbnRfa2V5IjogIkFJemFTeUJmaWllUjJnS3pOQmdSWWF3WnNhYUF0QjMtdk15MmN5MCIKICAgICAgICB9CiAgICAgIF0sCiAgICAgICJzZXJ2aWNlcyI6IHsKICAgICAgICAiYXBwaW52aXRlX3NlcnZpY2UiOiB7CiAgICAgICAgICAib3RoZXJfcGxhdGZvcm1fb2F1dGhfY2xpZW50IjogWwogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICI5OTA1Mzc4ODg2NS04OW5vYnNwcTkxaXM2dTNiNnJnaGxybTZ0NTNvbWhwZi5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgICAgICB9LAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICI5OTA1Mzc4ODg2NS1qMWFucG1hMHFuazRwOW9wYWI0djI1ZGdwbjNqM3U2OC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMiwKICAgICAgICAgICAgICAiaW9zX2luZm8iOiB7CiAgICAgICAgICAgICAgICAiYnVuZGxlX2lkIjogImNvbS5leGFtcGxlLm11c2ljQXBwIgogICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgXQogICAgICAgIH0KICAgICAgfQogICAgfQogIF0sCiAgImNvbmZpZ3VyYXRpb25fdmVyc2lvbiI6ICIxIgp9"
+          B64_DATA="${FIREBASE_SECRET:-$FALLBACK_B64}"
+          python3 -c "import base64, os; open('android/app/google-services.json', 'wb').write(base64.b64decode(os.environ['B64_DATA'].strip()))"
           ls -lh android/app/google-services.json
 
 
