@@ -44,12 +44,16 @@ class AuthService {
   UserModel? get currentUser => _currentUser;
   String get currentUserId => _currentUser?.id ?? StorageService.getDeviceId();
   String get currentUserName => _currentUser?.name ?? StorageService.getUserAuthorName();
+  String? get currentUserEmail => _currentUser?.email;
 
   /// Initializes auth state from local persistence
   void init() {
     _currentUser = StorageService.getCurrentUser();
     authState.value = _currentUser;
     debugPrint('[Auth] Initialized. Logged in: $isLoggedIn (${_currentUser?.name ?? "Guest"})');
+    if (_currentUser != null) {
+      _claimLocalPlaylistsForUser(_currentUser!);
+    }
   }
 
   /// Hashes a password deterministically with salt
@@ -133,6 +137,9 @@ class AuthService {
       _currentUser = newUser;
       authState.value = newUser;
 
+      // Claim local playlists for the newly registered user
+      await _claimLocalPlaylistsForUser(newUser);
+
       return AuthResult(
         success: true,
         message: 'Welcome to Aura, $cleanName! 🎉 Account created successfully.',
@@ -187,6 +194,9 @@ class AuthService {
       _currentUser = user;
       authState.value = user;
 
+      // Claim local playlists created on this device
+      await _claimLocalPlaylistsForUser(user);
+
       // Automatically restore cloud playlists on login
       int restoredCount = 0;
       if (user.cloudSlotId.isNotEmpty) {
@@ -216,21 +226,74 @@ class AuthService {
 
   /// Check whether the current user is the owner of a playlist
   bool isPlaylistOwner(Map<String, dynamic> playlist) {
-    if (playlist['isImported'] == true) return false;
-
     final ownerId = playlist['ownerId']?.toString();
-    if (ownerId != null && ownerId.isNotEmpty) {
-      return ownerId == currentUserId;
-    }
+    final ownerEmail = playlist['ownerEmail']?.toString().toLowerCase().trim();
+    final currentEmail = currentUserEmail?.toLowerCase().trim();
 
-    // If no ownerId set yet, check if author matches or if it's a locally created playlist
-    final authorName = playlist['authorName']?.toString();
-    if (authorName != null && authorName.isNotEmpty && authorName == currentUserName) {
+    // 1. Direct owner ID match (works for logged-in user ID and local device ID)
+    if (ownerId != null && ownerId.isNotEmpty && ownerId == currentUserId) {
       return true;
     }
 
-    // Default: if it's created on this device without isImported, treat as owner
+    // 2. Direct owner Email match (works across devices when logged into the same account)
+    if (isLoggedIn && ownerEmail != null && ownerEmail.isNotEmpty && currentEmail != null && currentEmail.isNotEmpty) {
+      if (ownerEmail == currentEmail) {
+        return true;
+      }
+    }
+
+    // 3. Author Name match (if not assigned to another user ID)
+    final authorName = (playlist['ownerName'] ?? playlist['authorName'])?.toString().trim().toLowerCase();
+    if (authorName != null && authorName.isNotEmpty && authorName == currentUserName.trim().toLowerCase()) {
+      if (ownerId == null || ownerId.isEmpty || ownerId == currentUserId || ownerId == StorageService.getDeviceId()) {
+        return true;
+      }
+    }
+
+    // 4. If explicitly marked imported from someone else and didn't match owner identity above
+    if (playlist['isImported'] == true) {
+      return false;
+    }
+
+    // 5. Default for locally created playlists on this device without isImported
     return true;
+  }
+
+  /// Scans local playlists and tags any created on this device or belonging to user with their account credentials
+  Future<void> _claimLocalPlaylistsForUser(UserModel user) async {
+    try {
+      final playlists = StorageService.getPlaylists();
+      bool modified = false;
+
+      for (final pl in playlists) {
+        final ownerId = pl['ownerId']?.toString();
+        final ownerEmail = pl['ownerEmail']?.toString();
+        final isImported = pl['isImported'] == true;
+
+        // If it was created on this device while logged out (ownerId is null, empty, or deviceId)
+        // and NOT imported from another user:
+        final isLocalUnclaimed = !isImported && (ownerId == null || ownerId.isEmpty || ownerId == StorageService.getDeviceId());
+
+        // Or if it matches this user's id, email, or author name
+        final matchesThisAccount = (ownerId != null && ownerId == user.id) ||
+            (ownerEmail != null && ownerEmail.toLowerCase() == user.email.toLowerCase()) ||
+            (!isImported && pl['authorName']?.toString().toLowerCase() == user.name.toLowerCase());
+
+        if (isLocalUnclaimed || matchesThisAccount) {
+          pl['ownerId'] = user.id;
+          pl['ownerEmail'] = user.email;
+          pl['ownerName'] = user.name;
+          pl['isImported'] = false;
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        await StorageService.savePlaylists(playlists);
+      }
+    } catch (e) {
+      debugPrint('[Auth] Error claiming local playlists: $e');
+    }
   }
 
   /// Backs up all local playlists to the user's dedicated account cloud slot
@@ -240,6 +303,7 @@ class AuthService {
     }
 
     try {
+      await _claimLocalPlaylistsForUser(_currentUser!);
       final playlists = StorageService.getPlaylists();
       String slotId = _currentUser!.cloudSlotId;
 
@@ -295,8 +359,11 @@ class AuthService {
 
     try {
       final resp = await _dio.get(
-        '$_apiBase/${_currentUser!.cloudSlotId}',
-        options: Options(validateStatus: (s) => s != null && s < 500),
+        '$_apiBase/${_currentUser!.cloudSlotId}?t=${DateTime.now().millisecondsSinceEpoch}',
+        options: Options(
+          validateStatus: (s) => s != null && s < 500,
+          headers: {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+        ),
       );
 
       if (resp.statusCode == 200 && resp.data != null) {
@@ -311,11 +378,14 @@ class AuthService {
         if (remotePlaylists.isEmpty) return 0;
 
         final localPlaylists = StorageService.getPlaylists();
-        final Set<String> existingIds = localPlaylists.map((p) => p['id']?.toString() ?? '').toSet();
-        final Set<String> existingCodes = localPlaylists
-            .map((p) => p['shareCode']?.toString().toUpperCase() ?? '')
-            .where((s) => s.isNotEmpty)
-            .toSet();
+        final Map<String, int> existingIdIndex = {};
+        final Map<String, int> existingCodeIndex = {};
+        for (int i = 0; i < localPlaylists.length; i++) {
+          final id = localPlaylists[i]['id']?.toString() ?? '';
+          final code = localPlaylists[i]['shareCode']?.toString().toUpperCase() ?? '';
+          if (id.isNotEmpty) existingIdIndex[id] = i;
+          if (code.isNotEmpty) existingCodeIndex[code] = i;
+        }
 
         int restored = 0;
         for (final item in remotePlaylists) {
@@ -324,10 +394,24 @@ class AuthService {
             final id = pl['id']?.toString() ?? '';
             final code = pl['shareCode']?.toString().toUpperCase() ?? '';
 
-            if (!existingIds.contains(id) && (code.isEmpty || !existingCodes.contains(code))) {
+            // User's own backup playlists are unlocked and owned by this account
+            pl['isImported'] = false;
+            pl['ownerId'] = _currentUser!.id;
+            pl['ownerEmail'] = _currentUser!.email;
+            pl['ownerName'] = _currentUser!.name;
+
+            final existingIdx = existingIdIndex[id] ?? (code.isNotEmpty ? existingCodeIndex[code] : null);
+            if (existingIdx != null) {
+              // Unlock and update existing local playlist with account ownership!
+              localPlaylists[existingIdx]['isImported'] = false;
+              localPlaylists[existingIdx]['ownerId'] = _currentUser!.id;
+              localPlaylists[existingIdx]['ownerEmail'] = _currentUser!.email;
+              localPlaylists[existingIdx]['ownerName'] = _currentUser!.name;
+              restored++;
+            } else {
               localPlaylists.add(pl);
-              if (id.isNotEmpty) existingIds.add(id);
-              if (code.isNotEmpty) existingCodes.add(code);
+              if (id.isNotEmpty) existingIdIndex[id] = localPlaylists.length - 1;
+              if (code.isNotEmpty) existingCodeIndex[code] = localPlaylists.length - 1;
               restored++;
             }
           }

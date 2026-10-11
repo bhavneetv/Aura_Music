@@ -285,15 +285,41 @@ class StorageService {
       final list = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
       bool needsResave = false;
+      final currentUser = getCurrentUser();
+
       for (final pl in list) {
         if (pl['shareCode'] == null || pl['shareCode'].toString().isEmpty) {
           pl['shareCode'] = PlaylistCloudSyncService.generateShareCode();
           needsResave = true;
         }
+
+        // If user is logged in, normalize and unlock playlists belonging to this user
+        if (currentUser != null) {
+          final isOwnerById = pl['ownerId'] != null && pl['ownerId'] == currentUser.id;
+          final isOwnerByEmail = pl['ownerEmail'] != null &&
+              pl['ownerEmail'].toString().trim().toLowerCase() == currentUser.email.trim().toLowerCase();
+
+          if (isOwnerById || isOwnerByEmail) {
+            if (pl['isImported'] == true) {
+              pl['isImported'] = false;
+              needsResave = true;
+            }
+            if (pl['ownerEmail'] != currentUser.email) {
+              pl['ownerEmail'] = currentUser.email;
+              needsResave = true;
+            }
+            if (pl['ownerId'] != currentUser.id) {
+              pl['ownerId'] = currentUser.id;
+              needsResave = true;
+            }
+          }
+        }
+
         if (pl['ownerId'] == null || pl['ownerId'].toString().isEmpty) {
           if (pl['isImported'] != true) {
-            pl['ownerId'] = getCurrentUser()?.id ?? getDeviceId();
-            pl['ownerName'] = getCurrentUser()?.name ?? getUserAuthorName();
+            pl['ownerId'] = currentUser?.id ?? getDeviceId();
+            pl['ownerName'] = currentUser?.name ?? getUserAuthorName();
+            if (currentUser != null) pl['ownerEmail'] = currentUser.email;
             needsResave = true;
           }
         }

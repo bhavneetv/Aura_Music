@@ -25,6 +25,7 @@ class PublicPlaylistSummary {
   final String syncId;
   final String shareCode;
   final String ownerId;
+  final String ownerEmail;
   final String name;
   final String description;
   final String authorName;
@@ -38,6 +39,7 @@ class PublicPlaylistSummary {
     required this.syncId,
     this.shareCode = '',
     this.ownerId = '',
+    this.ownerEmail = '',
     required this.name,
     required this.description,
     required this.authorName,
@@ -53,6 +55,7 @@ class PublicPlaylistSummary {
       syncId: json['syncId']?.toString() ?? '',
       shareCode: json['shareCode']?.toString() ?? '',
       ownerId: json['ownerId']?.toString() ?? '',
+      ownerEmail: json['ownerEmail']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Untitled Playlist',
       description: json['description']?.toString() ?? '',
       authorName: json['authorName']?.toString() ?? 'Community Member',
@@ -73,6 +76,7 @@ class PublicPlaylistSummary {
       'syncId': syncId,
       'shareCode': shareCode,
       'ownerId': ownerId,
+      'ownerEmail': ownerEmail,
       'name': name,
       'description': description,
       'authorName': authorName,
@@ -133,6 +137,7 @@ class PlaylistCloudSyncService {
     required List<Track> tracks,
     String? shareCode,
     String? ownerId,
+    String? ownerEmail,
   }) async {
     try {
       final code = (shareCode != null && shareCode.isNotEmpty) ? shareCode : generateShareCode();
@@ -142,6 +147,7 @@ class PlaylistCloudSyncService {
         'name': name,
         'shareCode': code,
         'ownerId': ownerId ?? '',
+        if (ownerEmail != null && ownerEmail.isNotEmpty) 'ownerEmail': ownerEmail,
         'description': description,
         'authorName': authorName,
         'isPublic': isPublic,
@@ -169,6 +175,7 @@ class PlaylistCloudSyncService {
                 syncId: syncId,
                 shareCode: code,
                 ownerId: ownerId ?? '',
+                ownerEmail: ownerEmail ?? '',
                 name: name,
                 description: description,
                 authorName: authorName,
@@ -200,6 +207,7 @@ class PlaylistCloudSyncService {
     required List<Track> tracks,
     String? shareCode,
     String? ownerId,
+    String? ownerEmail,
   }) async {
     if (syncId.isEmpty) return false;
     try {
@@ -212,6 +220,7 @@ class PlaylistCloudSyncService {
         'isSyncEnabled': isSyncEnabled,
         if (shareCode != null && shareCode.isNotEmpty) 'shareCode': shareCode,
         if (ownerId != null && ownerId.isNotEmpty) 'ownerId': ownerId,
+        if (ownerEmail != null && ownerEmail.isNotEmpty) 'ownerEmail': ownerEmail,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
         'tracks': tracks.map((t) => t.toJson()).toList(),
       };
@@ -229,6 +238,7 @@ class PlaylistCloudSyncService {
             syncId: syncId,
             shareCode: shareCode ?? '',
             ownerId: ownerId ?? '',
+            ownerEmail: ownerEmail ?? '',
             name: name,
             description: description,
             authorName: authorName,
@@ -259,6 +269,7 @@ class PlaylistCloudSyncService {
     String? playlistDescription,
     String? shareCode,
     String? ownerId,
+    String? ownerEmail,
   }) async {
     if (syncId.trim().isEmpty) {
       return SyncResult(
@@ -343,6 +354,9 @@ class PlaylistCloudSyncService {
         final resolvedOwner = (ownerId != null && ownerId.isNotEmpty)
             ? ownerId
             : remoteData['ownerId']?.toString() ?? '';
+        final resolvedOwnerEmail = (ownerEmail != null && ownerEmail.isNotEmpty)
+            ? ownerEmail
+            : remoteData['ownerEmail']?.toString() ?? '';
 
         final updatePayload = {
           'name': playlistName ?? remoteData['name'] ?? 'Collaborative Playlist',
@@ -353,6 +367,7 @@ class PlaylistCloudSyncService {
           'updatedAt': DateTime.now().millisecondsSinceEpoch,
           if (resolvedCode.isNotEmpty) 'shareCode': resolvedCode,
           if (resolvedOwner.isNotEmpty) 'ownerId': resolvedOwner,
+          if (resolvedOwnerEmail.isNotEmpty) 'ownerEmail': resolvedOwnerEmail,
           'tracks': merged.map((t) {
             final json = t.toJson();
             if (json['extras'] == null) json['extras'] = {};
@@ -378,6 +393,7 @@ class PlaylistCloudSyncService {
               syncId: syncId,
               shareCode: resolvedCode,
               ownerId: resolvedOwner,
+              ownerEmail: resolvedOwnerEmail,
               name: playlistName ?? remoteData['name']?.toString() ?? 'Playlist',
               description: playlistDescription ?? remoteData['description']?.toString() ?? '',
               authorName: remoteData['authorName']?.toString() ?? currentAuthor,
@@ -605,6 +621,7 @@ class PlaylistCloudSyncService {
                 ? data['shareCode'].toString()
                 : normalizedCode,
             'ownerId': data['ownerId']?.toString() ?? '',
+            'ownerEmail': data['ownerEmail']?.toString() ?? '',
             'name': data['name']?.toString() ?? 'Shared Playlist',
             'description': data['description']?.toString() ?? '',
             'authorName': data['authorName']?.toString() ?? 'Community Member',
@@ -689,6 +706,7 @@ class PlaylistCloudSyncService {
         syncId: 'seed_lofi',
         shareCode: 'AURA-LOFI99',
         ownerId: 'system_aura',
+        ownerEmail: 'system@auramusic.app',
         name: 'Midnight Lo-Fi & Chill',
         description: 'Atmospheric lo-fi beats, warm vinyl crackles, and calming night vibes.',
         authorName: 'Aura Curation',
@@ -702,6 +720,7 @@ class PlaylistCloudSyncService {
         syncId: 'seed_workout',
         shareCode: 'AURA-GYM100',
         ownerId: 'system_aura',
+        ownerEmail: 'system@auramusic.app',
         name: 'High Octane Gym Boost',
         description: 'Hard-hitting EDM, Phonk, and rap tracks built for intense lifting sessions.',
         authorName: 'Fitness Club',
@@ -715,6 +734,7 @@ class PlaylistCloudSyncService {
         syncId: 'seed_bollywood',
         shareCode: 'AURA-DESI55',
         ownerId: 'system_aura',
+        ownerEmail: 'system@auramusic.app',
         name: 'Bollywood Trending Hits',
         description: 'The biggest chart-topping romantic and dance tracks straight from Mumbai.',
         authorName: 'Desi Beats',
@@ -728,6 +748,7 @@ class PlaylistCloudSyncService {
         syncId: 'seed_acoustic',
         shareCode: 'AURA-ACOUST',
         ownerId: 'system_aura',
+        ownerEmail: 'system@auramusic.app',
         name: 'Acoustic Coffeehouse',
         description: 'Intimate fingerstyle guitars, stripped-down vocals, and cozy afternoon melodies.',
         authorName: 'Aura Acoustic',

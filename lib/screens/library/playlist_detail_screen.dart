@@ -79,10 +79,27 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     if (_playlist['shareCode'] == null || _playlist['shareCode'].toString().isEmpty) {
       _playlist['shareCode'] = PlaylistCloudSyncService.generateShareCode();
     }
+
+    if (AuthService.instance.isLoggedIn) {
+      final currentUserId = AuthService.instance.currentUserId;
+      final currentUserEmail = (AuthService.instance.currentUserEmail ?? '').trim().toLowerCase();
+      final pOwnerId = _playlist['ownerId']?.toString();
+      final pOwnerEmail = (_playlist['ownerEmail']?.toString() ?? '').trim().toLowerCase();
+      if ((pOwnerId != null && pOwnerId == currentUserId) ||
+          (pOwnerEmail.isNotEmpty && pOwnerEmail == currentUserEmail)) {
+        _playlist['isImported'] = false;
+        _playlist['ownerId'] = currentUserId;
+        _playlist['ownerEmail'] = AuthService.instance.currentUserEmail;
+      }
+    }
+
     if (_playlist['ownerId'] == null || _playlist['ownerId'].toString().isEmpty) {
       if (_playlist['isImported'] != true) {
         _playlist['ownerId'] = AuthService.instance.currentUserId;
         _playlist['ownerName'] = AuthService.instance.currentUserName;
+        if (AuthService.instance.isLoggedIn) {
+          _playlist['ownerEmail'] = AuthService.instance.currentUserEmail;
+        }
       }
     }
 
@@ -435,6 +452,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           tracks: _playlistTracks,
           shareCode: _playlist['shareCode']?.toString(),
           ownerId: _playlist['ownerId']?.toString() ?? AuthService.instance.currentUserId,
+          ownerEmail: _playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail,
         );
 
         if (syncId != null) {
@@ -454,6 +472,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
           playlistDescription: _playlist['description']?.toString(),
           shareCode: _playlist['shareCode']?.toString(),
           ownerId: _playlist['ownerId']?.toString(),
+          ownerEmail: _playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail,
         );
 
         if (result.success) {

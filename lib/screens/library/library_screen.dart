@@ -356,14 +356,29 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                 final cloudByCode = await PlaylistCloudSyncService.instance.fetchPlaylistByShareCode(input);
                                 if (cloudByCode != null) {
                                   final List<Track> tracks = List<Track>.from(cloudByCode['tracks'] as List? ?? []);
+                                  final currentUserId = AuthService.instance.currentUserId;
+                                  final currentUserEmail = (AuthService.instance.currentUserEmail ?? '').trim().toLowerCase();
+                                  final currentUserName = AuthService.instance.currentUserName.trim().toLowerCase();
+
+                                  final codeOwnerId = cloudByCode['ownerId']?.toString() ?? '';
+                                  final codeOwnerEmail = (cloudByCode['ownerEmail']?.toString() ?? '').trim().toLowerCase();
+                                  final codeAuthor = (cloudByCode['authorName']?.toString() ?? '').trim().toLowerCase();
+
+                                  final isMyOwnPlaylist = AuthService.instance.isLoggedIn && (
+                                    (codeOwnerId.isNotEmpty && codeOwnerId == currentUserId) ||
+                                    (codeOwnerEmail.isNotEmpty && codeOwnerEmail == currentUserEmail) ||
+                                    (codeAuthor.isNotEmpty && codeAuthor == currentUserName && (codeOwnerId.isEmpty || codeOwnerId == currentUserId))
+                                  );
+
                                   final newPl = {
                                     'id': DateTime.now().millisecondsSinceEpoch.toString(),
                                     'name': cloudByCode['name']?.toString() ?? 'Shared Playlist',
                                     'description': cloudByCode['description']?.toString() ?? 'Imported via Playlist Code',
                                     'authorName': cloudByCode['authorName']?.toString() ?? 'Community Member',
-                                    'ownerId': cloudByCode['ownerId']?.toString() ?? '',
+                                    'ownerId': isMyOwnPlaylist ? currentUserId : codeOwnerId,
+                                    'ownerEmail': isMyOwnPlaylist ? (AuthService.instance.currentUserEmail ?? codeOwnerEmail) : codeOwnerEmail,
                                     'ownerName': cloudByCode['authorName']?.toString() ?? '',
-                                    'isImported': true,
+                                    'isImported': !isMyOwnPlaylist,
                                     'isPublic': cloudByCode['isPublic'] == true,
                                     'isSyncEnabled': cloudByCode['isSyncEnabled'] == true,
                                     'shareCode': cloudByCode['shareCode']?.toString() ?? input.toUpperCase(),
@@ -646,6 +661,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                 final plId = DateTime.now().millisecondsSinceEpoch.toString();
                                 final shareCode = PlaylistCloudSyncService.generateShareCode();
                                 final ownerId = AuthService.instance.currentUserId;
+                                final ownerEmail = AuthService.instance.currentUserEmail ?? '';
                                 String? syncId;
 
                                 if (newPlaylistIsPublic || newPlaylistIsSyncEnabled) {
@@ -659,6 +675,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                     tracks: [],
                                     shareCode: shareCode,
                                     ownerId: ownerId,
+                                    ownerEmail: ownerEmail,
                                   );
                                 }
 
@@ -669,7 +686,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                   'description': desc.isNotEmpty ? desc : 'A custom playlist',
                                   'authorName': author,
                                   'ownerId': ownerId,
+                                  'ownerEmail': ownerEmail,
                                   'ownerName': author,
+                                  'isImported': false,
                                   'isPublic': newPlaylistIsPublic,
                                   'isSyncEnabled': newPlaylistIsSyncEnabled,
                                   'shareCode': shareCode,

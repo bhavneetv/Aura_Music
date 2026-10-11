@@ -134,6 +134,7 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
       final playlistId = widget.playlist['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
       String? syncId = widget.playlist['syncId']?.toString();
       final ownerId = widget.playlist['ownerId']?.toString() ?? AuthService.instance.currentUserId;
+      final ownerEmail = widget.playlist['ownerEmail']?.toString() ?? AuthService.instance.currentUserEmail ?? '';
 
       // If sync or public is enabled and no cloud slot exists yet, create one
       if ((_isSyncEnabled || _isPublic) && (syncId == null || syncId.isEmpty)) {
@@ -147,6 +148,7 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
           tracks: widget.tracks,
           shareCode: _shareCode,
           ownerId: ownerId,
+          ownerEmail: ownerEmail,
         );
       } else if (syncId != null && syncId.isNotEmpty) {
         // Update existing cloud slot with updated metadata and current tracks
@@ -160,6 +162,7 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
           tracks: widget.tracks,
           shareCode: _shareCode,
           ownerId: ownerId,
+          ownerEmail: ownerEmail,
         );
       }
 
@@ -172,6 +175,7 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
         'isSyncEnabled': _isSyncEnabled,
         'shareCode': _shareCode,
         'ownerId': ownerId,
+        'ownerEmail': ownerEmail,
         'ownerName': author,
         if (syncId != null) 'syncId': syncId,
       };

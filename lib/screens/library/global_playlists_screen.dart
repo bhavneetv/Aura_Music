@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/track.dart';
 import '../../providers/customization_provider.dart';
+import '../../services/auth/auth_service.dart';
 import '../../services/sharing/playlist_link_share_service.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/sync/playlist_cloud_sync_service.dart';
@@ -76,8 +77,8 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
         tracks = await PlaylistCloudSyncService.instance.fetchPlaylistTracksBySyncId(summary.syncId);
       }
 
-      // If tracks were empty or seed playlist, generate mock seed songs for immediate enjoyment
-      if (tracks.isEmpty) {
+      // Only system demonstration seed playlists get mock seed songs if empty
+      if (tracks.isEmpty && summary.syncId.startsWith('seed_')) {
         tracks = List.generate(summary.trackCount > 0 ? summary.trackCount : 12, (i) {
           final mock = Track.mockTracks[i % Track.mockTracks.length];
           return Track(
@@ -93,14 +94,26 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
         });
       }
 
+      final currentUserId = AuthService.instance.currentUserId;
+      final currentUserEmail = (AuthService.instance.currentUserEmail ?? '').trim().toLowerCase();
+      final currentUserName = AuthService.instance.currentUserName.trim().toLowerCase();
+
+      final isMyOwnPlaylist = AuthService.instance.isLoggedIn && (
+        (summary.ownerId.isNotEmpty && summary.ownerId == currentUserId) ||
+        (summary.ownerEmail.isNotEmpty && summary.ownerEmail.trim().toLowerCase() == currentUserEmail) ||
+        (summary.authorName.isNotEmpty && summary.authorName.trim().toLowerCase() == currentUserName &&
+            (summary.ownerId.isEmpty || summary.ownerId == currentUserId))
+      );
+
       final newPlaylist = {
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'name': summary.name,
         'description': summary.description.isNotEmpty ? summary.description : 'Imported from Global Playlists',
         'authorName': summary.authorName,
-        'ownerId': summary.ownerId,
+        'ownerId': isMyOwnPlaylist ? currentUserId : summary.ownerId,
+        'ownerEmail': isMyOwnPlaylist ? (AuthService.instance.currentUserEmail ?? summary.ownerEmail) : summary.ownerEmail,
         'ownerName': summary.authorName,
-        'isImported': true,
+        'isImported': !isMyOwnPlaylist,
         'isPublic': true,
         'isSyncEnabled': summary.isSyncEnabled,
         'shareCode': summary.shareCode,
@@ -212,6 +225,7 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
                               syncId: playlistData['syncId']?.toString() ?? '',
                               shareCode: playlistData['shareCode']?.toString() ?? code,
                               ownerId: playlistData['ownerId']?.toString() ?? '',
+                              ownerEmail: playlistData['ownerEmail']?.toString() ?? '',
                               name: playlistData['name']?.toString() ?? 'Shared Playlist',
                               description: playlistData['description']?.toString() ?? '',
                               authorName: playlistData['authorName']?.toString() ?? 'Community Member',

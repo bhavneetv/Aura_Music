@@ -38,6 +38,18 @@ void main() {
         'isImported': true,
       };
       expect(auth.isPlaylistOwner(importedPlaylist), isFalse);
+
+      // Cross-device same-account: matching email or currentUserId owns it even if isImported was set
+      final crossDeviceMyPlaylist = {
+        'id': 'pl_103',
+        'name': 'Created on Device 1 by Me',
+        'ownerId': auth.currentUserId,
+        'ownerEmail': 'bhavneet@aura.com',
+        'authorName': auth.currentUserName,
+        'isImported': true, // e.g. imported via code search on device 2
+      };
+      // Since ownerId matches currentUserId:
+      expect(auth.isPlaylistOwner(crossDeviceMyPlaylist), isTrue);
     });
   });
 
