@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../models/track.dart';
 import '../../models/source_mode.dart';
 import '../../models/user_model.dart';
-import '../sync/playlist_cloud_sync_service.dart';
 
 class StorageService {
   static const String _settingsBox = 'settings_box';
@@ -630,6 +630,7 @@ class StorageService {
   // ── Downloads Tracker ───────────────────────────────────────
 
   static Map<String, String> getDownloadedTracks() {
+    if (kIsWeb) return {};
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
     if (raw == null) return {};
@@ -659,6 +660,7 @@ class StorageService {
   }
 
   static List<Track> getFullDownloadedTracks() {
+    if (kIsWeb) return [];
     if (!Hive.isBoxOpen(_downloadsBox)) return [];
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
@@ -708,6 +710,7 @@ class StorageService {
   }
 
   static String? getDownloadedTrackPath(String trackId, {String? title, String? artist}) {
+    if (kIsWeb) return null;
     final downloads = getDownloadedTracks();
     if (downloads.containsKey(trackId)) {
       return downloads[trackId];
@@ -769,6 +772,7 @@ class StorageService {
   }
 
   static String? getDownloadedArtworkPath(String trackId, {String? title}) {
+    if (kIsWeb) return null;
     if (!Hive.isBoxOpen(_downloadsBox)) return null;
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
@@ -845,6 +849,7 @@ class StorageService {
   // ── Downloaded Playlists ────────────────────────────────────
 
   static List<Map<String, dynamic>> getDownloadedPlaylists() {
+    if (kIsWeb) return [];
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_playlists');
     if (raw == null) return [];

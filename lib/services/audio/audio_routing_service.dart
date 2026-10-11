@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 enum AudioDeviceType {
@@ -93,8 +94,11 @@ class AudioRoutingService {
   List<AudioOutputDevice> _cachedDevices = [];
   List<AudioOutputDevice> get cachedDevices => List.unmodifiable(_cachedDevices);
 
+  bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _isAndroid => !kIsWeb && Platform.isAndroid;
+
   void _initEventStream() {
-    if (!Platform.isAndroid && !Platform.isIOS) return;
+    if (!_isMobile) return;
 
     _eventChannel.receiveBroadcastStream().listen(
       (dynamic data) {
@@ -114,7 +118,7 @@ class AudioRoutingService {
   }
 
   Future<List<AudioOutputDevice>> getAvailableAudioOutputs() async {
-    if (!Platform.isAndroid && !Platform.isIOS) {
+    if (!_isMobile) {
       return [
         const AudioOutputDevice(
           id: 'default_speaker',
@@ -143,7 +147,7 @@ class AudioRoutingService {
   }
 
   Future<bool> selectAudioOutput(AudioOutputDevice device) async {
-    if (!Platform.isAndroid && !Platform.isIOS) return true;
+    if (!_isMobile) return true;
 
     try {
       final bool? success = await _methodChannel.invokeMethod('selectAudioOutput', {
@@ -158,7 +162,7 @@ class AudioRoutingService {
   }
 
   Future<bool> resetToDefaultRoute() async {
-    if (!Platform.isAndroid && !Platform.isIOS) return true;
+    if (!_isMobile) return true;
 
     try {
       final bool? success = await _methodChannel.invokeMethod('resetToDefaultRoute');
@@ -170,7 +174,7 @@ class AudioRoutingService {
   }
 
   Future<bool> openSystemOutputSwitcher() async {
-    if (!Platform.isAndroid) return false;
+    if (!_isAndroid) return false;
 
     try {
       final bool? success = await _methodChannel.invokeMethod('openSystemOutputSwitcher');

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -76,6 +77,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
   // ── Sign-in logic (original, unchanged) ────────────────────────────────────
 
   Future<void> _checkConnectivity() async {
+    if (kIsWeb) {
+      if (mounted) setState(() => _isOffline = false);
+      return;
+    }
     try {
       final results = await Connectivity().checkConnectivity();
       final hasConnection = !results.contains(ConnectivityResult.none);

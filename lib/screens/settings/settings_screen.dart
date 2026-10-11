@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1517,7 +1518,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
 
-                    if (Platform.isAndroid) ...[
+                    if (!kIsWeb && Platform.isAndroid) ...[
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,

@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../storage/storage_service.dart';
-import '../audio/audio_url_resolver.dart';
 import '../music_sources/source_manager.dart';
 import '../../models/track.dart';
 
@@ -43,23 +43,32 @@ class DownloadService extends ChangeNotifier {
   Map<String, DownloadTask> get tasks => _tasks;
 
   List<Track> getDownloadedTracksList() {
+    if (kIsWeb) return [];
     return StorageService.getFullDownloadedTracks();
   }
 
   bool isDownloaded(String trackId) {
+    if (kIsWeb) return false;
     final localPath = getLocalPath(trackId);
     if (localPath == null) return false;
-    final file = File(localPath);
-    return file.existsSync() && file.lengthSync() > 0;
+    try {
+      final file = File(localPath);
+      return file.existsSync() && file.lengthSync() > 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   String? getLocalPath(String trackId) {
+    if (kIsWeb) return null;
     final mapped = StorageService.getDownloadedTracks();
     if (!mapped.containsKey(trackId)) return null;
-    final file = File(mapped[trackId]!);
-    if (file.existsSync() && file.lengthSync() > 0) {
-      return file.path;
-    }
+    try {
+      final file = File(mapped[trackId]!);
+      if (file.existsSync() && file.lengthSync() > 0) {
+        return file.path;
+      }
+    } catch (_) {}
     return null;
   }
 

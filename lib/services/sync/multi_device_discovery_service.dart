@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 class DiscoveredDevice {
   final String deviceId;
@@ -44,7 +45,7 @@ class DiscoveredDevice {
       deviceName: json['deviceName'] as String? ?? 'Nearby Aura Device',
       ipAddress: senderIp,
       tcpPort: json['tcpPort'] as int? ?? 8766,
-      platform: json['platform'] as String? ?? Platform.operatingSystem,
+      platform: json['platform'] as String? ?? (kIsWeb ? 'web' : Platform.operatingSystem),
       lastSeen: DateTime.now(),
     );
   }
@@ -78,6 +79,7 @@ class MultiDeviceDiscoveryService {
     required String deviceName,
     required int tcpPort,
   }) async {
+    if (kIsWeb) return;
     if (_isListening) return;
 
     _localDeviceId = deviceId;
@@ -134,7 +136,7 @@ class MultiDeviceDiscoveryService {
         'deviceId': _localDeviceId,
         'deviceName': _localDeviceName,
         'tcpPort': _localTcpPort,
-        'platform': Platform.operatingSystem,
+        'platform': kIsWeb ? 'web' : Platform.operatingSystem,
       });
 
       final bytes = utf8.encode(payload);

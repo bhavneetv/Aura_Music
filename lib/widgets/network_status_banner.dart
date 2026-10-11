@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class NetworkStatusBanner extends StatefulWidget {
@@ -15,41 +16,48 @@ class NetworkStatusBanner extends StatefulWidget {
 }
 
 class _NetworkStatusBannerState extends State<NetworkStatusBanner> {
-  late StreamSubscription<List<ConnectivityResult>> _subscription;
+  StreamSubscription<List<ConnectivityResult>>? _subscription;
   bool _isOffline = false;
 
   @override
   void initState() {
     super.initState();
-    _checkInitialConnectivity();
-    _subscription = Connectivity().onConnectivityChanged.listen((results) {
-      final isOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
-      if (_isOffline != isOffline) {
-        setState(() {
-          _isOffline = isOffline;
-        });
-      }
-    });
-  }
-
-  Future<void> _checkInitialConnectivity() async {
-    final results = await Connectivity().checkConnectivity();
-    final isOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
-    if (mounted && _isOffline != isOffline) {
-      setState(() {
-        _isOffline = isOffline;
+    if (!kIsWeb) {
+      _checkInitialConnectivity();
+      _subscription = Connectivity().onConnectivityChanged.listen((results) {
+        final isOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
+        if (_isOffline != isOffline) {
+          setState(() {
+            _isOffline = isOffline;
+          });
+        }
       });
     }
   }
 
+  Future<void> _checkInitialConnectivity() async {
+    if (kIsWeb) return;
+    try {
+      final results = await Connectivity().checkConnectivity();
+      final isOffline = results.contains(ConnectivityResult.none) || results.isEmpty;
+      if (mounted && _isOffline != isOffline) {
+        setState(() {
+          _isOffline = isOffline;
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
-    _subscription.cancel();
+    _subscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) return widget.child;
+
     return Column(
       children: [
         AnimatedContainer(

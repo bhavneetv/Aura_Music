@@ -40,6 +40,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
     _loadPlaylists();
     AuthService.instance.playlistsChangedNotifier.addListener(_loadPlaylists);
     PlaylistLinkShareService.importEventNotifier.addListener(_loadPlaylists);
+    if (AuthService.instance.isLoggedIn && !AuthService.instance.isGuest && _playlists.isEmpty) {
+      AuthService.instance.restoreUserPlaylists().then((_) {
+        if (mounted) _loadPlaylists();
+      });
+    }
   }
 
   @override
@@ -1593,22 +1598,56 @@ class _AddPlaylistBottomSheetState extends ConsumerState<_AddPlaylistBottomSheet
 
     try {
       // 0. Attempt Firestore Collaborative Invite Code join
+      if (!AuthService.instance.isLoggedIn) {
+        await AuthService.instance.ensureAnonymousSession();
+      }
       if (AuthService.instance.isLoggedIn) {
         try {
           final repo = PlaylistRepository();
+          final currentUid = AuthService.instance.currentUserId;
+          final currentName = AuthService.instance.currentUserName.isNotEmpty
+              ? AuthService.instance.currentUserName
+              : StorageService.getUserAuthorName();
           final joinedPl = await repo.joinByInviteCode(
             input,
-            AuthService.instance.currentUserId,
-            AuthService.instance.currentUserName,
+            currentUid,
+            currentName,
           );
-          await AuthService.instance.restoreUserPlaylists();
+          
+          final convertedTracks = joinedPl.tracks.map((pt) => pt.toTrack().toJson()).toList();
+          final joinedMap = <String, dynamic>{
+            'id': joinedPl.id,
+            'name': joinedPl.name,
+            'description': joinedPl.description,
+            'authorName': joinedPl.ownerName,
+            'ownerId': joinedPl.ownerUid,
+            'ownerEmail': '',
+            'ownerName': joinedPl.ownerName,
+            'isImported': true,
+            'isPublic': joinedPl.isPublic,
+            'isSyncEnabled': joinedPl.collabEnabled,
+            'shareCode': joinedPl.shareCode ?? input.toUpperCase(),
+            'trackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+            'syncedTrackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+            'tracks': convertedTracks,
+          };
+          final localPlaylists = StorageService.getPlaylists();
+          localPlaylists.removeWhere((p) => p['id']?.toString() == joinedPl.id);
+          localPlaylists.insert(0, joinedMap);
+          await StorageService.savePlaylists(localPlaylists);
+          AuthService.instance.playlistsChangedNotifier.value++;
+
+          if (!AuthService.instance.isGuest) {
+            AuthService.instance.restoreUserPlaylists().catchError((_) => 0);
+          }
+
           if (mounted) {
             Navigator.pop(context);
             widget.onPlaylistsChanged();
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 backgroundColor: const Color(0xFF2E7D32),
-                content: Text('Joined collaborative playlist "${joinedPl.name}"! 🎵'),
+                content: Text('Joined collaborative playlist "${joinedPl.name}"! 🎵 Added to your Library.'),
               ),
             );
           }
@@ -1656,6 +1695,7 @@ class _AddPlaylistBottomSheetState extends ConsumerState<_AddPlaylistBottomSheet
         final playlists = StorageService.getPlaylists();
         playlists.insert(0, newPl);
         await StorageService.savePlaylists(playlists);
+        AuthService.instance.playlistsChangedNotifier.value++;
 
         final importEvent = PlaylistImportEvent(
           title: newPl['name'].toString(),

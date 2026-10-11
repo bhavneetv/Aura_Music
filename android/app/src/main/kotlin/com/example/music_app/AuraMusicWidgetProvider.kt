@@ -6,7 +6,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.view.KeyEvent
 import android.widget.RemoteViews
@@ -67,25 +75,26 @@ class AuraMusicWidgetProvider : AppWidgetProvider() {
                 if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
             )
 
-            // Try loading cached album art if available
+            // Try loading cached album art if available with smooth rounded corners
             if (!artPath.isNullOrBlank()) {
                 try {
                     val artFile = File(artPath)
                     if (artFile.exists() && artFile.canRead()) {
                         val bitmap = BitmapFactory.decodeFile(artFile.absolutePath)
                         if (bitmap != null) {
-                            views.setImageViewBitmap(R.id.widget_album_art, bitmap)
+                            val rounded = getRoundedCornerBitmap(bitmap)
+                            views.setImageViewBitmap(R.id.widget_album_art, rounded)
                         } else {
-                            views.setImageViewResource(R.id.widget_album_art, R.mipmap.ic_launcher)
+                            views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_default_art)
                         }
                     } else {
-                        views.setImageViewResource(R.id.widget_album_art, R.mipmap.ic_launcher)
+                        views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_default_art)
                     }
                 } catch (_: Exception) {
-                    views.setImageViewResource(R.id.widget_album_art, R.mipmap.ic_launcher)
+                    views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_default_art)
                 }
             } else {
-                views.setImageViewResource(R.id.widget_album_art, R.mipmap.ic_launcher)
+                views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_default_art)
             }
 
             // PendingIntent 1: Open app on widget body click
@@ -127,6 +136,26 @@ class AuraMusicWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_btn_next, nextPendingIntent)
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
+        }
+
+        private fun getRoundedCornerBitmap(bitmap: Bitmap): Bitmap {
+            val size = Math.min(bitmap.width, bitmap.height)
+            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            val paint = Paint().apply {
+                isAntiAlias = true
+                isFilterBitmap = true
+            }
+            val rect = Rect(0, 0, size, size)
+            val rectF = RectF(0f, 0f, size.toFloat(), size.toFloat())
+            val cornerRadius = size * 0.22f
+            canvas.drawRoundRect(rectF, cornerRadius, cornerRadius, paint)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+            val srcX = (bitmap.width - size) / 2
+            val srcY = (bitmap.height - size) / 2
+            val srcRect = Rect(srcX, srcY, srcX + size, srcY + size)
+            canvas.drawBitmap(bitmap, srcRect, rect, paint)
+            return output
         }
 
         private fun createMediaButtonPendingIntent(

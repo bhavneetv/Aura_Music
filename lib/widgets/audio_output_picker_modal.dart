@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/audio_routing_provider.dart';
@@ -189,7 +190,7 @@ class _AudioOutputPickerModalState extends ConsumerState<AudioOutputPickerModal>
                   }),
 
                   // System Output Switchers (Android Media Output Panel & iOS AVRoutePickerView)
-                  if (Platform.isAndroid || Platform.isIOS) ...[
+                  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) ...[
                     const SizedBox(height: 8),
                     InkWell(
                       onTap: () {

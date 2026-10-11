@@ -31,12 +31,14 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyA_PLACEHOLDER_WEB_KEY',
-    appId: '1:1234567890:web:abcdef123456',
-    messagingSenderId: '1234567890',
-    projectId: 'aura-music-app',
-    authDomain: 'aura-music-app.firebaseapp.com',
-    storageBucket: 'aura-music-app.appspot.com',
+    apiKey: 'AIzaSyAa8Eda6a51--muE8qPw9IWKR8BpJSVfe4',
+    appId: '1:99053788865:web:2193eb230a38761216be40',
+    messagingSenderId: '99053788865',
+    projectId: 'aura-c0ef9',
+    authDomain: 'aura-c0ef9.firebaseapp.com',
+    databaseURL: 'https://aura-c0ef9-default-rtdb.asia-southeast1.firebasedatabase.app',
+    storageBucket: 'aura-c0ef9.firebasestorage.app',
+    measurementId: 'G-GYB4CSWZMZ',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -48,29 +50,31 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyA_PLACEHOLDER_IOS_KEY',
-    appId: '1:1234567890:ios:abcdef123456',
-    messagingSenderId: '1234567890',
-    projectId: 'aura-music-app',
-    storageBucket: 'aura-music-app.appspot.com',
+    apiKey: 'AIzaSyC9ih5L_PbZ5AdBOcf0aiy_XKlaHE9Aj74',
+    appId: '1:99053788865:ios:151da9fc6808874316be40',
+    messagingSenderId: '99053788865',
+    projectId: 'aura-c0ef9',
+    storageBucket: 'aura-c0ef9.firebasestorage.app',
     iosBundleId: 'com.example.musicApp',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyA_PLACEHOLDER_IOS_KEY',
-    appId: '1:1234567890:ios:abcdef123456',
-    messagingSenderId: '1234567890',
-    projectId: 'aura-music-app',
-    storageBucket: 'aura-music-app.appspot.com',
+    apiKey: 'AIzaSyC9ih5L_PbZ5AdBOcf0aiy_XKlaHE9Aj74',
+    appId: '1:99053788865:ios:151da9fc6808874316be40',
+    messagingSenderId: '99053788865',
+    projectId: 'aura-c0ef9',
+    storageBucket: 'aura-c0ef9.firebasestorage.app',
     iosBundleId: 'com.example.musicApp',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyA_PLACEHOLDER_WINDOWS_KEY',
-    appId: '1:1234567890:web:abcdef123456',
-    messagingSenderId: '1234567890',
-    projectId: 'aura-music-app',
-    authDomain: 'aura-music-app.firebaseapp.com',
-    storageBucket: 'aura-music-app.appspot.com',
+    apiKey: 'AIzaSyAa8Eda6a51--muE8qPw9IWKR8BpJSVfe4',
+    appId: '1:99053788865:web:2193eb230a38761216be40',
+    messagingSenderId: '99053788865',
+    projectId: 'aura-c0ef9',
+    authDomain: 'aura-c0ef9.firebaseapp.com',
+    databaseURL: 'https://aura-c0ef9-default-rtdb.asia-southeast1.firebasedatabase.app',
+    storageBucket: 'aura-c0ef9.firebasestorage.app',
+    measurementId: 'G-GYB4CSWZMZ',
   );
 }

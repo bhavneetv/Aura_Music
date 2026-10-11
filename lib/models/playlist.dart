@@ -38,7 +38,7 @@ class Playlist {
   bool get isFavorites => type == 'favorites';
   bool isOwner(String? uid) => uid != null && uid == ownerUid;
   bool isMember(String? uid) => uid != null && memberUids.contains(uid);
-  bool canEditTracks(String? uid) => isOwner(uid) || (collabEnabled && isMember(uid));
+  bool canEditTracks(String? uid) => isOwner(uid) || collabEnabled || isMember(uid);
   bool canManage(String? uid) => isOwner(uid);
 
   factory Playlist.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {

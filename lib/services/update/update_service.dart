@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../version/version_service.dart';
@@ -22,6 +23,7 @@ class UpdateService {
     BuildContext context, {
     bool silentIfLatest = false,
   }) async {
+    if (kIsWeb) return;
     // I.2 Network connectivity check
     try {
       final result = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 3));

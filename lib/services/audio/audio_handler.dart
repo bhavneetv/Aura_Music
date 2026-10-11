@@ -348,6 +348,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         cur?.duration != item.duration ||
         cur?.artUri != item.artUri) {
       mediaItem.add(item);
+      HomeWidgetService.updatePlaybackState(
+        track: track,
+        isPlaying: playbackState.value.playing,
+      );
     }
   }
 
@@ -841,6 +845,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
           genre: '',
         );
         HomeWidgetService.updatePlaybackState(track: t, isPlaying: isPlaying);
+      } else {
+        HomeWidgetService.updatePlaybackState(track: null, isPlaying: false);
       }
     } catch (_) {}
   }

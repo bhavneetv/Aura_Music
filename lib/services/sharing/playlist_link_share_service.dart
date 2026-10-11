@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show gzip;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../models/track.dart';

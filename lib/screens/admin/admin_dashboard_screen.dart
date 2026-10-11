@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../services/network/app_connectivity.dart';
 import '../../config/admin_config.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/customization_provider.dart';
@@ -284,8 +284,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> wit
   }
 
   Future<void> _syncAll() async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -682,8 +681,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> wit
 
     return RefreshIndicator(
       onRefresh: () async {
-        final connResults = await Connectivity().checkConnectivity();
-        final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+        final isOffline = await AppConnectivity.isOffline();
         if (isOffline) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../network/app_connectivity.dart';
 import '../stats/stats_service.dart';
 import '../migration/migration_service.dart';
 import '../auth/auth_service.dart';
@@ -53,17 +54,16 @@ class SyncService {
     isSyncing.value = true;
 
     try {
-      final connectivity = await Connectivity().checkConnectivity();
-      final hasWifi = connectivity.contains(ConnectivityResult.wifi);
-      final hasCellular = connectivity.contains(ConnectivityResult.mobile);
-      final hasEthernet = connectivity.contains(ConnectivityResult.ethernet);
-      final isOnline = hasWifi || hasCellular || hasEthernet;
-
+      final isOnline = await AppConnectivity.isOnline();
       if (!isOnline) {
         return 'Account & database sync is disabled in offline mode.';
       }
 
-      if (syncWifiOnly.value && !hasWifi && !hasEthernet) {
+      final connectivity = await Connectivity().checkConnectivity();
+      final hasWifi = connectivity.contains(ConnectivityResult.wifi);
+      final hasEthernet = connectivity.contains(ConnectivityResult.ethernet);
+
+      if (!kIsWeb && syncWifiOnly.value && !hasWifi && !hasEthernet) {
         return 'Sync skipped: "Sync on Wi-Fi only" is enabled.';
       }
 

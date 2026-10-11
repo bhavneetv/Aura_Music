@@ -10,6 +10,7 @@ import '../../services/sync/playlist_cloud_sync_service.dart';
 import '../../themes/app_theme.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../../widgets/playlist_imported_dialog.dart';
+import 'playlist_detail_screen.dart';
 
 class GlobalPlaylistsScreen extends ConsumerStatefulWidget {
   const GlobalPlaylistsScreen({super.key});
@@ -24,7 +25,6 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
   String _searchQuery = '';
   int _selectedFilterIndex = 0; // 0: All, 1: Collaborative, 2: Recent
   final Set<String> _importingIds = {};
-  final Set<String> _importedSyncIds = {};
 
   static const List<String> _filters = [
     'All',
@@ -35,18 +35,18 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadExistingImportedIds();
     _fetchGlobalPlaylists();
+    AuthService.instance.playlistsChangedNotifier.addListener(_onPlaylistsChanged);
   }
 
-  void _loadExistingImportedIds() {
-    final local = StorageService.getPlaylists();
-    for (final pl in local) {
-      final syncId = pl['syncId']?.toString();
-      if (syncId != null && syncId.isNotEmpty) {
-        _importedSyncIds.add(syncId);
-      }
-    }
+  @override
+  void dispose() {
+    AuthService.instance.playlistsChangedNotifier.removeListener(_onPlaylistsChanged);
+    super.dispose();
+  }
+
+  void _onPlaylistsChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _fetchGlobalPlaylists() async {
@@ -68,6 +68,11 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
 
   Future<void> _importPlaylist(PublicPlaylistSummary summary, Color accentColor) async {
     if (_importingIds.contains(summary.syncId)) return;
+
+    // Ensure session exists if collaborative
+    if (summary.isSyncEnabled && !AuthService.instance.isLoggedIn) {
+      await AuthService.instance.ensureAnonymousSession();
+    }
 
     setState(() => _importingIds.add(summary.syncId));
 
@@ -106,7 +111,7 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
                   (summary.ownerId.isEmpty || summary.ownerId == currentUserId)));
 
       final newPlaylist = {
-        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'id': summary.syncId.isNotEmpty ? summary.syncId : DateTime.now().millisecondsSinceEpoch.toString(),
         'name': summary.name,
         'description': summary.description.isNotEmpty ? summary.description : 'Imported from Global Playlists',
         'authorName': summary.authorName,
@@ -119,17 +124,26 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
         'shareCode': summary.shareCode,
         'syncId': summary.syncId,
         'trackIds': tracks.map((t) => t.id).toList(),
+        'syncedTrackIds': tracks.map((t) => t.id).toList(),
         'tracks': tracks.map((t) => t.toJson()).toList(),
       };
 
       final playlists = StorageService.getPlaylists();
+      playlists.removeWhere((pl) {
+        final sId = pl['syncId']?.toString();
+        final id = pl['id']?.toString();
+        return (sId != null && sId.isNotEmpty && sId == summary.syncId) ||
+               (id != null && id.isNotEmpty && id == summary.syncId);
+      });
       playlists.insert(0, newPlaylist);
       await StorageService.savePlaylists(playlists);
+
+      // Trigger instant UI refresh across the app
+      AuthService.instance.playlistsChangedNotifier.value++;
 
       if (mounted) {
         setState(() {
           _importingIds.remove(summary.syncId);
-          _importedSyncIds.add(summary.syncId);
         });
 
         final importEvent = PlaylistImportEvent(
@@ -521,13 +535,37 @@ class _GlobalPlaylistsScreenState extends ConsumerState<GlobalPlaylistsScreen> {
         itemCount: filtered.length,
         itemBuilder: (context, index) {
           final item = filtered[index];
+          final localPlaylists = StorageService.getPlaylists();
+          final localIndex = localPlaylists.indexWhere((pl) {
+            final sId = pl['syncId']?.toString();
+            final id = pl['id']?.toString();
+            final code = pl['shareCode']?.toString();
+            return (sId != null && sId.isNotEmpty && sId == item.syncId) ||
+                   (id != null && id.isNotEmpty && id == item.syncId) ||
+                   (code != null && code.isNotEmpty && item.shareCode.isNotEmpty && code == item.shareCode);
+          });
+          final isImported = localIndex != -1;
+
           return _PlaylistCard(
             item: item,
             isDark: isDark,
             accentColor: accentColor,
-            isImported: _importedSyncIds.contains(item.syncId),
+            isImported: isImported,
             isImporting: _importingIds.contains(item.syncId),
             onImport: () => _importPlaylist(item, accentColor),
+            onOpen: isImported
+                ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PlaylistDetailScreen(
+                          playlistIndex: localIndex,
+                          initialPlaylist: localPlaylists[localIndex],
+                        ),
+                      ),
+                    );
+                  }
+                : null,
           );
         },
       ),
@@ -542,6 +580,7 @@ class _PlaylistCard extends StatelessWidget {
   final bool isImported;
   final bool isImporting;
   final VoidCallback onImport;
+  final VoidCallback? onOpen;
 
   const _PlaylistCard({
     required this.item,
@@ -550,6 +589,7 @@ class _PlaylistCard extends StatelessWidget {
     required this.isImported,
     required this.isImporting,
     required this.onImport,
+    this.onOpen,
   });
 
   static const double _art = 58;
@@ -684,11 +724,12 @@ class _PlaylistCard extends StatelessWidget {
           SizedBox(
             height: 34,
             child: ElevatedButton(
-              onPressed: isImported || isImporting ? null : onImport,
+              onPressed: isImporting
+                  ? null
+                  : (isImported ? onOpen : onImport),
               style: ElevatedButton.styleFrom(
-                backgroundColor: isImported ? Colors.grey.withValues(alpha: 0.2) : accentColor,
-                foregroundColor: isImported ? Colors.grey : Colors.black,
-                disabledBackgroundColor: isImported ? Colors.grey.withValues(alpha: 0.2) : accentColor.withValues(alpha: 0.6),
+                backgroundColor: isImported ? Colors.green.withValues(alpha: 0.18) : accentColor,
+                foregroundColor: isImported ? Colors.greenAccent : Colors.black,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 34),
@@ -703,15 +744,20 @@ class _PlaylistCard extends StatelessWidget {
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(isImported ? Icons.check_rounded : Icons.download_rounded,
-                            size: 15, color: isImported ? Colors.grey : Colors.black),
+                        Icon(
+                          isImported
+                              ? Icons.check_circle_rounded
+                              : (item.isSyncEnabled ? Icons.group_add_rounded : Icons.download_rounded),
+                          size: 15,
+                          color: isImported ? Colors.greenAccent : Colors.black,
+                        ),
                         const SizedBox(width: 4),
                         Text(
-                          isImported ? 'Added' : 'Import',
+                          isImported ? 'In Library ✅' : (item.isSyncEnabled ? 'Join Collab' : 'Import'),
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.bold,
-                            color: isImported ? Colors.grey : Colors.black,
+                            color: isImported ? Colors.greenAccent : Colors.black,
                           ),
                         ),
                       ],

@@ -19,7 +19,7 @@ struct AuraTimelineProvider: TimelineProvider {
         MusicEntry(
             date: Date(),
             title: "Aura Music",
-            artist: "Tap to play",
+            artist: "Tap to play music",
             isPlaying: "false",
             artPath: ""
         )
@@ -98,144 +98,214 @@ struct AuraWidgetEntryView: View {
     var entry: AuraTimelineProvider.Entry
     @Environment(\.widgetFamily) var family
 
+    @ViewBuilder
     var body: some View {
-        ZStack {
-            // Material dark glass background
-            Color(red: 0.11, green: 0.11, blue: 0.13)
-                .edgesIgnoringSafeArea(.all)
+        if #available(iOS 17.0, *) {
+            widgetContent
+                .containerBackground(Color(red: 0.09, green: 0.09, blue: 0.11), for: .widget)
+                .widgetURL(URL(string: "aura://now-playing"))
+        } else {
+            ZStack {
+                Color(red: 0.09, green: 0.09, blue: 0.11)
+                    .edgesIgnoringSafeArea(.all)
+                widgetContent
+            }
+            .widgetURL(URL(string: "aura://now-playing"))
+        }
+    }
 
-            HStack(spacing: 14) {
-                // Album Art / App Icon
-                Group {
-                    if let image = loadAlbumArt(path: entry.artPath) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        ZStack {
-                            LinearGradient(
-                                colors: [Color(red: 0.42, green: 0.36, blue: 0.91), Color(red: 0.25, green: 0.21, blue: 0.65)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            Image(systemName: "music.note")
-                                .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-                    }
-                }
-                .frame(width: 64, height: 64)
-                .cornerRadius(16)
-                .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
-
-                // Track Metadata
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-
-                    Text(entry.artist)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(Color.white.opacity(0.7))
-                        .lineLimit(1)
-
-                    HStack(spacing: 4) {
+    private var widgetContent: some View {
+        HStack(spacing: 12) {
+            // Album Art / Vinyl Artwork
+            Group {
+                if let image = loadAlbumArt(path: entry.artPath) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    // Sleek dark luxury vinyl disc fallback
+                    ZStack {
                         Circle()
-                            .fill(entry.isPlaying == "true" ? Color.green : Color.orange)
-                            .frame(width: 6, height: 6)
-                        Text(entry.isPlaying == "true" ? "Now Playing" : "Paused")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color.white.opacity(0.6))
-                    }
-                    .padding(.top, 2)
-                }
-
-                Spacer()
-
-                // Interactive Controls
-                HStack(spacing: 8) {
-                    // Previous
-                    if #available(iOS 17.0, *) {
-                        Button(intent: PreviousTrackIntent()) {
-                            Image(systemName: "backward.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Link(destination: URL(string: "aura://action/prev")!) {
-                            Image(systemName: "backward.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(Circle())
-                        }
-                    }
-
-                    // Play/Pause
-                    if #available(iOS 17.0, *) {
-                        Button(intent: TogglePlayIntent()) {
-                            Image(systemName: entry.isPlaying == "true" ? "pause.fill" : "play.fill")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(
-                                    LinearGradient(
-                                        colors: [Color(red: 0.48, green: 0.30, blue: 1.0), Color(red: 0.35, green: 0.15, blue: 0.9)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
+                            .fill(
+                                RadialGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 0.14, green: 0.14, blue: 0.17),
+                                        Color(red: 0.08, green: 0.08, blue: 0.10)
+                                    ]),
+                                    center: .center,
+                                    startRadius: 5,
+                                    endRadius: 36
                                 )
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Link(destination: URL(string: "aura://action/play_pause")!) {
-                            Image(systemName: entry.isPlaying == "true" ? "pause.fill" : "play.fill")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Color.purple)
-                                .clipShape(Circle())
-                        }
-                    }
-
-                    // Next
-                    if #available(iOS 17.0, *) {
-                        Button(intent: NextTrackIntent()) {
-                            Image(systemName: "forward.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Link(destination: URL(string: "aura://action/next")!) {
-                            Image(systemName: "forward.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.12))
-                                .clipShape(Circle())
-                        }
+                            )
+                        Circle()
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .frame(width: 56, height: 56)
+                        Circle()
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .frame(width: 42, height: 42)
+                        Circle()
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .frame(width: 28, height: 28)
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.49, green: 0.23, blue: 0.93),
+                                        Color(red: 0.35, green: 0.15, blue: 0.75)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 24, height: 24)
+                        Circle()
+                            .fill(Color(red: 0.08, green: 0.08, blue: 0.10))
+                            .frame(width: 8, height: 8)
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .frame(width: 72, height: 72)
+            .cornerRadius(18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
+
+            // Track Metadata
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.title)
+                    .font(.system(size: 14.5, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Text(entry.artist)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.7))
+                    .lineLimit(1)
+
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(entry.isPlaying == "true" ? Color(red: 0.65, green: 0.55, blue: 0.98) : Color.white.opacity(0.4))
+                        .frame(width: 6, height: 6)
+                    Text(entry.isPlaying == "true" ? "Playing" : "Paused")
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundColor(entry.isPlaying == "true" ? Color(red: 0.65, green: 0.55, blue: 0.98) : Color.white.opacity(0.5))
+                }
+                .padding(.top, 2)
+            }
+
+            Spacer()
+
+            // Interactive Playback Controls
+            HStack(spacing: 7) {
+                // Previous
+                if #available(iOS 17.0, *) {
+                    Button(intent: PreviousTrackIntent()) {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Link(destination: URL(string: "aura://action/prev")!) {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                }
+
+                // Play/Pause
+                if #available(iOS 17.0, *) {
+                    Button(intent: TogglePlayIntent()) {
+                        Image(systemName: entry.isPlaying == "true" ? "pause.fill" : "play.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.49, green: 0.23, blue: 0.93),
+                                        Color(red: 0.38, green: 0.15, blue: 0.85)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Link(destination: URL(string: "aura://action/play_pause")!) {
+                        Image(systemName: entry.isPlaying == "true" ? "pause.fill" : "play.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.49, green: 0.23, blue: 0.93),
+                                        Color(red: 0.38, green: 0.15, blue: 0.85)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(Circle())
+                    }
+                }
+
+                // Next
+                if #available(iOS 17.0, *) {
+                    Button(intent: NextTrackIntent()) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Link(destination: URL(string: "aura://action/next")!) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                }
+            }
         }
-        .widgetURL(URL(string: "aura://now-playing"))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private func loadAlbumArt(path: String) -> UIImage? {
         guard !path.isEmpty else { return nil }
-        return UIImage(contentsOfFile: path)
+        if let direct = UIImage(contentsOfFile: path) {
+            return direct
+        }
+        if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.example.musicApp") {
+            let filename = URL(fileURLWithPath: path).lastPathComponent
+            let groupPath = containerURL.appendingPathComponent("home_widget").appendingPathComponent(filename).path
+            if let groupImg = UIImage(contentsOfFile: groupPath) {
+                return groupImg
+            }
+            let directContainerPath = containerURL.appendingPathComponent(filename).path
+            if let directImg = UIImage(contentsOfFile: directContainerPath) {
+                return directImg
+            }
+        }
+        return nil
     }
 }
 

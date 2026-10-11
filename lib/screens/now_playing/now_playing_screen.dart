@@ -20,6 +20,7 @@ import '../../widgets/waveform_seek_bar.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../../themes/app_theme.dart';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import '../splash/splash_screen.dart';
 import '../equalizer/equalizer_screen.dart';
 import 'lyrics_screen.dart';
@@ -28,18 +29,22 @@ import '../../services/playlist/playlist_repository.dart';
 
 ImageProvider getArtworkImageProvider(Track track) {
   String path = track.artworkUrl.trim();
-  final downloadedArt = StorageService.getDownloadedArtworkPath(track.id);
-  if (downloadedArt != null && File(downloadedArt).existsSync()) {
-    path = downloadedArt;
-  }
-  if (path.startsWith('file://')) {
-    path = Uri.parse(path).toFilePath();
-  }
-  if (path.isNotEmpty && !path.startsWith('http://') && !path.startsWith('https://')) {
-    final file = File(path);
-    if (file.existsSync() && file.lengthSync() > 0) {
-      return FileImage(file);
-    }
+  if (!kIsWeb) {
+    try {
+      final downloadedArt = StorageService.getDownloadedArtworkPath(track.id);
+      if (downloadedArt != null && File(downloadedArt).existsSync()) {
+        path = downloadedArt;
+      }
+      if (path.startsWith('file://')) {
+        path = Uri.parse(path).toFilePath();
+      }
+      if (path.isNotEmpty && !path.startsWith('http://') && !path.startsWith('https://')) {
+        final file = File(path);
+        if (file.existsSync() && file.lengthSync() > 0) {
+          return FileImage(file);
+        }
+      }
+    } catch (_) {}
   }
   if (path.isNotEmpty && (path.startsWith('http://') || path.startsWith('https://'))) {
     return NetworkImage(path);
@@ -3504,30 +3509,36 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 playlists[index]['tracks'] = tracksList;
                                 await StorageService.savePlaylists(playlists);
 
-                                // If playlist is collaborative, auto sync addition to Firestore
-                                if (pl['isSyncEnabled'] == true && AuthService.instance.isLoggedIn && !AuthService.instance.isGuest) {
+                                // If playlist is collaborative, auto sync addition to Firestore (guests can contribute too)
+                                if (pl['isSyncEnabled'] == true) {
                                   final pid = pl['id']?.toString() ?? '';
-                                  if (pid.isNotEmpty && authorUid.isNotEmpty) {
-                                    try {
-                                      final currentTracks = tracksList.map((t) => Track.fromJson(Map<String, dynamic>.from(t as Map))).toList();
-                                      final baseIds = List<String>.from(pl['syncedTrackIds'] as List? ?? []);
-                                      PlaylistRepository().syncPlaylistTracks(
-                                        playlistId: pid,
-                                        callerUid: authorUid,
-                                        callerName: authorName,
-                                        localTracks: currentTracks,
-                                        deletedTrackIds: List<String>.from(pl['deletedTrackIds'] as List? ?? []),
-                                        baseTrackIds: baseIds,
-                                      ).then((synced) {
+                                  if (pid.isNotEmpty) {
+                                    () async {
+                                      try {
+                                        if (!AuthService.instance.isLoggedIn) {
+                                          await AuthService.instance.ensureAnonymousSession();
+                                        }
+                                        final effectiveUid = AuthService.instance.currentUserId.isNotEmpty
+                                            ? AuthService.instance.currentUserId
+                                            : (authorUid.isNotEmpty ? authorUid : StorageService.getDeviceId());
+                                        final currentTracks = tracksList.map((t) => Track.fromJson(Map<String, dynamic>.from(t as Map))).toList();
+                                        final baseIds = List<String>.from(pl['syncedTrackIds'] as List? ?? []);
+                                        final synced = await PlaylistRepository().syncPlaylistTracks(
+                                          playlistId: pid,
+                                          callerUid: effectiveUid,
+                                          callerName: authorName,
+                                          localTracks: currentTracks,
+                                          deletedTrackIds: List<String>.from(pl['deletedTrackIds'] as List? ?? []),
+                                          baseTrackIds: baseIds,
+                                        );
                                         if (synced.isNotEmpty) {
                                           pl['syncedTrackIds'] = synced.map((t) => t.id).toList();
                                           StorageService.updatePlaylist(pid, pl);
                                         }
-                                      }).catchError((e) {
+                                      } catch (e) {
                                         debugPrint('NowPlaying auto sync notice: $e');
-                                        return <Track>[];
-                                      });
-                                    } catch (_) {}
+                                      }
+                                    }();
                                   }
                                 }
                                 if (mounted) {

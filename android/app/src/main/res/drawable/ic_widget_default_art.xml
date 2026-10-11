@@ -1,0 +1,51 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Dark rounded background matching widget theme -->
+    <path
+        android:fillColor="#1D1D21"
+        android:pathData="M18,0 L82,0 A18,18 0 0,1 100,18 L100,82 A18,18 0 0,1 82,100 L18,100 A18,18 0 0,1 0,82 L0,18 A18,18 0 0,1 18,0 Z" />
+
+    <!-- Vinyl outer edge -->
+    <path
+        android:fillColor="#111113"
+        android:pathData="M50,8 A42,42 0 1,0 50,92 A42,42 0 1,0 50,8 Z" />
+
+    <!-- Vinyl Groove 1 -->
+    <path
+        android:strokeColor="#25252A"
+        android:strokeWidth="1.2"
+        android:pathData="M50,14 A36,36 0 1,0 50,86 A36,36 0 1,0 50,14 Z" />
+
+    <!-- Vinyl Groove 2 -->
+    <path
+        android:strokeColor="#212126"
+        android:strokeWidth="1.2"
+        android:pathData="M50,20 A30,30 0 1,0 50,80 A30,30 0 1,0 50,20 Z" />
+
+    <!-- Vinyl Groove 3 -->
+    <path
+        android:strokeColor="#25252A"
+        android:strokeWidth="1.2"
+        android:pathData="M50,26 A24,24 0 1,0 50,74 A24,24 0 1,0 50,26 Z" />
+
+    <!-- Vinyl Center Label (Aura Accent) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M50,33 A17,17 0 1,0 50,67 A17,17 0 1,0 50,33 Z" />
+
+    <!-- Label Inner Ring -->
+    <path
+        android:strokeColor="#9061F9"
+        android:strokeWidth="1"
+        android:pathData="M50,38 A12,12 0 1,0 50,62 A12,12 0 1,0 50,38 Z" />
+
+    <!-- Center Spindle Hole -->
+    <path
+        android:fillColor="#111113"
+        android:pathData="M50,45 A5,5 0 1,0 50,55 A5,5 0 1,0 50,45 Z" />
+
+</vector>

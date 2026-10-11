@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../../services/network/app_connectivity.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/customization_provider.dart';
 import '../../../services/auth/auth_service.dart';
@@ -65,9 +65,9 @@ class FirebaseAccountSection extends ConsumerWidget {
   }
 
   Future<void> _linkEmail(BuildContext context, Color accent) async {
-    final connResults = await Connectivity().checkConnectivity();
+    final isOffline = await AppConnectivity.isOffline();
     if (!context.mounted) return;
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    if (isOffline) {
       _showError(context, 'Account linking is disabled in offline mode. Please connect to the internet.');
       return;
     }
@@ -87,9 +87,9 @@ class FirebaseAccountSection extends ConsumerWidget {
   }
 
   Future<void> _linkGoogle(BuildContext context) async {
-    final connResults = await Connectivity().checkConnectivity();
+    final isOffline = await AppConnectivity.isOffline();
     if (!context.mounted) return;
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    if (isOffline) {
       _showError(context, 'Account linking is disabled in offline mode. Please connect to the internet.');
       return;
     }
@@ -115,8 +115,8 @@ class FirebaseAccountSection extends ConsumerWidget {
   }
 
   Future<void> _signOut(BuildContext context) async {
-    final connResults = await Connectivity().checkConnectivity();
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    final isOffline = await AppConnectivity.isOffline();
+    if (isOffline) {
       if (context.mounted) {
         _showError(context, 'Logout is disabled in offline mode. Please connect to the internet.');
       }
@@ -1038,8 +1038,7 @@ class FirebaseSyncSection extends ConsumerWidget {
                     onPressed: syncing
                         ? null
                         : () async {
-                            final connResults = await Connectivity().checkConnectivity();
-                            final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+                            final isOffline = await AppConnectivity.isOffline();
                             if (isOffline) {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(

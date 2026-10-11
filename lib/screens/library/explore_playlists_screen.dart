@@ -9,8 +9,8 @@ import '../../services/playlist/playlist_repository.dart';
 import '../../services/auth/auth_service.dart';
 import '../../services/storage/storage_service.dart';
 import '../../providers/customization_provider.dart';
-import '../../widgets/auth_dialog.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../services/network/app_connectivity.dart';
+import 'playlist_detail_screen.dart';
 
 class ExplorePlaylistsScreen extends ConsumerStatefulWidget {
   const ExplorePlaylistsScreen({super.key});
@@ -93,8 +93,7 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
       _errorMessage = null;
     });
 
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         setState(() {
@@ -135,8 +134,7 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
   }
 
   Future<void> _handleSearchByCode([String? inputCode]) async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -347,8 +345,7 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
   }
 
   Future<void> _joinCollaborator(Playlist p) async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -373,34 +370,88 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
       return;
     }
 
-    final uid = AuthService.instance.currentUserId;
-
-    if (!AuthService.instance.isLoggedIn || uid.isEmpty) {
-      final loggedIn = await AuthModalDialog.show(
-        context,
-        featurePrompt: 'Sign in to join collaborative playlists!',
-      );
-      if (!loggedIn) return;
+    // Ensure an active session exists (anonymous if user is a guest)
+    if (!AuthService.instance.isLoggedIn) {
+      await AuthService.instance.ensureAnonymousSession();
     }
 
     try {
       final currentUid = AuthService.instance.currentUserId;
-      final currentName = AuthService.instance.currentUserName;
+      final currentName = AuthService.instance.currentUserName.isNotEmpty
+          ? AuthService.instance.currentUserName
+          : StorageService.getUserAuthorName();
 
-      final code = await _repository.getInviteCodeForPlaylist(p.id);
-      if (code != null) {
-        await _repository.joinByInviteCode(code, currentUid, currentName);
-      } else {
-        await FirebaseFirestore.instance.collection('playlists').doc(p.id).update({
-          'memberUids': FieldValue.arrayUnion([currentUid]),
-          'updatedAt': FieldValue.serverTimestamp(),
+      Playlist target = p;
+
+      // 1. Join on Firestore if session exists
+      if (currentUid.isNotEmpty) {
+        try {
+          final code = await _repository.getInviteCodeForPlaylist(p.id);
+          if (code != null) {
+            target = await _repository.joinByInviteCode(code, currentUid, currentName);
+          } else {
+            await FirebaseFirestore.instance.collection('playlists').doc(p.id).update({
+              'memberUids': FieldValue.arrayUnion([currentUid]),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (fe) {
+          debugPrint('Firestore join notice: $fe');
+        }
+      }
+
+      // If tracks are missing from summary, fetch full playlist
+      if (target.tracks.isEmpty) {
+        try {
+          final fullPl = await _repository.getPlaylist(target.id);
+          if (fullPl != null) {
+            target = fullPl;
+          }
+        } catch (_) {}
+      }
+
+      // 2. ALWAYS add immediately to local StorageService!
+      final convertedTracks = target.tracks.map((pt) {
+        final t = pt.toTrack();
+        return t.toJson();
+      }).toList();
+
+      final joinedMap = <String, dynamic>{
+        'id': target.id,
+        'name': target.name,
+        'description': target.description,
+        'authorName': target.ownerName,
+        'ownerId': target.ownerUid,
+        'ownerEmail': '',
+        'ownerName': target.ownerName,
+        'isImported': true,
+        'isPublic': target.isPublic,
+        'isSyncEnabled': target.collabEnabled,
+        'shareCode': target.shareCode ?? '',
+        'trackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+        'syncedTrackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+        'tracks': convertedTracks,
+      };
+
+      final localPlaylists = StorageService.getPlaylists();
+      localPlaylists.removeWhere((item) => item['id']?.toString() == target.id);
+      localPlaylists.insert(0, joinedMap);
+      await StorageService.savePlaylists(localPlaylists);
+
+      // Trigger instant UI refresh across the app
+      AuthService.instance.playlistsChangedNotifier.value++;
+
+      // Background cloud restore if logged in
+      if (AuthService.instance.isLoggedIn && !AuthService.instance.isGuest) {
+        AuthService.instance.restoreUserPlaylists().catchError((e) {
+          debugPrint('Background restoreUserPlaylists notice: $e');
+          return 0;
         });
       }
 
-      await AuthService.instance.restoreUserPlaylists();
-
       if (mounted) {
         Navigator.pop(context);
+        final wasRejoined = p.memberUids.contains(currentUid);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF2E7D32),
@@ -409,7 +460,12 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
                 const Icon(Icons.handshake_rounded, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Joined "${p.name}" as a Collaborator! 🤝 Added to your Library.', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text(
+                    wasRejoined
+                        ? 'Re-joined "${target.name}" as a Collaborator! 🤝 Added to your Library.'
+                        : 'Joined "${target.name}" as a Collaborator! 🤝 Added to your Library.',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ],
             ),
@@ -430,8 +486,7 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
   }
 
   Future<void> _importAsCopy(Playlist p) async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -456,25 +511,80 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
       return;
     }
 
-    final uid = AuthService.instance.currentUserId;
-    final name = AuthService.instance.currentUserName;
-    if (uid.isEmpty) return;
-
     try {
-      await _repository.duplicateAsPrivateCopy(
-        sourcePlaylistId: p.id,
-        newOwnerUid: uid,
-        newOwnerName: name,
-      );
+      final currentUid = AuthService.instance.currentUserId;
+      final currentAuthor = AuthService.instance.currentUserName.isNotEmpty
+          ? AuthService.instance.currentUserName
+          : StorageService.getUserAuthorName();
 
-      // Restore into local playlists
-      await AuthService.instance.restoreUserPlaylists();
+      Playlist source = p;
+      if (source.tracks.isEmpty) {
+        try {
+          final full = await _repository.getPlaylist(p.id);
+          if (full != null) source = full;
+        } catch (_) {}
+      }
+
+      String newId = 'copy_${DateTime.now().millisecondsSinceEpoch}';
+
+      // If user is authenticated and not a guest, duplicate on Firestore as well
+      if (AuthService.instance.isLoggedIn && !AuthService.instance.isGuest && currentUid.isNotEmpty) {
+        try {
+          final remoteCopy = await _repository.duplicateAsPrivateCopy(
+            sourcePlaylistId: source.id,
+            newOwnerUid: currentUid,
+            newOwnerName: currentAuthor,
+          );
+          newId = remoteCopy.id;
+        } catch (cloudErr) {
+          debugPrint('Firestore copy creation notice: $cloudErr');
+        }
+      }
+
+      final convertedTracks = source.tracks.map((pt) {
+        final t = pt.toTrack();
+        return t.toJson();
+      }).toList();
+
+      final copyPlaylist = <String, dynamic>{
+        'id': newId,
+        'name': '${source.name} (Copy)',
+        'description': source.description.isNotEmpty ? source.description : 'Copied from ${source.ownerName}',
+        'authorName': currentAuthor,
+        'ownerId': currentUid.isNotEmpty ? currentUid : StorageService.getDeviceId(),
+        'ownerEmail': AuthService.instance.currentUserEmail ?? '',
+        'ownerName': currentAuthor,
+        'isImported': false,
+        'isPublic': false,
+        'isSyncEnabled': false,
+        'shareCode': '',
+        'trackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+        'syncedTrackIds': convertedTracks.map((t) => t['id']?.toString() ?? '').toList(),
+        'tracks': convertedTracks,
+      };
+
+      // IMMEDIATELY save to local storage
+      final localPlaylists = StorageService.getPlaylists();
+      localPlaylists.removeWhere((item) => item['id']?.toString() == newId);
+      localPlaylists.insert(0, copyPlaylist);
+      await StorageService.savePlaylists(localPlaylists);
+
+      // Trigger instant UI refresh across the app
+      AuthService.instance.playlistsChangedNotifier.value++;
+
+      // Trigger cloud restore in background if appropriate
+      if (AuthService.instance.isLoggedIn && !AuthService.instance.isGuest) {
+        AuthService.instance.restoreUserPlaylists().catchError((e) {
+          debugPrint('Background restoreUserPlaylists error: $e');
+          return 0;
+        });
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF2E7D32),
-            content: Text('Imported "${p.name}" as your private copy!'),
+            content: Text('Imported "${source.name}" as your private copy! 📥 Added to your Library.'),
           ),
         );
       }
@@ -494,8 +604,8 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = ref.watch(customizationProvider).accentColor;
     final currentUid = AuthService.instance.currentUserId;
-    final isMember = currentUid.isNotEmpty && p.memberUids.contains(currentUid);
     final isOwner = p.isOwner(currentUid);
+    final hasInLocalLibrary = StorageService.getPlaylists().any((item) => item['id']?.toString() == p.id);
 
     showModalBottomSheet(
       context: context,
@@ -585,35 +695,57 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
                             Expanded(
                               child: FilledButton.icon(
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: isMember ? Colors.grey.withOpacity(0.3) : accent,
-                                  foregroundColor: isMember ? (isDark ? Colors.white70 : Colors.black87) : Colors.black,
+                                  backgroundColor: hasInLocalLibrary ? Colors.grey.withOpacity(0.3) : accent,
+                                  foregroundColor: hasInLocalLibrary ? (isDark ? Colors.white70 : Colors.black87) : Colors.black,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),
-                                onPressed: (isMember || isJoining || isImporting) ? null : () async {
-                                  setModalState(() => isJoining = true);
-                                  try {
-                                    await _joinCollaborator(p);
-                                  } finally {
-                                    if (modalCtx.mounted) {
-                                      setModalState(() => isJoining = false);
-                                    }
-                                  }
-                                },
+                                onPressed: isJoining || isImporting
+                                    ? null
+                                    : () async {
+                                        if (hasInLocalLibrary) {
+                                          Navigator.pop(ctx);
+                                          final playlists = StorageService.getPlaylists();
+                                          final idx = playlists.indexWhere((item) => item['id']?.toString() == p.id);
+                                          if (idx != -1 && context.mounted) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => PlaylistDetailScreen(
+                                                  playlistIndex: idx,
+                                                  initialPlaylist: playlists[idx],
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                          return;
+                                        }
+
+                                        setModalState(() => isJoining = true);
+                                        try {
+                                          await _joinCollaborator(p);
+                                        } finally {
+                                          if (modalCtx.mounted) {
+                                            setModalState(() => isJoining = false);
+                                          }
+                                        }
+                                      },
                                 icon: isJoining
                                     ? const SizedBox(
                                         width: 16,
                                         height: 16,
                                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                                       )
-                                    : Icon(isMember ? Icons.check_circle_rounded : Icons.group_add_rounded, size: 17),
+                                    : Icon(hasInLocalLibrary ? Icons.check_circle_rounded : Icons.group_add_rounded, size: 17),
                                 label: FittedBox(
                                   fit: BoxFit.scaleDown,
                                   child: Text(
                                     isJoining
                                         ? 'Joining...'
-                                        : (isOwner
-                                            ? 'You are Owner 👑'
-                                            : (isMember ? 'Collaborator ✅' : 'Join Collab 🤝')),
+                                        : (hasInLocalLibrary
+                                            ? (isOwner ? 'Owner (In Library) 👑' : 'In Library ✅')
+                                            : (isOwner
+                                                ? 'Add to Library 👑'
+                                                : (p.memberUids.contains(currentUid) ? 'Re-join Collab 🤝' : 'Join Collab 🤝'))),
                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                   ),
                                 ),
@@ -955,8 +1087,7 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
                                   itemCount: filtered.length,
                                   itemBuilder: (context, index) {
                                     final pl = filtered[index];
-                                    final currentUid = AuthService.instance.currentUserId;
-                                    final isUserMember = currentUid.isNotEmpty && pl.memberUids.contains(currentUid);
+                                    final isUserInLibrary = StorageService.getPlaylists().any((item) => item['id']?.toString() == pl.id);
 
                                     return Card(
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -1029,14 +1160,14 @@ class _ExplorePlaylistsScreenState extends ConsumerState<ExplorePlaylistsScreen>
                                                             ),
                                                             child: const Text('PUBLIC', style: TextStyle(fontSize: 10, color: Colors.teal, fontWeight: FontWeight.bold)),
                                                           ),
-                                                        if (isUserMember)
+                                                        if (isUserInLibrary)
                                                           Container(
                                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                                                             decoration: BoxDecoration(
                                                               color: Colors.green.withOpacity(0.15),
                                                               borderRadius: BorderRadius.circular(6),
                                                             ),
-                                                            child: const Text('MEMBER ✅', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                                                            child: const Text('IN LIBRARY ✅', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
                                                           ),
                                                       ],
                                                     ),

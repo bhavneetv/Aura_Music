@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../models/track.dart';
 import '../storage/storage_service.dart';
 
@@ -60,13 +61,15 @@ class WaveformService {
 
     if (audioUrl.isNotEmpty) {
       // 1. Try local disk file
-      final file = File(audioUrl);
-      if (await file.exists()) {
+      if (!kIsWeb) {
         try {
-          final length = await file.length();
-          if (length > 1024) {
-            final samples = await _extractAmplitudesFromFile(file, length, barCount);
-            if (samples.isNotEmpty) return samples;
+          final file = File(audioUrl);
+          if (await file.exists()) {
+            final length = await file.length();
+            if (length > 1024) {
+              final samples = await _extractAmplitudesFromFile(file, length, barCount);
+              if (samples.isNotEmpty) return samples;
+            }
           }
         } catch (_) {}
       }

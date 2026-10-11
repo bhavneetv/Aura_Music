@@ -124,6 +124,7 @@ class NearbyHandoffService {
   String get deviceName {
     final stored = StorageService.getUserName();
     if (stored.isNotEmpty) return stored;
+    if (kIsWeb) return 'Aura Web';
     try {
       return Platform.localHostname;
     } catch (_) {

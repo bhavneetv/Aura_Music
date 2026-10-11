@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -10,7 +11,6 @@ import '../services/storage/storage_service.dart';
 import '../services/audio/audio_handler.dart';
 import '../services/audio/audio_url_resolver.dart';
 import '../services/recommendation/recommendation_engine.dart';
-import '../services/music_sources/jamendo_source.dart';
 import '../services/music_sources/source_manager.dart';
 import '../services/voice/voice_assistant_service.dart';
 import '../services/quick_actions/quick_actions_service.dart';
@@ -302,7 +302,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         if (nextIdx < state.queue.length) {
           final rawNextTrack = state.queue[nextIdx];
           final nextTrack = _resolveSingleTrackWithLocalDownload(rawNextTrack);
-          final bool isNextLocal = !nextTrack.audioUrl.startsWith('http') && 
+          final bool isNextLocal = !kIsWeb && !nextTrack.audioUrl.startsWith('http') && 
               File(nextTrack.audioUrl).existsSync() && 
               File(nextTrack.audioUrl).lengthSync() > 0;
           final isNextRemoteYT = !isNextLocal && (nextTrack.isYouTube || 
@@ -609,6 +609,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   bool _isLocalTrack(Track track) {
+    if (kIsWeb) return false;
     if (track.audioUrl.isNotEmpty && !track.audioUrl.startsWith('http')) {
       final file = File(track.audioUrl);
       if (file.existsSync() && file.lengthSync() > 0) return true;
@@ -622,6 +623,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   Track _resolveSingleTrackWithLocalDownload(Track track) {
+    if (kIsWeb) return track;
     final downloadedAudio = StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist);
     final downloadedArt = StorageService.getDownloadedArtworkPath(track.id, title: track.title);
 
@@ -646,6 +648,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   Future<bool> _checkIsOffline() async {
+    if (kIsWeb) return false;
     try {
       final results = await Connectivity().checkConnectivity();
       if (results.contains(ConnectivityResult.none) || results.isEmpty) {
@@ -826,8 +829,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       audioUrl = audioUrl.replaceAll('_320.', '_160.');
     }
 
-    final downloadedPath = StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist);
-    if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
+    final downloadedPath = !kIsWeb ? StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist) : null;
+    if (!kIsWeb && downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
     }
 
@@ -837,7 +840,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
 
     // Verify whether this track already exists on device storage
-    final bool isLocalFile = !audioUrl.startsWith('http') && 
+    final bool isLocalFile = !kIsWeb && !audioUrl.startsWith('http') && 
         File(audioUrl).existsSync() && 
         File(audioUrl).lengthSync() > 0;
 
@@ -849,7 +852,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         audioUrl.contains('googlevideo.com'));
     
     final bool needsResolution = !isLocalFile && (audioUrl.isEmpty || 
-        (!audioUrl.startsWith('http') && !File(audioUrl).existsSync()) ||
+        (!audioUrl.startsWith('http') && (!kIsWeb && !File(audioUrl).existsSync())) ||
         isYouTubeTrack);
 
     if (needsResolution) {
@@ -1106,8 +1109,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           nextTrackItem.id.startsWith('yt_');
       if (isYT) continue;
       
-      final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id, title: nextTrackItem.title, artist: nextTrackItem.artist);
-      if (localPath == null || !File(localPath).existsSync()) {
+      final localPath = !kIsWeb ? StorageService.getDownloadedTrackPath(nextTrackItem.id, title: nextTrackItem.title, artist: nextTrackItem.artist) : null;
+      if (kIsWeb || localPath == null || !File(localPath).existsSync()) {
         try {
           final freshUrl = await SourceManager.instance.getStreamUrl(nextTrackItem);
           if (freshUrl != null && freshUrl.isNotEmpty && freshUrl != nextTrackItem.audioUrl) {
@@ -1452,16 +1455,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
           audioUrl = audioUrl.replaceAll('_320.', '_160.');
         }
-        final downloadedPath = StorageService.getDownloadedTrackPath(targetTrack.id, title: targetTrack.title, artist: targetTrack.artist);
-        if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
+        final downloadedPath = !kIsWeb ? StorageService.getDownloadedTrackPath(targetTrack.id, title: targetTrack.title, artist: targetTrack.artist) : null;
+        if (!kIsWeb && downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
           audioUrl = downloadedPath;
         }
 
-        final bool isTargetLocal = !audioUrl.startsWith('http') && 
+        final bool isTargetLocal = !kIsWeb && !audioUrl.startsWith('http') && 
             File(audioUrl).existsSync() && 
             File(audioUrl).lengthSync() > 0;
 
-        if (!isTargetLocal && (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync()))) {
+        if (!isTargetLocal && (audioUrl.isEmpty || (!audioUrl.startsWith('http') && (!kIsWeb && !File(audioUrl).existsSync())))) {
           _handler.logPlaybackEvent(
             eventName: 'CROSSFADE_RESOLVING_URL',
             currentTrackId: targetTrack.id,

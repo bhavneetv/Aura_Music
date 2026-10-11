@@ -75,6 +75,7 @@
 			<string>com.example.musicApp</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+			 <string>com.googleusercontent.apps.99053788865-j1anpma0qnk4p9opab4v25dgpn3j3u68</string>
 				<string>aura</string>
 				<string>aura-playlist</string>
 				<string>auramusic</string>

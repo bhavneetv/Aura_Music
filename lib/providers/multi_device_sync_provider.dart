@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/sync/multi_device_discovery_service.dart';
 import '../services/sync/multi_device_sync_service.dart';
@@ -47,15 +48,19 @@ class MultiDeviceSyncNotifier extends Notifier<MultiDeviceSyncState> {
   @override
   MultiDeviceSyncState build() {
     final deviceId = 'aura_${DateTime.now().millisecondsSinceEpoch % 10000}';
-    final deviceName = 'Aura ${Platform.operatingSystem.toUpperCase()} (${Platform.localHostname})';
+    final osName = kIsWeb ? 'WEB' : Platform.operatingSystem.toUpperCase();
+    final host = kIsWeb ? 'Browser' : Platform.localHostname;
+    final deviceName = 'Aura $osName ($host)';
 
-    _discoverySub = _discoveryService.onDiscoveredDevicesChanged.listen((devices) {
-      state = state.copyWith(discoveredDevices: devices);
-    });
+    if (!kIsWeb) {
+      _discoverySub = _discoveryService.onDiscoveredDevicesChanged.listen((devices) {
+        state = state.copyWith(discoveredDevices: devices);
+      });
 
-    _sessionSub = _syncService.onSessionChanged.listen((session) {
-      state = state.copyWith(session: session);
-    });
+      _sessionSub = _syncService.onSessionChanged.listen((session) {
+        state = state.copyWith(session: session);
+      });
+    }
 
     // Wire up follower callbacks to PlaybackProvider
     _syncService.onFollowerPlayRequested = (track, position) async {

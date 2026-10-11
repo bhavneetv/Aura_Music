@@ -33,7 +33,11 @@ class AuthService {
   static final AuthService instance = AuthService._();
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: kIsWeb
+        ? '99053788865-89nobspq91is6u3b6rghlrm6t53omhpf.apps.googleusercontent.com'
+        : null,
+  );
   final UserService _userService = UserService();
 
   // Backward compatibility notifier for existing UI listeners
@@ -81,6 +85,10 @@ class AuthService {
           if (appUser != null) {
             _syncLocalProfile(appUser);
           }
+          restoreUserPlaylists().catchError((e) {
+            debugPrint('Auto-restore user playlists error: $e');
+            return 0;
+          });
         });
       } else {
         _currentAppUser = null;
@@ -193,14 +201,15 @@ class AuthService {
 
   /// Check whether the device currently has active network connectivity.
   Future<bool> isOnline() async {
+    if (kIsWeb) return true;
     try {
       final results = await Connectivity().checkConnectivity();
-      if (results.contains(ConnectivityResult.none) || results.isEmpty) {
+      if (results.contains(ConnectivityResult.none)) {
         return false;
       }
       return true;
     } catch (_) {
-      return false;
+      return true;
     }
   }
 
@@ -210,25 +219,39 @@ class AuthService {
       return AuthResult.fail('Internet connection required. Sign-in is disabled in offline mode.');
     }
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        // User cancelled the Google sign-in flow
-        return AuthResult.fail('Google sign-in was cancelled.');
+      UserCredential userCredential;
+      String? preferredName;
+
+      if (kIsWeb) {
+        final GoogleAuthProvider googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
+        userCredential = await _auth.signInWithPopup(googleProvider);
+        preferredName = userCredential.user?.displayName;
+      } else {
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          // User cancelled the Google sign-in flow
+          return AuthResult.fail('Google sign-in was cancelled.');
+        }
+
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final OAuthCredential credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        userCredential = await _auth.signInWithCredential(credential);
+        preferredName = googleUser.displayName;
       }
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential = await _auth.signInWithCredential(credential);
       final user = userCredential.user;
       if (user == null) return AuthResult.fail('Failed to obtain user info.');
 
-      final appUser = await _userService.syncUserOnLogin(user, preferredName: googleUser.displayName);
+      final appUser = await _userService.syncUserOnLogin(user, preferredName: preferredName);
       _currentAppUser = appUser;
       await _syncLocalProfile(appUser);
+      await restoreUserPlaylists();
       backupUserPlaylists().catchError((e) {
         debugPrint('Google login auto-backup error: $e');
         return '';
@@ -271,6 +294,7 @@ class AuthService {
       final appUser = await _userService.syncUserOnLogin(user);
       _currentAppUser = appUser;
       await _syncLocalProfile(appUser);
+      await restoreUserPlaylists();
       backupUserPlaylists().catchError((e) {
         debugPrint('Email login auto-backup error: $e');
         return '';
@@ -356,6 +380,27 @@ class AuthService {
     }
   }
 
+  /// Ensures an active Firebase session exists (anonymous if user is not signed in).
+  /// This ensures Firestore security rules (`request.auth != null`) are satisfied for collaborative actions.
+  Future<void> ensureAnonymousSession() async {
+    if (_auth.currentUser != null) return;
+    try {
+      final credential = await _auth.signInAnonymously();
+      final user = credential.user;
+      if (user != null) {
+        final name = StorageService.getUserAuthorName();
+        final finalName = name.isNotEmpty ? name : 'Guest Listener';
+        await user.updateDisplayName(finalName);
+        final appUser = await _userService.syncUserOnLogin(user, preferredName: finalName);
+        _currentAppUser = appUser;
+        await _syncLocalProfile(appUser);
+        authState.value = true;
+      }
+    } catch (e) {
+      debugPrint('ensureAnonymousSession notice: $e');
+    }
+  }
+
   // --- 5. Account Linking: Add Google to Email/Password or Guest ---
   Future<AuthResult> linkGoogleAccount() async {
     if (!await isOnline()) {
@@ -365,18 +410,31 @@ class AuthService {
     if (user == null) return AuthResult.fail('No active session.');
 
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        return AuthResult.fail('Google sign-in was cancelled.');
+      UserCredential userCred;
+      String? linkedEmail;
+
+      if (kIsWeb) {
+        final GoogleAuthProvider googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
+        userCred = await user.linkWithPopup(googleProvider);
+        linkedEmail = userCred.user?.email;
+      } else {
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          return AuthResult.fail('Google sign-in was cancelled.');
+        }
+
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final OAuthCredential credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        userCred = await user.linkWithCredential(credential);
+        linkedEmail = googleUser.email.trim();
       }
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final userCred = await user.linkWithCredential(credential);
       final updatedUser = userCred.user ?? user;
 
       final providers = updatedUser.providerData
@@ -386,7 +444,7 @@ class AuthService {
         updatedUser.uid,
         providers,
         isGuest: false,
-        linkedGoogleEmail: googleUser.email.trim(),
+        linkedGoogleEmail: linkedEmail,
       );
 
       final appUser = await _userService.getUser(updatedUser.uid, isEmailVerified: updatedUser.emailVerified);
@@ -656,27 +714,29 @@ class AuthService {
       // --- PRUNE DELETED PLAYLISTS FROM CLOUD ---
       // Any remote playlist owned by this user that is NOT in localIds was deleted locally,
       // so delete it from cloud backup as well!
-      try {
-        final remoteOwnedSnap = await FirebaseFirestore.instance
-            .collection('playlists')
-            .where('ownerUid', isEqualTo: uid)
-            .get();
+      if (localPlaylists.isNotEmpty) {
+        try {
+          final remoteOwnedSnap = await FirebaseFirestore.instance
+              .collection('playlists')
+              .where('ownerUid', isEqualTo: uid)
+              .get();
 
-        for (final doc in remoteOwnedSnap.docs) {
-          final data = doc.data();
-          final type = data['type']?.toString() ?? 'custom';
-          if (type == 'favorites') continue;
+          for (final doc in remoteOwnedSnap.docs) {
+            final data = doc.data();
+            final type = data['type']?.toString() ?? 'custom';
+            if (type == 'favorites') continue;
 
-          if (!localIds.contains(doc.id)) {
-            try {
-              await repo.deletePlaylist(doc.id, uid);
-            } catch (de) {
-              debugPrint('Failed to prune deleted remote playlist ${doc.id}: $de');
+            if (!localIds.contains(doc.id)) {
+              try {
+                await repo.deletePlaylist(doc.id, uid);
+              } catch (de) {
+                debugPrint('Failed to prune deleted remote playlist ${doc.id}: $de');
+              }
             }
           }
+        } catch (pe) {
+          debugPrint('Failed to query remote playlists for pruning: $pe');
         }
-      } catch (pe) {
-        debugPrint('Failed to query remote playlists for pruning: $pe');
       }
 
       // Also backup favorites
@@ -759,20 +819,12 @@ class AuthService {
       }
 
       final existingLocal = StorageService.getPlaylists();
-      // Keep local playlists that are NOT owned by the current user (e.g. joined or other author),
-      // or that ARE present in docMap. Any playlist owned by the current user that is no longer
-      // in docMap was pruned/deleted from cloud, so it should not linger locally.
+      // Preserve all existing local playlists so local copies and newly created
+      // playlists are never dropped if Firestore queries lag or miss them.
       final localMap = <String, Map<String, dynamic>>{};
       for (final p in existingLocal) {
         final pid = p['id']?.toString() ?? '';
-        if (pid.isEmpty) continue;
-        final ownerId = p['ownerId']?.toString() ?? p['ownerUid']?.toString() ?? '';
-        final isOwnedByCurrentUser = ownerId.isNotEmpty && ownerId == uid;
-        if (isOwnedByCurrentUser) {
-          if (docMap.containsKey(pid)) {
-            localMap[pid] = p;
-          }
-        } else {
+        if (pid.isNotEmpty) {
           localMap[pid] = p;
         }
       }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../services/network/app_connectivity.dart';
 import '../providers/customization_provider.dart';
 import '../services/auth/auth_service.dart';
 
@@ -19,8 +19,8 @@ class AuthModalDialog extends ConsumerStatefulWidget {
     VoidCallback? onLoggedIn,
     String? featurePrompt,
   }) async {
-    final connResults = await Connectivity().checkConnectivity();
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    final isOffline = await AppConnectivity.isOffline();
+    if (isOffline) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -70,8 +70,8 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handleSubmit() async {
-    final connResults = await Connectivity().checkConnectivity();
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    final isOffline = await AppConnectivity.isOffline();
+    if (isOffline) {
       setState(() {
         _isLoading = false;
         _errorMessage = 'Internet connection required. Login is disabled in offline mode.';
@@ -127,8 +127,8 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handleLogout() async {
-    final connResults = await Connectivity().checkConnectivity();
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    final isOffline = await AppConnectivity.isOffline();
+    if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -157,8 +157,8 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
     final nav = Navigator.of(context);
     final accentColor = ref.read(customizationProvider).accentColor;
 
-    final connResults = await Connectivity().checkConnectivity();
-    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+    final isOffline = await AppConnectivity.isOffline();
+    if (isOffline) {
       if (mounted) {
         messenger.showSnackBar(
           const SnackBar(

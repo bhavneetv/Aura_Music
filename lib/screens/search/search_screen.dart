@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../services/network/app_connectivity.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/music_provider.dart';
@@ -197,8 +197,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with TickerProvider
   }
 
   Future<void> _toggleAiMode() async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       triggerHaptic(HapticFeedbackType.light);
       if (mounted) {
@@ -496,8 +495,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with TickerProvider
   // updates, which tell the curating animation which step is running.
   Future<void> _executeAiSearch(String query) async {
     if (query.trim().isEmpty) return;
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

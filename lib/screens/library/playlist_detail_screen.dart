@@ -12,11 +12,10 @@ import '../sharing/remote_link_share_modal.dart';
 import 'package:flutter/services.dart';
 import '../../services/auth/auth_service.dart';
 import '../../widgets/playlist_settings_dialog.dart';
-import '../../widgets/auth_dialog.dart';
 import '../../models/playlist.dart';
 import '../../models/playlist_track.dart';
 import '../../services/playlist/playlist_repository.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import '../../services/network/app_connectivity.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Playlist page
@@ -345,13 +344,21 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         _loadPlaylistData();
       });
 
-      // Sync to Firestore if collab sync is active
-      if (_playlist['isSyncEnabled'] == true && AuthService.instance.isLoggedIn && !AuthService.instance.isGuest) {
+      // Sync to Firestore if collab sync is active (guests can contribute too)
+      if (_playlist['isSyncEnabled'] == true) {
+        if (!AuthService.instance.isLoggedIn) {
+          AuthService.instance.ensureAnonymousSession();
+        }
         final pid = _playlist['id']?.toString() ?? '';
-        if (pid.isNotEmpty && callerUid.isNotEmpty) {
+        final syncUid = callerUid.isNotEmpty
+            ? callerUid
+            : (AuthService.instance.currentUserId.isNotEmpty
+                ? AuthService.instance.currentUserId
+                : StorageService.getDeviceId());
+        if (pid.isNotEmpty) {
           PlaylistRepository().syncPlaylistTracks(
             playlistId: pid,
-            callerUid: callerUid,
+            callerUid: syncUid,
             callerName: callerName,
             localTracks: _playlistTracks,
             deletedTrackIds: List<String>.from(_playlist['deletedTrackIds'] as List? ?? []),
@@ -396,15 +403,22 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         _loadPlaylistData();
       });
 
-      // Remove from Firestore if authenticated
-      if (AuthService.instance.isLoggedIn) {
-        final pid = _playlist['id']?.toString() ?? '';
-        final uid = AuthService.instance.currentUserId;
-        if (pid.isNotEmpty && uid.isNotEmpty && removedTrackId.isNotEmpty) {
-          PlaylistRepository().removeTrack(pid, removedTrackId, uid).catchError((e) {
-            debugPrint('Firestore removeTrack notice: $e');
-          });
-        }
+      // Remove from Firestore if collaborative sync is active (guests can contribute too)
+      if (_playlist['isSyncEnabled'] == true) {
+        () async {
+          if (!AuthService.instance.isLoggedIn) {
+            await AuthService.instance.ensureAnonymousSession();
+          }
+          final pid = _playlist['id']?.toString() ?? '';
+          final uid = AuthService.instance.currentUserId.isNotEmpty
+              ? AuthService.instance.currentUserId
+              : StorageService.getDeviceId();
+          if (pid.isNotEmpty && uid.isNotEmpty && removedTrackId.isNotEmpty) {
+            PlaylistRepository().removeTrack(pid, removedTrackId, uid).catchError((e) {
+              debugPrint('Firestore removeTrack notice: $e');
+            });
+          }
+        }();
       }
     }
   }
@@ -484,9 +498,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   Future<void> _performPlaylistSync(Color accentColor) async {
-    // 0. Connectivity check: verify internet access
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -512,15 +524,10 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
       return;
     }
 
-    // 1. Auth check: user needs to be logged in to participate in cloud sync
-    if (!AuthService.instance.isLoggedIn || AuthService.instance.isGuest) {
-      final loggedIn = await AuthModalDialog.show(
-        context,
-        featurePrompt: AuthService.instance.isGuest
-            ? 'Guest accounts cannot sync playlists to cloud. Please link or sign in with an account!'
-            : 'Please sign in or create an account to sync songs with other devices!',
-      );
-      if (!loggedIn || AuthService.instance.isGuest) return;
+    // 1. Auth check: ensure an active Firebase session exists.
+    // Guests CAN sync songs to collaborative playlists without saving to an account.
+    if (!AuthService.instance.isLoggedIn) {
+      await AuthService.instance.ensureAnonymousSession();
     }
 
     final currentUserId = AuthService.instance.currentUserId;
@@ -702,8 +709,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
   }
 
   Future<void> _openPlaylistSettings() async {
-    final connResults = await Connectivity().checkConnectivity();
-    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    final isOffline = await AppConnectivity.isOffline();
     if (isOffline) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
