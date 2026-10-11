@@ -14,6 +14,7 @@ import '../../services/update/update_service.dart';
 import '../../services/version/version_service.dart';
 import '../../models/source_mode.dart';
 import '../../providers/music_source_mode_provider.dart';
+import 'widgets/firebase_settings_widgets.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -449,14 +450,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         const Divider(indent: 24, endIndent: 24, height: 1),
 
-        // User Profile Section
-        const SizedBox(height: 12),
-        _buildSectionHeader('USER PROFILE', customBranding.accentColor),
-        _buildSelectionTile(
-          'Your Display Name',
-          StorageService.getUserName().isNotEmpty ? StorageService.getUserName() : 'Not Set',
-          () => _showEditUserNameDialog(context),
+        // Admin Portal (visible only to verified admin email)
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: FirebaseAdminPortalTile(),
         ),
+
+        // Firebase Cloud Account Section
+        const SizedBox(height: 12),
+        _buildSectionHeader('ACCOUNT & CLOUD PROFILE', customBranding.accentColor),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: FirebaseAccountSection(),
+        ),
+        const SizedBox(height: 12),
+        const Divider(indent: 24, endIndent: 24, height: 1),
+
+        // Firebase Cloud Sync Section
+        const SizedBox(height: 12),
+        _buildSectionHeader('CLOUD SYNC', customBranding.accentColor),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: FirebaseSyncSection(),
+        ),
+        const SizedBox(height: 12),
+        const Divider(indent: 24, endIndent: 24, height: 1),
+
+        // Firebase User Listening Stats Section (fl_chart)
+        const SizedBox(height: 12),
+        _buildSectionHeader('MY LISTENING STATS', customBranding.accentColor),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: FirebaseMyStatsSection(),
+        ),
+        const SizedBox(height: 12),
         const Divider(indent: 24, endIndent: 24, height: 1),
 
         // 1. Group: Appearance

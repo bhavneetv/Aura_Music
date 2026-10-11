@@ -6,6 +6,8 @@ import '../providers/customization_provider.dart';
 import '../services/auth/auth_service.dart';
 import '../services/storage/storage_service.dart';
 import '../services/sync/playlist_cloud_sync_service.dart';
+import '../services/playlist/playlist_repository.dart';
+import '../models/playlist_track.dart';
 import '../themes/app_theme.dart';
 import 'auth_dialog.dart';
 
@@ -164,6 +166,54 @@ class _PlaylistSettingsModalState extends ConsumerState<PlaylistSettingsModal> {
           ownerId: ownerId,
           ownerEmail: ownerEmail,
         );
+      }
+
+      // Sync to Firestore (enables public explore and collaborative sync)
+      if (AuthService.instance.isLoggedIn) {
+        try {
+          final repo = PlaylistRepository();
+          final existing = await repo.getPlaylist(playlistId);
+          if (existing != null) {
+            await repo.updatePlaylistDetails(
+              playlistId: playlistId,
+              name: name,
+              description: desc,
+              callerUid: ownerId,
+            );
+            await repo.updateVisibility(
+              playlistId,
+              _isPublic ? 'public' : 'private',
+              ownerId,
+            );
+            if (_isSyncEnabled && !existing.collabEnabled) {
+              try {
+                _shareCode = await repo.enableCollaboration(playlistId, ownerId);
+              } catch (_) {}
+            } else if (!_isSyncEnabled && existing.collabEnabled) {
+              try {
+                await repo.disableCollaboration(playlistId, ownerId);
+              } catch (_) {}
+            }
+          } else {
+            final created = await repo.createPlaylist(
+              id: playlistId,
+              name: name,
+              description: desc,
+              ownerUid: ownerId,
+              ownerName: author,
+              visibility: _isPublic ? 'public' : 'private',
+              collabEnabled: _isSyncEnabled,
+              initialTracks: widget.tracks.map((t) => PlaylistTrack.fromTrack(t, addedByUid: ownerId, addedByName: author)).toList(),
+            );
+            if (_isSyncEnabled) {
+              try {
+                _shareCode = await repo.enableCollaboration(created.id, ownerId);
+              } catch (_) {}
+            }
+          }
+        } catch (e) {
+          debugPrint('Error syncing playlist to Firestore in settings dialog: $e');
+        }
       }
 
       final updatedPlaylist = {

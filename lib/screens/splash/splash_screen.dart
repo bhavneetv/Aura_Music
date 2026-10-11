@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../themes/app_theme.dart';
 import '../../services/storage/storage_service.dart';
 import '../../services/sharing/playlist_link_share_service.dart';
+import '../../services/auth/auth_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -87,7 +88,9 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     // Navigate out after 3 seconds
     Future.delayed(const Duration(milliseconds: 3200), () {
       if (mounted) {
-        if (StorageService.isOnboardingComplete()) {
+        if (!AuthService.instance.isLoggedIn) {
+          context.go('/login');
+        } else if (StorageService.isOnboardingComplete()) {
           context.go('/home');
         } else {
           context.go('/onboarding');

@@ -15,6 +15,7 @@ import '../services/music_sources/source_manager.dart';
 import '../services/voice/voice_assistant_service.dart';
 import '../services/quick_actions/quick_actions_service.dart';
 import '../services/sync/multi_device_sync_service.dart';
+import '../services/stats/stats_service.dart';
 import '../providers/music_provider.dart';
 import '../main.dart';
 
@@ -292,6 +293,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Save play position periodically in Hive
       if (state.currentTrack != null) {
         StorageService.saveSetting('playback_pos_${state.currentTrack!.id}', pos.inMilliseconds);
+        StatsService.instance.onPlaybackProgress(state.currentTrack!, pos, dur);
       }
 
       // Preload next track audio immediately as soon as track starts playing for zero-latency gapless & crossfade playback
@@ -356,6 +358,9 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Uses _lastCompletedNonce to deduplicate: only fires if the current
       // nonce hasn't already triggered a completion handler.
       if (playerState.processingState == ProcessingState.completed) {
+        if (state.currentTrack != null) {
+          StatsService.instance.onSongCompleted(state.currentTrack!);
+        }
         final currentNonce = _playbackNonce;
         if (currentNonce != _lastCompletedNonce) {
           _lastCompletedNonce = currentNonce;

@@ -69,7 +69,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.music_app"
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 21)
         targetSdk = flutter.targetSdkVersion
         versionCode = if (versionPropertiesFile.exists() && versionProperties.containsKey("VERSION_CODE")) {
             (versionProperties["VERSION_CODE"] as String).trim().toInt()
@@ -115,4 +115,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }

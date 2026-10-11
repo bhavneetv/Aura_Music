@@ -16,6 +16,8 @@ import '../../services/sharing/playlist_link_share_service.dart';
 import '../sharing/remote_link_share_modal.dart';
 import '../../widgets/playlist_imported_dialog.dart';
 import 'global_playlists_screen.dart';
+import 'explore_playlists_screen.dart';
+import '../../services/playlist/playlist_repository.dart';
 import '../../services/sync/playlist_cloud_sync_service.dart';
 import '../../services/auth/auth_service.dart';
 import '../../widgets/auth_dialog.dart';
@@ -352,6 +354,31 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                               });
 
                               try {
+                                // 0. Attempt Firestore Collaborative Invite Code join
+                                if (AuthService.instance.isLoggedIn) {
+                                  try {
+                                    final repo = PlaylistRepository();
+                                    final joinedPl = await repo.joinByInviteCode(
+                                      input,
+                                      AuthService.instance.currentUserId,
+                                      AuthService.instance.currentUserName,
+                                    );
+                                    if (mounted) {
+                                      Navigator.pop(sheetContext);
+                                      _loadPlaylists();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          backgroundColor: const Color(0xFF2E7D32),
+                                          content: Text('Joined collaborative playlist "${joinedPl.name}"! 🎵'),
+                                        ),
+                                      );
+                                    }
+                                    return;
+                                  } catch (e) {
+                                    // If code wasn't a valid invite code, fallback to legacy/links below
+                                  }
+                                }
+
                                 // 1. Attempt Cloud Share Code lookup (e.g. AURA-7K9X2B)
                                 final cloudByCode = await PlaylistCloudSyncService.instance.fetchPlaylistByShareCode(input);
                                 if (cloudByCode != null) {
@@ -658,11 +685,37 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
                                 setModalState(() => isLoading = true);
                                 await StorageService.setUserAuthorName(author);
 
-                                final plId = DateTime.now().millisecondsSinceEpoch.toString();
-                                final shareCode = PlaylistCloudSyncService.generateShareCode();
+                                String plId = DateTime.now().millisecondsSinceEpoch.toString();
+                                String shareCode = PlaylistCloudSyncService.generateShareCode();
                                 final ownerId = AuthService.instance.currentUserId;
                                 final ownerEmail = AuthService.instance.currentUserEmail ?? '';
                                 String? syncId;
+
+                                // Create in Cloud Firestore (for Explore screen and Collaboration)
+                                if (AuthService.instance.isLoggedIn) {
+                                  try {
+                                    final repo = PlaylistRepository();
+                                    final firestorePlaylist = await repo.createPlaylist(
+                                      id: plId,
+                                      name: name,
+                                      description: desc,
+                                      ownerUid: ownerId,
+                                      ownerName: author,
+                                      visibility: newPlaylistIsPublic ? 'public' : 'private',
+                                      collabEnabled: newPlaylistIsSyncEnabled,
+                                    );
+                                    plId = firestorePlaylist.id;
+                                    if (newPlaylistIsSyncEnabled) {
+                                      try {
+                                        shareCode = await repo.enableCollaboration(plId, ownerId);
+                                      } catch (ce) {
+                                        debugPrint('Collaboration code notice: $ce');
+                                      }
+                                    }
+                                  } catch (e) {
+                                    debugPrint('Firestore playlist create error: $e');
+                                  }
+                                }
 
                                 if (newPlaylistIsPublic || newPlaylistIsSyncEnabled) {
                                   syncId = await PlaylistCloudSyncService.instance.createCloudSyncSlot(
@@ -882,14 +935,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               ),
               _buildLibraryShortcutCard(
                 context,
-                'Global 🌐',
+                'Explore 🌐',
                 'Community',
                 Icons.public_rounded,
                 accentColor,
                 () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
+                    MaterialPageRoute(builder: (context) => const ExplorePlaylistsScreen()),
                   ).then((_) => _loadPlaylists());
                 },
               ),
@@ -1013,7 +1066,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
+                  MaterialPageRoute(builder: (context) => const ExplorePlaylistsScreen()),
                 ).then((_) => _loadPlaylists());
               },
               icon: Icon(Icons.public_rounded, color: accentColor, size: 18),
@@ -1057,7 +1110,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with SingleTicker
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const GlobalPlaylistsScreen()),
+                  MaterialPageRoute(builder: (context) => const ExplorePlaylistsScreen()),
                 ).then((_) => _loadPlaylists());
               },
             ),

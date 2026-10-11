@@ -1,0 +1,1 @@
+{"firestore":{"rules":"firestore.rules","indexes":"firestore.indexes.json"},"flutter":{"platforms":{"android":{"default":{"projectId":"aura-c0ef9","appId":"1:99053788865:android:c037a580f2acd5ea16be40","fileOutput":"android/app/google-services.json"}}}}}

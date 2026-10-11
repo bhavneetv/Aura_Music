@@ -12,6 +12,9 @@ import '../../services/sync/playlist_cloud_sync_service.dart';
 import '../../services/auth/auth_service.dart';
 import '../../widgets/playlist_settings_dialog.dart';
 import '../../widgets/auth_dialog.dart';
+import '../../models/playlist.dart';
+import '../../models/playlist_track.dart';
+import '../../services/playlist/playlist_repository.dart';
 
 class PlaylistDetailScreen extends ConsumerStatefulWidget {
   final int playlistIndex;
@@ -157,6 +160,42 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     }
 
     await StorageService.savePlaylists(playlists);
+
+    // Sync to Cloud Firestore if authenticated
+    if (AuthService.instance.isLoggedIn && targetId != null && targetId.isNotEmpty) {
+      try {
+        final repo = PlaylistRepository();
+        final isPublic = updated['isPublic'] == true;
+        final isCollab = updated['isSyncEnabled'] == true;
+        final ownerId = updated['ownerId']?.toString() ?? AuthService.instance.currentUserId;
+        final authorName = updated['authorName']?.toString() ?? updated['ownerName']?.toString() ?? AuthService.instance.currentUserName;
+
+        final playlistTracks = _playlistTracks.map((t) => PlaylistTrack.fromTrack(
+          t,
+          addedByUid: AuthService.instance.currentUserId,
+          addedByName: AuthService.instance.currentUserName,
+        )).toList();
+
+        final pl = Playlist(
+          id: targetId,
+          name: updated['name']?.toString() ?? 'My Playlist',
+          description: updated['description']?.toString() ?? '',
+          ownerUid: ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId,
+          ownerName: authorName,
+          memberUids: [ownerId.isNotEmpty ? ownerId : AuthService.instance.currentUserId],
+          visibility: isPublic ? 'public' : 'private',
+          collabEnabled: isCollab,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          trackCount: playlistTracks.length,
+          tracks: playlistTracks,
+        );
+
+        await repo.saveOrUpdatePlaylist(pl);
+      } catch (e) {
+        debugPrint('Firestore _persistPlaylist error: $e');
+      }
+    }
   }
 
   void _downloadPlaylist(Color accentColor) async {

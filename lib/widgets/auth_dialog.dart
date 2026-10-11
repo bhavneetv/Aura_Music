@@ -88,7 +88,7 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
               children: [
                 const Icon(Icons.check_circle_rounded, color: Colors.black, size: 20),
                 const SizedBox(width: 8),
-                Expanded(child: Text(result.message, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+                Expanded(child: Text(result.message ?? 'Success', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
               ],
             ),
             backgroundColor: ref.read(customizationProvider).accentColor,
@@ -96,7 +96,7 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
           ),
         );
       } else {
-        setState(() => _errorMessage = result.message);
+        setState(() => _errorMessage = result.message ?? 'Authentication failed');
       }
     }
   }
