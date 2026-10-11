@@ -40,7 +40,21 @@ class CustomizationState {
 
   Color get accentColor => Color.fromARGB(255, red, green, blue);
 
-  IconData get brandingIcon => IconData(brandingIconCode, fontFamily: 'MaterialIcons');
+  IconData get brandingIcon {
+    switch (brandingIconCode) {
+      case 0xe410:
+        return Icons.music_note_rounded;
+      case 0xe3a1:
+        return Icons.library_music_rounded;
+      case 0xe25b:
+        return Icons.favorite_rounded;
+      case 0xe229:
+        return Icons.equalizer_rounded;
+      case 0xe056:
+      default:
+        return Icons.album_rounded;
+    }
+  }
 }
 
 class CustomizationNotifier extends Notifier<CustomizationState> {

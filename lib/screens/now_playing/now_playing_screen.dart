@@ -1,4 +1,3 @@
-
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -62,7 +61,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // Deceleration angle tracker
   late AnimationController _decelController;
   late Animation<double> _decelAngleAnimation;
-  Offset _albumDragOffset = Offset.zero;
+  // Artwork swipe. A notifier, so dragging repaints only the artwork instead
+  // of rebuilding the whole screen on every finger movement.
+  final ValueNotifier<Offset> _albumDrag = ValueNotifier<Offset>(Offset.zero);
+  late AnimationController _albumSpringController;
+  Offset _albumSpringFrom = Offset.zero;
+  bool _albumPastThreshold = false;
 
   // Smooth seeking slider state
   bool _isDraggingProgress = false;
@@ -131,11 +135,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // Heart pop animation state
   late AnimationController _heartController;
 
-  // Stacked queue preview & drag shuffle state
+  // Hold-to-browse queue state
   bool _showQueuePreview = false;
-  int _queueDragIndex = -1;
-  double _accumulatedDragY = 0.0;
+  int _queueDragIndex = -1; // song currently in focus
+  int _queueStartIndex = 0; // song in focus when the hold began
   bool _hasDraggedQueue = false;
+  bool _queueEdgeArmed = true; // allows one "end of queue" double tap per push
+  // Position in the list, in songs. A notifier, so sliding repaints only the
+  // browser.
+  final ValueNotifier<double> _queueBrowsePos = ValueNotifier<double>(0);
 
   @override
   void initState() {
@@ -152,6 +160,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
+    _albumSpringController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    )..addListener(() {
+        // Bounce the artwork back to the middle after a swipe.
+        final t = Curves.easeOutBack.transform(_albumSpringController.value);
+        _albumDrag.value = Offset.lerp(_albumSpringFrom, Offset.zero, t) ?? Offset.zero;
+      });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (ref.read(playbackProvider).isPlaying) {
@@ -168,6 +184,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     _spinController.dispose();
     _decelController.dispose();
     _heartController.dispose();
+    _albumSpringController.dispose();
+    _albumDrag.dispose();
+    _queueBrowsePos.dispose();
     _lyricsScrollController.dispose();
     super.dispose();
   }
@@ -224,15 +243,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         ? [const Color(0xFF1B1B1D), const Color(0xFF0C0C0E)]
         : [const Color(0xFFFAF7F2), const Color(0xFFE8E2D7)];
 
-    double angle = 0.0;
-    if (_decelController.isAnimating) {
-      angle = _decelAngleAnimation.value;
-    } else if (state.isPlaying) {
-      angle = _spinController.value * 2 * math.pi;
-    } else {
-      angle = _lastAngle;
-    }
-
     final isFav = StorageService.isFavorite('trackIds', track.id);
 
     // ── Screen Theme Layout Routing ─────────────────────────────
@@ -266,24 +276,24 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
             ),
             child: Stack(
               children: [
-                // Dynamic cover art blur glow layer
+                // Soft glow in the artwork's color. (The old full-screen blur on
+                // top of it only blurred a plain gradient, which looks the same
+                // but cost a lot every frame, so it is gone.)
                 Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          center: const Alignment(0, -0.4),
-                          radius: 0.85,
-                          colors: [
-                            activeAccent.withValues(alpha: isDark ? 0.28 : 0.20),
-                            Colors.transparent,
-                          ],
+                  child: IgnorePointer(
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(0, -0.4),
+                            radius: 0.85,
+                            colors: [
+                              activeAccent.withValues(alpha: isDark ? 0.28 : 0.20),
+                              activeAccent.withValues(alpha: 0),
+                            ],
+                          ),
                         ),
-                      ),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-                        child: Container(color: Colors.transparent),
                       ),
                     ),
                   ),
@@ -292,835 +302,1071 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                 // Main player content
                 SafeArea(
                   bottom: false,
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-            child: Column(
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: (isDark ? Colors.white : Colors.black).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+                  child: _buildNormalPlayer(state, notifier, track, customBranding, isDark, isFav),
                 ),
-                const SizedBox(height: 12),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
 
-                // Header Top Row (Top Middle Title)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.keyboard_arrow_down_rounded, size: 28, color: isDark ? Colors.white.withValues(alpha: 0.95) : Colors.black87),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              track.title.toUpperCase(),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                letterSpacing: 1.5,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              track.artist.toUpperCase(),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                letterSpacing: 1.0,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.6),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEFAULT PLAYER LAYOUT
+  //
+  //   Portrait    header · artwork (takes whatever height is left) · title +
+  //               like · progress · transport · action dock
+  //   Landscape   artwork on the left, all controls on the right
+  //
+  // The player is sized to the screen, so every button is reachable without
+  // scrolling on any phone. The song summary sits below it; on tall screens
+  // its top edge peeks in to show it is there.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildNormalPlayer(
+    PlaybackState state,
+    PlaybackNotifier notifier,
+    Track track,
+    CustomizationState customBranding,
+    bool isDark,
+    bool isFav,
+  ) {
+    final accentColor = customBranding.accentColor;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportW = constraints.maxWidth;
+        final viewportH = constraints.maxHeight;
+        final bottomInset = MediaQuery.of(context).padding.bottom;
+        final isLandscape = viewportW >= 600 && viewportW > viewportH * 1.15;
+
+        // On tall portrait screens, leave room for the summary card to peek in.
+        final peek = (!isLandscape && viewportH >= 700) ? 62.0 : 0.0;
+        final playerHeight = math.max(viewportH - bottomInset - peek, isLandscape ? 380.0 : 540.0);
+
+        final stage = _buildStage(state, notifier, track, isDark, accentColor);
+
+        // Everything under the artwork. Font scaling is capped here so the
+        // controls always fit the height they were measured for.
+        final controls = MediaQuery.withClampedTextScaling(
+          maxScaleFactor: 1.2,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTrackInfoRow(track, isDark, isFav),
+              const SizedBox(height: 8),
+              _buildProgressSection(state, notifier, track, customBranding, isDark),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _buildTransportRow(state, notifier, accentColor, isDark),
+              ),
+              const SizedBox(height: 12),
+              _buildSyncBanner(customBranding, isDark),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildActionDock(state, notifier, track, accentColor, isDark),
+              ),
+            ],
+          ),
+        );
+
+        final handle = Center(
+          child: Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        );
+
+        final Widget player;
+        if (isLandscape) {
+          final controlsWidth = math.min(480.0, viewportW * 0.48);
+          player = Column(
+            children: [
+              const SizedBox(height: 8),
+              handle,
+              _buildNormalHeader(state, track, customBranding, isDark),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
                         children: [
-                          ListenableBuilder(
-                            listenable: DownloadService.instance,
-                            builder: (context, _) {
-                              final isDownloaded = DownloadService.instance.isDownloaded(track.id);
-                              final task = DownloadService.instance.tasks[track.id];
-                              final isDownloading = task?.status == 'downloading';
-
-                              if (isDownloading) {
-                                return SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(strokeWidth: 2.5, color: customBranding.accentColor),
-                                );
-                              }
-                              if (isDownloaded) {
-                                return IconButton(
-                                  icon: Icon(Icons.download_done_rounded, color: customBranding.accentColor, size: 22),
-                                  onPressed: () {},
-                                );
-                              }
-                              return IconButton(
-                                icon: Icon(Icons.download_rounded, color: isDark ? Colors.white.withValues(alpha: 0.8) : Colors.black54, size: 22),
-                                onPressed: () {
-                                  DownloadService.instance.startDownload(track);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Downloading "${track.title}" for offline playback...'),
-                                      duration: const Duration(seconds: 2),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.playlist_add_rounded, color: isDark ? Colors.white.withValues(alpha: 0.8) : Colors.black54, size: 24),
-                            tooltip: 'Add to Playlist',
-                            onPressed: () {
-                              triggerHaptic(HapticFeedbackType.selection);
-                              _showAddToPlaylistBottomSheet(track);
-                            },
-                          ),
+                          Expanded(child: stage),
+                          _buildGestureHint(isDark),
+                          const SizedBox(height: 10),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                    SizedBox(
+                      width: controlsWidth,
+                      // Shrinks as one piece on very short screens instead of
+                      // overflowing.
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(width: controlsWidth, child: controls),
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            ],
+          );
+        } else {
+          player = Column(
+            children: [
+              const SizedBox(height: 8),
+              handle,
+              _buildNormalHeader(state, track, customBranding, isDark),
+              Expanded(child: stage),
+              _buildGestureHint(isDark),
+              const SizedBox(height: 10),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: controls,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          );
+        }
 
-                const SizedBox(height: 12),
+        return SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            children: [
+              SizedBox(height: playerHeight, child: player),
+              const SizedBox(height: 8),
 
-                // Dynamic Skin Stages with Physics Swipe Gestures & H.2 Press-and-Drag Queue Interaction
-                GestureDetector(
-                  onDoubleTap: () async {
-                    triggerHaptic(HapticFeedbackType.medium);
-                    await StorageService.toggleFavoriteTrack(track);
-                    if (StorageService.isFavorite('trackIds', track.id)) {
-                      ref.read(playbackProvider.notifier).onTrackLiked(track);
-                    }
-                    _heartController.forward(from: 0.0);
-                    setState(() {});
+              // ── Song Summary Section ──────────────────────
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: _buildSongSummarySection(track, isDark, accentColor),
+                ),
+              ),
+              SizedBox(height: 24 + bottomInset),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Header: close · position in queue · download · add to playlist ─────────
+
+  Widget _buildNormalHeader(PlaybackState state, Track track, CustomizationState customBranding, bool isDark) {
+    final iconColor = isDark ? Colors.white.withValues(alpha: 0.9) : Colors.black87;
+    final hasPosition = state.queue.isNotEmpty && state.currentIndex >= 0 && state.currentIndex < state.queue.length;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: SizedBox(
+        height: 50,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Centered on the screen regardless of how many buttons flank it.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 100),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'NOW PLAYING',
+                    maxLines: 1,
+                    style: TextStyle(
+                      letterSpacing: 1.6,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.55),
+                    ),
+                  ),
+                  if (hasPosition) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${state.currentIndex + 1} of ${state.queue.length} in queue',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Close',
+                  icon: Icon(Icons.keyboard_arrow_down_rounded, size: 30, color: iconColor),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(child: _buildDownloadButton(track, customBranding, isDark)),
+                ),
+                IconButton(
+                  icon: Icon(Icons.playlist_add_rounded, color: iconColor.withValues(alpha: 0.8), size: 24),
+                  tooltip: 'Add to Playlist',
+                  onPressed: () {
+                    triggerHaptic(HapticFeedbackType.selection);
+                    _showAddToPlaylistBottomSheet(track);
                   },
-                  onLongPressStart: (details) {
-                    triggerHaptic(HapticFeedbackType.medium);
-                    setState(() {
-                      _showQueuePreview = true;
-                      _queueDragIndex = state.currentIndex >= 0 ? state.currentIndex : 0;
-                      _accumulatedDragY = 0.0;
-                      _hasDraggedQueue = false;
-                    });
-                  },
-                  onLongPressMoveUpdate: (details) {
-                    final dy = details.offsetFromOrigin.dy;
-                    final deltaY = dy - _accumulatedDragY;
-                    const stepThreshold = 45.0;
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                    if (deltaY.abs() > stepThreshold) {
-                      _accumulatedDragY = dy;
-                      _hasDraggedQueue = true;
+  /// Download state / button (original, unchanged).
+  Widget _buildDownloadButton(Track track, CustomizationState customBranding, bool isDark) {
+    return ListenableBuilder(
+      listenable: DownloadService.instance,
+      builder: (context, _) {
+        final isDownloaded = DownloadService.instance.isDownloaded(track.id);
+        final task = DownloadService.instance.tasks[track.id];
+        final isDownloading = task?.status == 'downloading';
 
-                      final queue = state.queue;
-                      if (queue.isNotEmpty) {
-                        if (deltaY < 0) {
-                          // Drag UP -> Shuffle to next card in queue
-                          if (_queueDragIndex + 1 < queue.length) {
-                            setState(() {
-                              _queueDragIndex++;
-                            });
-                            triggerHaptic(HapticFeedbackType.light);
-                          } else {
-                            // Boundary signal (Double light haptic)
-                            triggerHaptic(HapticFeedbackType.light);
-                            Future.delayed(const Duration(milliseconds: 60), () => triggerHaptic(HapticFeedbackType.light));
-                          }
-                        } else {
-                          // Drag DOWN -> Shuffle to previous card in queue
-                          if (_queueDragIndex - 1 >= 0) {
-                            setState(() {
-                              _queueDragIndex--;
-                            });
-                            triggerHaptic(HapticFeedbackType.light);
-                          } else {
-                            // Boundary signal (Double light haptic)
-                            triggerHaptic(HapticFeedbackType.light);
-                            Future.delayed(const Duration(milliseconds: 60), () => triggerHaptic(HapticFeedbackType.light));
-                          }
-                        }
-                      }
-                    }
-                  },
-                  onLongPressEnd: (details) {
-                    final queue = state.queue;
-                    if (_hasDraggedQueue && _queueDragIndex >= 0 && _queueDragIndex < queue.length && _queueDragIndex != state.currentIndex) {
-                      // Release after drag plays selected track without changing queue order
-                      triggerHaptic(HapticFeedbackType.medium);
-                      notifier.jumpToQueueIndex(_queueDragIndex);
-                    }
-                    // Clean reset on release
-                    setState(() {
-                      _showQueuePreview = false;
-                      _hasDraggedQueue = false;
-                      _queueDragIndex = -1;
-                      _accumulatedDragY = 0.0;
-                    });
-                  },
-                  onPanUpdate: (details) {
-                    if (!_showQueuePreview) {
-                      setState(() {
-                        _albumDragOffset += details.delta;
-                      });
-                    }
-                  },
-                  onPanEnd: (details) async {
-                    if (_showQueuePreview) return;
-                    final dx = _albumDragOffset.dx;
-                    final dy = _albumDragOffset.dy;
+        if (isDownloading) {
+          return SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5, color: customBranding.accentColor),
+          );
+        }
+        if (isDownloaded) {
+          return IconButton(
+            icon: Icon(Icons.download_done_rounded, color: customBranding.accentColor, size: 22),
+            onPressed: () {},
+          );
+        }
+        return IconButton(
+          icon: Icon(Icons.download_rounded, color: isDark ? Colors.white.withValues(alpha: 0.8) : Colors.black54, size: 22),
+          onPressed: () {
+            DownloadService.instance.startDownload(track);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Downloading "${track.title}" for offline playback...'),
+                duration: const Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                    if (dx.abs() > dy.abs()) {
-                      if (dx < -80) {
-                        // Swipe Left -> Next Track
-                        triggerHaptic(HapticFeedbackType.medium);
-                        notifier.nextTrack();
-                      } else if (dx > 80) {
-                        // Swipe Right -> Previous Track
-                        triggerHaptic(HapticFeedbackType.medium);
-                        notifier.previousTrack();
-                      }
-                    } else {
-                      if (dy < -80) {
-                        // Swipe Up -> Toggle Favorite
-                        triggerHaptic(HapticFeedbackType.medium);
-                        await StorageService.toggleFavoriteTrack(track);
-                        if (StorageService.isFavorite('trackIds', track.id)) {
-                          ref.read(playbackProvider.notifier).onTrackLiked(track);
-                        }
-                        _heartController.forward(from: 0.0);
-                        setState(() {});
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(StorageService.isFavorite('trackIds', track.id) ? 'Added to Favorites ❤️' : 'Removed from Favorites'),
-                              duration: const Duration(seconds: 1),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      } else if (dy > 80) {
-                        // Swipe Down -> Add to Playlist
-                        triggerHaptic(HapticFeedbackType.medium);
-                        _showAddToPlaylistBottomSheet(track);
-                      }
-                    }
+  // ── Artwork stage: skin, swipe gestures, hold-to-browse queue ──────────────
 
-                    // Physics spring back bounce
-                    setState(() {
-                      _albumDragOffset = Offset.zero;
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutBack,
-                    transform: Matrix4.translationValues(_albumDragOffset.dx, _albumDragOffset.dy, 0),
-                    width: MediaQuery.of(context).size.width,
-                    height: MediaQuery.of(context).size.width * 0.82,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Interactive 3D Deck of Cards Stack Queue Preview
-                        if (_showQueuePreview) ...[
-                          Builder(
-                            builder: (context) {
-                              final queue = state.queue;
-                              if (queue.isEmpty) {
-                                return Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black87,
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: const Text('Queue is empty', style: TextStyle(color: Colors.white, fontSize: 12)),
-                                  ),
-                                );
-                              }
+  double _currentAngle(bool isPlaying) {
+    if (_decelController.isAnimating) return _decelAngleAnimation.value;
+    if (isPlaying) return _spinController.value * 2 * math.pi;
+    // Rest where the slow-down ended instead of snapping back.
+    if (_decelController.isCompleted) return _decelAngleAnimation.value;
+    return _lastAngle;
+  }
 
-                              final focusedIdx = (_queueDragIndex >= 0 && _queueDragIndex < queue.length)
-                                  ? _queueDragIndex
-                                  : (state.currentIndex >= 0 ? state.currentIndex : 0);
+  Widget _buildStage(PlaybackState state, PlaybackNotifier notifier, Track track, bool isDark, Color accentColor) {
+    final screenW = MediaQuery.of(context).size.width;
+    // The skins draw themselves from the screen width. Laying them out at
+    // that size and letting FittedBox scale the result means they always fit
+    // the space this screen can spare, on any device or orientation.
+    final designSize = Size(screenW, screenW * 0.82);
 
-                              // Pre-cache nearby artwork for smooth 60 FPS transitions
-                              for (int i = math.max(0, focusedIdx - 2); i <= math.min(queue.length - 1, focusedIdx + 2); i++) {
-                                if (queue[i].artworkUrl.isNotEmpty) {
-                                  precacheImage(NetworkImage(queue[i].artworkUrl), context);
-                                }
-                              }
-
-                              final visibleIndices = <int>[];
-                              for (int offset = -2; offset <= 2; offset++) {
-                                final idx = focusedIdx + offset;
-                                if (idx >= 0 && idx < queue.length) {
-                                  visibleIndices.add(idx);
-                                }
-                              }
-
-                              return Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  // Instructions Legend Banner
-                                  Positioned(
-                                    top: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.85),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: customBranding.accentColor.withOpacity(0.6), width: 1.0),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.touch_app_rounded, size: 14, color: customBranding.accentColor),
-                                          const SizedBox(width: 6),
-                                          const Text(
-                                            'Drag up/down to shuffle • Release to play track',
-                                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  ...visibleIndices.map((idx) {
-                                  final itemTrack = queue[idx];
-                                  final dist = idx - focusedIdx;
-                                  final isFocused = (idx == focusedIdx);
-
-                                  final double offsetY = dist * 52.0;
-                                  final double scale = (1.0 - (dist.abs() * 0.10)).clamp(0.72, 1.05);
-                                  final double opacity = (1.0 - (dist.abs() * 0.25)).clamp(0.35, 1.0);
-                                  final double tiltAngle = dist * 0.07;
-
-                                  final Matrix4 transform = Matrix4.identity()
-                                    ..setEntry(3, 2, 0.001)
-                                    ..rotateX(tiltAngle)
-                                    ..translate(0.0, offsetY, 0.0);
-
-                                  return Transform(
-                                    transform: transform,
-                                    alignment: Alignment.center,
-                                    child: Transform.scale(
-                                      scale: scale,
-                                      child: Opacity(
-                                        opacity: opacity,
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            triggerHaptic(HapticFeedbackType.medium);
-                                            notifier.jumpToQueueIndex(idx);
-                                            setState(() => _showQueuePreview = false);
-                                          },
-                                          child: AnimatedContainer(
-                                            duration: const Duration(milliseconds: 180),
-                                            curve: Curves.easeOutCubic,
-                                            width: MediaQuery.of(context).size.width * 0.78,
-                                            height: 78,
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: isFocused
-                                                  ? (isDark ? const Color(0xFF28282E) : Colors.white)
-                                                  : (isDark ? const Color(0xFF1E1E22) : const Color(0xFFF0EAE1)),
-                                              borderRadius: BorderRadius.circular(20),
-                                              border: isFocused
-                                                  ? Border.all(color: customBranding.accentColor, width: 2.0)
-                                                  : Border.all(color: Colors.grey.withOpacity(0.2), width: 1.0),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: isFocused
-                                                      ? customBranding.accentColor.withOpacity(0.35)
-                                                      : Colors.black.withOpacity(0.20),
-                                                  blurRadius: isFocused ? 18 : 8,
-                                                  offset: Offset(0, isFocused ? 6 : 3),
-                                                ),
-                                              ],
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                AppArtworkImage(
-                                                  artworkUrl: itemTrack.artworkUrl,
-                                                  trackId: itemTrack.id,
-                                                  width: 52,
-                                                  height: 52,
-                                                  fit: BoxFit.cover,
-                                                  borderRadius: BorderRadius.circular(12),
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Expanded(
-                                                  child: Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    mainAxisAlignment: MainAxisAlignment.center,
-                                                    children: [
-                                                      Text(
-                                                        isFocused
-                                                            ? (idx == state.currentIndex ? 'NOW PLAYING 🎵' : 'RELEASE TO PLAY ⚡')
-                                                            : 'UP NEXT #${idx + 1}',
-                                                        style: TextStyle(
-                                                          fontSize: 10,
-                                                          fontWeight: FontWeight.bold,
-                                                          color: isFocused ? customBranding.accentColor : Colors.grey,
-                                                          letterSpacing: 0.8,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(height: 2),
-                                                      Text(
-                                                        itemTrack.title,
-                                                        style: TextStyle(
-                                                          fontWeight: FontWeight.bold,
-                                                          fontSize: isFocused ? 14 : 13,
-                                                        ),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                      Text(
-                                                        itemTrack.artist,
-                                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                Icon(
-                                                  isFocused ? Icons.play_circle_fill_rounded : Icons.music_note_rounded,
-                                                  size: isFocused ? 30 : 22,
-                                                  color: isFocused ? customBranding.accentColor : Colors.grey,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }),
-                                ],
-                              );
-                            },
-                          ),
-                        ],
-
-                        // Main Skin Stage (Vinyl / CD / Cassette / Minimal)
-                        if (!_showQueuePreview)
-                          _buildSkinStage(state.playerSkin, track, angle, isDark, customBranding.accentColor),
-
-                        // Double-tap Animated Heart Pop Overlay
-                        AnimatedBuilder(
-                          animation: _heartController,
-                          builder: (context, child) {
-                            if (!_heartController.isAnimating) return const SizedBox.shrink();
-                            final scale = 0.5 + (_heartController.value * 0.9);
-                            final opacity = 1.0 - _heartController.value;
-                            return Opacity(
-                              opacity: opacity.clamp(0.0, 1.0),
-                              child: Transform.scale(
-                                scale: scale,
-                                child: Icon(
-                                  Icons.favorite_rounded,
-                                  color: customBranding.accentColor,
-                                  size: 110,
-                                ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: () => _toggleFavorite(track),
+      onLongPressStart: (_) => _startQueueBrowse(state),
+      onLongPressMoveUpdate: (details) => _updateQueueBrowse(details.offsetFromOrigin.dy, state.queue),
+      onLongPressEnd: (_) => _endQueueBrowse(state, notifier),
+      onPanUpdate: (details) {
+        if (!_showQueuePreview) _onAlbumDragUpdate(details.delta);
+      },
+      onPanEnd: (_) => _onAlbumDragEnd(track, notifier),
+      onPanCancel: _springAlbumBack,
+      child: RepaintBoundary(
+        child: Stack(
+          // Fill the space the layout gives the artwork, whatever its shape.
+          fit: StackFit.expand,
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeIn,
+                layoutBuilder: (currentChild, previousChildren) {
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ...previousChildren,
+                      if (currentChild != null) currentChild,
+                    ],
+                  );
+                },
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.94, end: 1.0).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: _showQueuePreview
+                    ? _QueueBrowser(
+                        key: const ValueKey('queue-browser'),
+                        queue: state.queue,
+                        position: _queueBrowsePos,
+                        currentIndex: state.currentIndex,
+                        accent: accentColor,
+                        isDark: isDark,
+                      )
+                    : KeyedSubtree(
+                        key: const ValueKey('skin-stage'),
+                        // Follows the finger directly; only this subtree
+                        // repaints while dragging.
+                        child: ValueListenableBuilder<Offset>(
+                          valueListenable: _albumDrag,
+                          builder: (context, offset, child) {
+                            return Transform.translate(
+                              offset: offset,
+                              child: Transform.rotate(
+                                angle: (offset.dx / math.max(screenW, 1.0)) * 0.14,
+                                child: child,
                               ),
                             );
                           },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Mini Gesture Legend
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Text('↔️ Swipe Track', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('👆 Favorite', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                        Text(' • ', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        Text('👇 Queue', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Title & Artist Metadata
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Column(
-                    children: [
-                      Text(
-                        track.title,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        track.artist,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary).withOpacity(0.6),
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Progress Slider
-                Builder(
-                  builder: (context) {
-                    final sliderValue = _isDraggingProgress
-                        ? _dragProgressValue.clamp(0.0, 1.0)
-                        : state.progress.clamp(0.0, 1.0);
-                    final currentDisplayPosition = _isDraggingProgress
-                        ? Duration(milliseconds: (_dragProgressValue * state.totalDuration.inMilliseconds).round())
-                        : state.currentPosition;
-
-                    final isWaveformStyle = StorageService.getProgressBarStyle() == 'waveform';
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        children: [
-                          if (isWaveformStyle)
-                            WaveformSeekBar(
-                              track: track,
-                              progress: sliderValue,
-                              currentPosition: currentDisplayPosition,
-                              totalDuration: state.totalDuration,
-                              activeColor: customBranding.accentColor,
-                              isDark: isDark,
-                              onChangeStart: (val) {
-                                triggerHaptic(HapticFeedbackType.selection);
-                                setState(() {
-                                  _isDraggingProgress = true;
-                                  _dragProgressValue = val;
-                                });
-                              },
-                              onChanged: (val) {
-                                setState(() {
-                                  _dragProgressValue = val;
-                                });
-                              },
-                              onChangeEnd: (val) {
-                                notifier.seek(val);
-                                setState(() {
-                                  _isDraggingProgress = false;
-                                });
-                              },
-                            )
-                          else
-                            SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 3.5,
-                                activeTrackColor: customBranding.accentColor,
-                                thumbColor: customBranding.accentColor,
-                                trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
-                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                              ),
-                              child: Slider(
-                                value: sliderValue,
-                                onChangeStart: (val) {
-                                  triggerHaptic(HapticFeedbackType.selection);
-                                  setState(() {
-                                    _isDraggingProgress = true;
-                                    _dragProgressValue = val;
-                                  });
-                                },
-                                onChanged: (val) {
-                                  setState(() {
-                                    _dragProgressValue = val;
-                                  });
-                                },
-                                onChangeEnd: (val) {
-                                  notifier.seek(val);
-                                  setState(() {
-                                    _isDraggingProgress = false;
-                                  });
-                                },
-                              ),
-                            ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(_formatDuration(currentDisplayPosition), style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                                Text(_formatDuration(state.totalDuration), style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // Controls: Shuffle, Previous, Play/Pause, Next, Repeat
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.shuffle_rounded, 
-                          color: state.isShuffle ? customBranding.accentColor : Colors.grey, 
-                          size: 22
-                        ),
-                        onPressed: () {
-                          notifier.toggleShuffle();
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.skip_previous_rounded, size: 36),
-                        onPressed: () => notifier.previousTrack(),
-                      ),
-                      GestureDetector(
-                        onTap: () => notifier.togglePlay(),
-                        child: Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            color: customBranding.accentColor,
-                            shape: BoxShape.circle,
-                            boxShadow: const [
-                              BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))
-                            ],
-                          ),
-                          child: (state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering)
-                              ? Center(
-                                  child: SizedBox(
-                                    width: 26,
-                                    height: 26,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.5,
-                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
-                                    ),
-                                  ),
-                                )
-                              : Icon(
-                                  state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                  color: isDark ? Colors.black : Colors.white,
-                                  size: 36,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: FittedBox(
+                              fit: BoxFit.contain,
+                              child: SizedBox.fromSize(
+                                size: designSize,
+                                // Rebuilds on every animation frame, so the
+                                // record turns smoothly instead of only when
+                                // the playback position updates.
+                                child: AnimatedBuilder(
+                                  animation: Listenable.merge([_spinController, _decelController]),
+                                  builder: (context, _) {
+                                    return _buildSkinStage(
+                                      state.playerSkin,
+                                      track,
+                                      _currentAngle(state.isPlaying),
+                                      isDark,
+                                      accentColor,
+                                    );
+                                  },
                                 ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.skip_next_rounded, size: 36),
-                        onPressed: () => notifier.nextTrack(),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          state.repeatMode == RepeatMode.one 
-                              ? Icons.repeat_one_rounded 
-                              : Icons.repeat_rounded,
-                          color: state.repeatMode != RepeatMode.off ? customBranding.accentColor : Colors.grey,
-                          size: 22,
-                        ),
-                        onPressed: () {
-                          final nextMode = {
-                            RepeatMode.off: RepeatMode.all,
-                            RepeatMode.all: RepeatMode.one,
-                            RepeatMode.one: RepeatMode.off,
-                          }[state.repeatMode]!;
-                          notifier.setRepeatMode(nextMode);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Multi-Device Group Sync Active Banner
-                Consumer(
-                  builder: (context, ref, child) {
-                    final syncState = ref.watch(multiDeviceSyncProvider);
-                    if (!syncState.session.isInGroup) return const SizedBox.shrink();
-                    return GestureDetector(
-                      onTap: () => showAudioOutputPickerModal(context),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 12, left: 24, right: 24),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: customBranding.accentColor.withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: customBranding.accentColor.withOpacity(0.5), width: 1.0),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.wifi_tethering_rounded, size: 14, color: customBranding.accentColor),
-                            const SizedBox(width: 8),
-                            Text(
-                              syncState.session.isHost
-                                  ? 'Synced with ${syncState.session.syncedCount} nearby devices 📶'
-                                  : 'Synced to host (${syncState.session.hostDeviceName}) 📶',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : Colors.black87,
                               ),
                             ),
-                          ],
+                          ),
                         ),
+                      ),
+              ),
+            ),
+
+            // Double-tap heart pop
+            IgnorePointer(
+              child: Center(
+                child: AnimatedBuilder(
+                  animation: _heartController,
+                  builder: (context, child) {
+                    if (!_heartController.isAnimating) return const SizedBox.shrink();
+                    final scale = 0.5 + (_heartController.value * 0.9);
+                    final opacity = 1.0 - _heartController.value;
+                    return Opacity(
+                      opacity: opacity.clamp(0.0, 1.0),
+                      child: Transform.scale(
+                        scale: scale,
+                        child: Icon(Icons.favorite_rounded, color: accentColor, size: 110),
                       ),
                     );
                   },
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                // Bottom row: Output Devices, Sleep timer, Lyrics, Equalizer, Speed, Queue
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      // Audio Output & Multi-Room Sync Button
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final syncSession = ref.watch(multiDeviceSyncProvider).session;
-                          final activeDev = ref.watch(audioRoutingProvider).activeDevice;
-                          final isGroupActive = syncSession.isInGroup;
+  Widget _buildGestureHint(bool isDark) {
+    final color = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.5);
 
-                          return _buildActionButton(
-                            icon: isGroupActive
-                                ? Icons.speaker_group_rounded
-                                : (activeDev?.type == AudioDeviceType.bluetooth
-                                    ? Icons.bluetooth_audio_rounded
-                                    : (activeDev?.type == AudioDeviceType.wiredHeadset
-                                        ? Icons.headphones_rounded
-                                        : Icons.speaker_rounded)),
-                            label: isGroupActive ? 'Synced (${syncSession.syncedCount})' : 'Output',
-                            isActive: isGroupActive || (activeDev != null && activeDev.type != AudioDeviceType.speaker),
-                            accentColor: customBranding.accentColor,
-                            onTap: () => showAudioOutputPickerModal(context),
-                          );
-                        },
+    Widget item(IconData icon, String text) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(fontSize: 10.5, color: color, fontWeight: FontWeight.w700)),
+        ],
+      );
+    }
+
+    final dot = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      child: Text('·', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w900)),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      // Scales down on narrow phones instead of overflowing.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(100),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              item(Icons.swipe_rounded, 'Swipe to skip'),
+              dot,
+              item(Icons.favorite_rounded, 'Double-tap to like'),
+              dot,
+              item(Icons.touch_app_rounded, 'Hold for queue'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Favorite ───────────────────────────────────────────────────────────────
+
+  Future<void> _toggleFavorite(Track track, {bool announce = false}) async {
+    triggerHaptic(HapticFeedbackType.medium);
+    await StorageService.toggleFavoriteTrack(track);
+    final isNowFavorite = StorageService.isFavorite('trackIds', track.id);
+    if (isNowFavorite) {
+      ref.read(playbackProvider.notifier).onTrackLiked(track);
+    }
+    if (!mounted) return;
+    _heartController.forward(from: 0.0);
+    setState(() {});
+
+    if (announce) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isNowFavorite ? 'Added to Favorites ❤️' : 'Removed from Favorites'),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ── Swipe gestures on the artwork ──────────────────────────────────────────
+
+  /// How far the artwork must be dragged for a swipe to count.
+  static const double _swipeThreshold = 80;
+
+  void _onAlbumDragUpdate(Offset delta) {
+    _albumSpringController.stop();
+    final next = _albumDrag.value + delta;
+    _albumDrag.value = next;
+
+    // A tick the moment the drag is far enough to do something on release.
+    final past = next.dx.abs() > _swipeThreshold || next.dy.abs() > _swipeThreshold;
+    if (past != _albumPastThreshold) {
+      _albumPastThreshold = past;
+      if (past) triggerHaptic(HapticFeedbackType.selection);
+    }
+  }
+
+  Future<void> _onAlbumDragEnd(Track track, PlaybackNotifier notifier) async {
+    if (_showQueuePreview) return;
+    final dx = _albumDrag.value.dx;
+    final dy = _albumDrag.value.dy;
+    _springAlbumBack();
+
+    if (dx.abs() > dy.abs()) {
+      if (dx < -_swipeThreshold) {
+        // Swipe Left -> Next Track
+        triggerHaptic(HapticFeedbackType.medium);
+        notifier.nextTrack();
+      } else if (dx > _swipeThreshold) {
+        // Swipe Right -> Previous Track
+        triggerHaptic(HapticFeedbackType.medium);
+        notifier.previousTrack();
+      }
+    } else {
+      if (dy < -_swipeThreshold) {
+        // Swipe Up -> Toggle Favorite
+        await _toggleFavorite(track, announce: true);
+      } else if (dy > _swipeThreshold) {
+        // Swipe Down -> Add to Playlist
+        triggerHaptic(HapticFeedbackType.medium);
+        _showAddToPlaylistBottomSheet(track);
+      }
+    }
+  }
+
+  /// Lets the artwork bounce back to the middle.
+  void _springAlbumBack() {
+    _albumPastThreshold = false;
+    _albumSpringFrom = _albumDrag.value;
+    if (_albumSpringFrom == Offset.zero) return;
+    _albumSpringController.forward(from: 0.0);
+  }
+
+  // ── Hold-to-browse queue ───────────────────────────────────────────────────
+  //
+  // Press and hold the artwork, then slide up or down. The list follows the
+  // finger continuously. Haptics:
+  //   • a firm tap when the browser opens
+  //   • a light tick each time a different song comes into focus
+  //   • two quick light taps when you push past the first or last song
+  //   • a firm tap on release, if a different song was chosen
+
+  /// Finger travel that moves the list by one song.
+  static const double _queueStepPx = 46;
+
+  void _startQueueBrowse(PlaybackState state) {
+    triggerHaptic(HapticFeedbackType.medium);
+    _springAlbumBack();
+
+    final start = (state.currentIndex >= 0 && state.currentIndex < state.queue.length) ? state.currentIndex : 0;
+    _queueStartIndex = start;
+    _queueBrowsePos.value = start.toDouble();
+    _queueEdgeArmed = true;
+    _precacheQueueArtwork(state.queue, start);
+
+    setState(() {
+      _showQueuePreview = true;
+      _queueDragIndex = start;
+      _hasDraggedQueue = false;
+    });
+  }
+
+  void _updateQueueBrowse(double dragDy, List<Track> queue) {
+    if (!_showQueuePreview || queue.isEmpty) return;
+    final last = queue.length - 1;
+
+    // Dragging up moves toward later songs.
+    final raw = _queueStartIndex - dragDy / _queueStepPx;
+
+    // Past either end the list still gives a little, like a stretched band.
+    double shown = raw;
+    if (raw < 0) {
+      shown = -_rubberBand(-raw);
+    } else if (raw > last) {
+      shown = last + _rubberBand(raw - last);
+    }
+    _queueBrowsePos.value = shown;
+
+    final focused = raw.round().clamp(0, last).toInt();
+    if (focused != _queueDragIndex) {
+      _queueDragIndex = focused;
+      _hasDraggedQueue = true;
+      triggerHaptic(HapticFeedbackType.light);
+      _precacheQueueArtwork(queue, focused);
+    }
+
+    // Start / end of the queue: one double tap per push, re-armed once the
+    // finger comes back inside the list.
+    final pastEnd = raw < -0.45 || raw > last + 0.45;
+    if (pastEnd && _queueEdgeArmed) {
+      _queueEdgeArmed = false;
+      _hasDraggedQueue = true;
+      _doubleLightHaptic();
+    } else if (!pastEnd && raw > -0.15 && raw < last + 0.15) {
+      _queueEdgeArmed = true;
+    }
+  }
+
+  /// Eases toward a limit of about a third of a card, however far you pull.
+  double _rubberBand(double overshoot) => 0.36 * (1 - 1 / (overshoot * 1.3 + 1));
+
+  void _doubleLightHaptic() {
+    triggerHaptic(HapticFeedbackType.light);
+    Future.delayed(const Duration(milliseconds: 90), () {
+      if (mounted) triggerHaptic(HapticFeedbackType.light);
+    });
+  }
+
+  void _endQueueBrowse(PlaybackState state, PlaybackNotifier notifier) {
+    if (!_showQueuePreview) return;
+    final queue = state.queue;
+    final target = _queueDragIndex;
+
+    if (_hasDraggedQueue && target >= 0 && target < queue.length && target != state.currentIndex) {
+      // Release after drag plays selected track without changing queue order
+      triggerHaptic(HapticFeedbackType.medium);
+      notifier.jumpToQueueIndex(target);
+    }
+
+    setState(() {
+      _showQueuePreview = false;
+      _hasDraggedQueue = false;
+      _queueDragIndex = -1;
+    });
+  }
+
+  /// Warms up artwork around [index] so cards never pop in while sliding.
+  void _precacheQueueArtwork(List<Track> queue, int index) {
+    final first = math.max(0, index - 3);
+    final last = math.min(queue.length - 1, index + 3);
+    for (int i = first; i <= last; i++) {
+      if (queue[i].artworkUrl.isNotEmpty) {
+        precacheImage(getArtworkImageProvider(queue[i]), context, onError: (_, __) {});
+      }
+    }
+  }
+
+  // ── Title, artist and like button ──────────────────────────────────────────
+
+  Widget _buildTrackInfoRow(Track track, bool isDark, bool isFav) {
+    final primary = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 28, right: 14),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                        height: 1.15,
+                        color: primary,
                       ),
-
-                      // Sleep Timer Option
-                      _buildActionButton(
-                        icon: Icons.timer_rounded,
-                        label: 'Timer',
-                        isActive: state.sleepTimerMinutes != null || state.isSleepTimerEndOfTrack,
-                        accentColor: customBranding.accentColor,
-                        onTap: () => _showSleepTimerDialog(notifier),
-                      ),
-
-                      // Synced Lyrics Option
-                      _buildActionButton(
-                        icon: Icons.lyrics_rounded,
-                        label: 'Lyrics',
-                        isActive: _lyricsResult != null && _lyricsResult!.hasLyrics,
-                        accentColor: customBranding.accentColor,
-                        onTap: (_lyricsResult != null && _lyricsResult!.hasLyrics)
-                            ? () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => LyricsScreen(
-                                      track: track,
-                                      lyricsResult: _lyricsResult!,
-                                    ),
-                                  ),
-                                );
-                              }
-                            : () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Fetching lyrics for this track...'), duration: Duration(seconds: 1)),
-                                );
-                              },
-                      ),
-
-                      // Equalizer Option
-                      _buildActionButton(
-                        icon: Icons.graphic_eq_rounded,
-                        label: 'EQ',
-                        isActive: false,
-                        accentColor: customBranding.accentColor,
-                        onTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => const EqualizerScreen()));
-                        },
-                      ),
-
-                      // Playback Speed Option
-                      _buildActionButton(
-                        icon: Icons.speed_rounded,
-                        label: '${state.playbackSpeed}x',
-                        isActive: state.playbackSpeed != 1.0,
-                        accentColor: customBranding.accentColor,
-                        onTap: () => _showPlaybackSpeedDialog(notifier),
-                      ),
-
-                      // Active Queue Option
-                      _buildActionButton(
-                        icon: Icons.queue_music_rounded,
-                        label: 'Queue',
-                        isActive: false,
-                        accentColor: customBranding.accentColor,
-                        onTap: () => _showQueueBottomSheet(state, notifier),
-                      ),
-                    ],
-                  ),
                 ),
-
-                const SizedBox(height: 24),
-
-                // ── Song Summary Section ──────────────────────
-                _buildSongSummarySection(track, isDark, customBranding.accentColor),
-
-                const SizedBox(height: 24),
+                const SizedBox(height: 3),
+                Text(
+                  track.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: primary.withValues(alpha: 0.6),
+                      ),
+                ),
               ],
             ),
           ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: isFav ? 'Remove from Favorites' : 'Add to Favorites',
+            iconSize: 26,
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+              child: Icon(
+                isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                key: ValueKey(isFav),
+                color: isFav ? Colors.redAccent : primary.withValues(alpha: 0.6),
+              ),
+            ),
+            onPressed: () => _toggleFavorite(track),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Seek bar and times (original, unchanged).
+  Widget _buildProgressSection(
+    PlaybackState state,
+    PlaybackNotifier notifier,
+    Track track,
+    CustomizationState customBranding,
+    bool isDark,
+  ) {
+    return Builder(
+      builder: (context) {
+        final sliderValue = _isDraggingProgress
+            ? _dragProgressValue.clamp(0.0, 1.0)
+            : state.progress.clamp(0.0, 1.0);
+        final currentDisplayPosition = _isDraggingProgress
+            ? Duration(milliseconds: (_dragProgressValue * state.totalDuration.inMilliseconds).round())
+            : state.currentPosition;
+
+        final isWaveformStyle = StorageService.getProgressBarStyle() == 'waveform';
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            children: [
+              if (isWaveformStyle)
+                WaveformSeekBar(
+                  track: track,
+                  progress: sliderValue,
+                  currentPosition: currentDisplayPosition,
+                  totalDuration: state.totalDuration,
+                  activeColor: customBranding.accentColor,
+                  isDark: isDark,
+                  onChangeStart: (val) {
+                    triggerHaptic(HapticFeedbackType.selection);
+                    setState(() {
+                      _isDraggingProgress = true;
+                      _dragProgressValue = val;
+                    });
+                  },
+                  onChanged: (val) {
+                    setState(() {
+                      _dragProgressValue = val;
+                    });
+                  },
+                  onChangeEnd: (val) {
+                    notifier.seek(val);
+                    setState(() {
+                      _isDraggingProgress = false;
+                    });
+                  },
+                )
+              else
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3.5,
+                    activeTrackColor: customBranding.accentColor,
+                    thumbColor: customBranding.accentColor,
+                    trackShape: resolveSliderTrackShape(StorageService.getProgressBarStyle()),
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                  ),
+                  child: Slider(
+                    value: sliderValue,
+                    onChangeStart: (val) {
+                      triggerHaptic(HapticFeedbackType.selection);
+                      setState(() {
+                        _isDraggingProgress = true;
+                        _dragProgressValue = val;
+                      });
+                    },
+                    onChanged: (val) {
+                      setState(() {
+                        _dragProgressValue = val;
+                      });
+                    },
+                    onChangeEnd: (val) {
+                      notifier.seek(val);
+                      setState(() {
+                        _isDraggingProgress = false;
+                      });
+                    },
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_formatDuration(currentDisplayPosition), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    Text(_formatDuration(state.totalDuration), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Shuffle · previous · play/pause · next · repeat ────────────────────────
+
+  Widget _buildTransportRow(PlaybackState state, PlaybackNotifier notifier, Color accentColor, bool isDark) {
+    final strong = isDark ? Colors.white.withValues(alpha: 0.95) : Colors.black87;
+    final idle = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.5);
+    final onAccent = ThemeData.estimateBrightnessForColor(accentColor) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    final isBusy = state.status == PlaybackStatus.loading || state.status == PlaybackStatus.buffering;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        IconButton(
+          tooltip: 'Shuffle',
+          icon: Icon(Icons.shuffle_rounded, color: state.isShuffle ? accentColor : idle, size: 23),
+          onPressed: () {
+            triggerHaptic(HapticFeedbackType.selection);
+            notifier.toggleShuffle();
+          },
+        ),
+        IconButton(
+          tooltip: 'Previous',
+          iconSize: 40,
+          padding: const EdgeInsets.all(6),
+          icon: Icon(Icons.skip_previous_rounded, color: strong),
+          onPressed: () {
+            triggerHaptic(HapticFeedbackType.light);
+            notifier.previousTrack();
+          },
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.35),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Material(
+            color: accentColor,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () {
+                triggerHaptic(HapticFeedbackType.light);
+                notifier.togglePlay();
+              },
+              child: SizedBox(
+                width: 68,
+                height: 68,
+                child: Center(
+                  child: isBusy
+                      ? SizedBox(
+                          width: 26,
+                          height: 26,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(onAccent),
+                          ),
+                        )
+                      : AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+                          child: Icon(
+                            state.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                            key: ValueKey(state.isPlaying),
+                            color: onAccent,
+                            size: 38,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Next',
+          iconSize: 40,
+          padding: const EdgeInsets.all(6),
+          icon: Icon(Icons.skip_next_rounded, color: strong),
+          onPressed: () {
+            triggerHaptic(HapticFeedbackType.light);
+            notifier.nextTrack();
+          },
+        ),
+        IconButton(
+          tooltip: 'Repeat',
+          icon: Icon(
+            state.repeatMode == RepeatMode.one ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+            color: state.repeatMode != RepeatMode.off ? accentColor : idle,
+            size: 23,
+          ),
+          onPressed: () {
+            triggerHaptic(HapticFeedbackType.selection);
+            final nextMode = {
+              RepeatMode.off: RepeatMode.all,
+              RepeatMode.all: RepeatMode.one,
+              RepeatMode.one: RepeatMode.off,
+            }[state.repeatMode]!;
+            notifier.setRepeatMode(nextMode);
+          },
         ),
       ],
-    ),
-  );
-},
-),
-);
-}
+    );
+  }
 
+  /// "Synced with N devices" banner (original, unchanged).
+  Widget _buildSyncBanner(CustomizationState customBranding, bool isDark) {
+    return Consumer(
+      builder: (context, ref, child) {
+        final syncState = ref.watch(multiDeviceSyncProvider);
+        if (!syncState.session.isInGroup) return const SizedBox.shrink();
+        return GestureDetector(
+          onTap: () => showAudioOutputPickerModal(context),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12, left: 24, right: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: customBranding.accentColor.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: customBranding.accentColor.withOpacity(0.5), width: 1.0),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.wifi_tethering_rounded, size: 14, color: customBranding.accentColor),
+                const SizedBox(width: 8),
+                Text(
+                  syncState.session.isHost
+                      ? 'Synced with ${syncState.session.syncedCount} nearby devices 📶'
+                      : 'Synced to host (${syncState.session.hostDeviceName}) 📶',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Action dock: Output · Timer · Lyrics · EQ · Speed · Queue ──────────────
+
+  Widget _buildActionDock(
+    PlaybackState state,
+    PlaybackNotifier notifier,
+    Track track,
+    Color accentColor,
+    bool isDark,
+  ) {
+    final hasLyrics = _lyricsResult != null && _lyricsResult!.hasLyrics;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      decoration: BoxDecoration(
+        color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.06)),
+      ),
+      // Six equal slots, so every button has the same generous tap area.
+      child: Row(
+        children: [
+          // Audio Output & Multi-Room Sync Button
+          Expanded(
+            child: Consumer(
+              builder: (context, ref, child) {
+                final syncSession = ref.watch(multiDeviceSyncProvider).session;
+                final activeDev = ref.watch(audioRoutingProvider).activeDevice;
+                final isGroupActive = syncSession.isInGroup;
+
+                return _buildActionButton(
+                  icon: isGroupActive
+                      ? Icons.speaker_group_rounded
+                      : (activeDev?.type == AudioDeviceType.bluetooth
+                          ? Icons.bluetooth_audio_rounded
+                          : (activeDev?.type == AudioDeviceType.wiredHeadset
+                              ? Icons.headphones_rounded
+                              : Icons.speaker_rounded)),
+                  label: isGroupActive ? 'Synced (${syncSession.syncedCount})' : 'Output',
+                  isActive: isGroupActive || (activeDev != null && activeDev.type != AudioDeviceType.speaker),
+                  accentColor: accentColor,
+                  onTap: () => showAudioOutputPickerModal(context),
+                );
+              },
+            ),
+          ),
+
+          // Sleep Timer Option
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.timer_rounded,
+              label: 'Timer',
+              isActive: state.sleepTimerMinutes != null || state.isSleepTimerEndOfTrack,
+              accentColor: accentColor,
+              onTap: () => _showSleepTimerDialog(notifier),
+            ),
+          ),
+
+          // Synced Lyrics Option
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.lyrics_rounded,
+              label: 'Lyrics',
+              isActive: hasLyrics,
+              accentColor: accentColor,
+              onTap: hasLyrics
+                  ? () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => LyricsScreen(
+                            track: track,
+                            lyricsResult: _lyricsResult!,
+                          ),
+                        ),
+                      );
+                    }
+                  : () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Fetching lyrics for this track...'), duration: Duration(seconds: 1)),
+                      );
+                    },
+            ),
+          ),
+
+          // Equalizer Option
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.graphic_eq_rounded,
+              label: 'EQ',
+              isActive: false,
+              accentColor: accentColor,
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const EqualizerScreen()));
+              },
+            ),
+          ),
+
+          // Playback Speed Option
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.speed_rounded,
+              label: '${state.playbackSpeed}x',
+              isActive: state.playbackSpeed != 1.0,
+              accentColor: accentColor,
+              onTap: () => _showPlaybackSpeedDialog(notifier),
+            ),
+          ),
+
+          // Active Queue Option
+          Expanded(
+            child: _buildActionButton(
+              icon: Icons.queue_music_rounded,
+              label: 'Queue',
+              isActive: false,
+              accentColor: accentColor,
+              onTap: () => _showQueueBottomSheet(state, notifier),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One icon-over-label button. Also used by the Minimal theme's action row.
   Widget _buildActionButton({
     required IconData icon,
     required String label,
@@ -1129,30 +1375,41 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
     required VoidCallback onTap,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final idle = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.62);
 
     return InkWell(
       onTap: () {
         triggerHaptic(HapticFeedbackType.selection);
         onTap();
       },
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(18),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 22,
-              color: isActive ? accentColor : (isDark ? Colors.white60 : Colors.black54),
+            // A soft pill lights up behind the icon when the feature is on.
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 44,
+              height: 30,
+              decoration: BoxDecoration(
+                color: isActive ? accentColor.withValues(alpha: 0.18) : accentColor.withValues(alpha: 0),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, size: 21, color: isActive ? accentColor : idle),
             ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                color: isActive ? accentColor : (isDark ? Colors.white54 : Colors.black54),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                  color: isActive ? accentColor : idle,
+                ),
               ),
             ),
           ],
@@ -3248,7 +3505,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                                 await StorageService.savePlaylists(playlists);
 
                                 // If playlist is collaborative, auto sync addition to Firestore
-                                if (pl['isSyncEnabled'] == true && AuthService.instance.isLoggedIn) {
+                                if (pl['isSyncEnabled'] == true && AuthService.instance.isLoggedIn && !AuthService.instance.isGuest) {
                                   final pid = pl['id']?.toString() ?? '';
                                   if (pid.isNotEmpty && authorUid.isNotEmpty) {
                                     try {
@@ -3653,5 +3910,290 @@ class _ArcProgressPainter extends CustomPainter {
     return oldDelegate.progress != progress ||
         oldDelegate.activeColor != activeColor ||
         oldDelegate.inactiveColor != inactiveColor;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// HOLD-TO-BROWSE QUEUE
+//
+// Shown in place of the artwork while it is held. Cards are placed from the
+// space this widget is actually given (not from the screen width), so the
+// stack is centered and fully visible on any screen size or orientation. The
+// card in focus is always painted last, so nothing ever covers it.
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _QueueBrowser extends StatelessWidget {
+  const _QueueBrowser({
+    super.key,
+    required this.queue,
+    required this.position,
+    required this.currentIndex,
+    required this.accent,
+    required this.isDark,
+  });
+
+  final List<Track> queue;
+
+  /// Where the list is, in songs. 3.5 means halfway between songs 4 and 5.
+  final ValueNotifier<double> position;
+
+  /// The song that is playing.
+  final int currentIndex;
+  final Color accent;
+  final bool isDark;
+
+  static const double _cardHeight = 70;
+  static const double _hintSpace = 40;
+
+  @override
+  Widget build(BuildContext context) {
+    if (queue.isEmpty) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Text('Queue is empty', style: TextStyle(color: Colors.white, fontSize: 12)),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final last = queue.length - 1;
+
+        final cardWidth = math.max(0.0, math.min(width - 40, 440.0));
+        // Fit two neighbours above and below when there is room; squeeze
+        // them closer (never off-screen) when there is not.
+        final spacing = ((height - _hintSpace - _cardHeight) / 4).clamp(26.0, 58.0).toDouble();
+        final centerY = _hintSpace + (height - _hintSpace) / 2;
+
+        return ClipRect(
+          // Only this builder runs while the finger moves.
+          child: ValueListenableBuilder<double>(
+            valueListenable: position,
+            builder: (context, pos, _) {
+              final focused = pos.round().clamp(0, last).toInt();
+
+              // Farthest first, so the focused card is painted on top.
+              final indices = <int>[
+                for (var i = math.max(0, focused - 3); i <= math.min(last, focused + 3); i++) i,
+              ]..sort((a, b) => (b - pos).abs().compareTo((a - pos).abs()));
+
+              final String hint;
+              if (pos < -0.12) {
+                hint = 'Start of queue';
+              } else if (pos > last + 0.12) {
+                hint = 'End of queue';
+              } else {
+                hint = 'Slide to browse · release to play';
+              }
+
+              return Stack(
+                children: [
+                  for (final index in indices)
+                    _buildCard(index, pos, focused, cardWidth, width, centerY, spacing),
+                  Positioned(
+                    top: 2,
+                    left: 12,
+                    right: 12,
+                    child: Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.82),
+                            borderRadius: BorderRadius.circular(100),
+                            border: Border.all(color: accent.withValues(alpha: 0.55)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.swap_vert_rounded, size: 14, color: accent),
+                              const SizedBox(width: 6),
+                              Text(
+                                hint,
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                '${focused + 1}/${queue.length}',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w800),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCard(
+    int index,
+    double pos,
+    int focused,
+    double cardWidth,
+    double width,
+    double centerY,
+    double spacing,
+  ) {
+    final distance = index - pos;
+    final away = distance.abs();
+    final scale = (1.0 - away * 0.07).clamp(0.78, 1.0).toDouble();
+    final opacity = (1.0 - away * 0.3).clamp(0.0, 1.0).toDouble();
+
+    return Positioned(
+      left: (width - cardWidth) / 2,
+      top: centerY - _cardHeight / 2 + distance * spacing,
+      width: cardWidth,
+      height: _cardHeight,
+      child: Opacity(
+        opacity: opacity,
+        child: Transform.scale(
+          scale: scale,
+          child: _QueueBrowseCard(
+            track: queue[index],
+            number: index + 1,
+            isFocused: index == focused,
+            isCurrent: index == currentIndex,
+            isUpcoming: index > currentIndex,
+            accent: accent,
+            isDark: isDark,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QueueBrowseCard extends StatelessWidget {
+  const _QueueBrowseCard({
+    required this.track,
+    required this.number,
+    required this.isFocused,
+    required this.isCurrent,
+    required this.isUpcoming,
+    required this.accent,
+    required this.isDark,
+  });
+
+  final Track track;
+  final int number;
+  final bool isFocused;
+  final bool isCurrent;
+  final bool isUpcoming;
+  final Color accent;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final String label;
+    if (isCurrent) {
+      label = 'NOW PLAYING';
+    } else if (isFocused) {
+      label = 'RELEASE TO PLAY';
+    } else {
+      label = isUpcoming ? 'UP NEXT' : 'EARLIER IN QUEUE';
+    }
+
+    final muted = (isDark ? Colors.white : Colors.black).withValues(alpha: 0.5);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        // Solid colors: cards overlap, so nothing may show through.
+        color: isFocused
+            ? (isDark ? const Color(0xFF2A2A30) : Colors.white)
+            : (isDark ? const Color(0xFF1E1E22) : const Color(0xFFF0EAE1)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isFocused ? accent : Colors.grey.withValues(alpha: 0.2),
+          width: isFocused ? 2.0 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isFocused ? accent.withValues(alpha: 0.35) : Colors.black.withValues(alpha: 0.2),
+            blurRadius: isFocused ? 18 : 8,
+            offset: Offset(0, isFocused ? 6 : 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          AppArtworkImage(
+            artworkUrl: track.artworkUrl,
+            trackId: track.id,
+            width: 46,
+            height: 46,
+            fit: BoxFit.cover,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: isFocused ? accent : muted,
+                    letterSpacing: 0.8,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    height: 1.2,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                Text(
+                  track.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, height: 1.25, color: muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (isFocused)
+            Icon(
+              isCurrent ? Icons.graphic_eq_rounded : Icons.play_circle_fill_rounded,
+              size: isCurrent ? 24 : 30,
+              color: accent,
+            )
+          else
+            Text(
+              '#$number',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: muted),
+            ),
+        ],
+      ),
+    );
   }
 }

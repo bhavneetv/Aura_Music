@@ -112,8 +112,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with TickerProvider
   }
 
   String _nextRoute() {
+    if (!StorageService.isOnboardingComplete()) return '/onboarding';
     if (!AuthService.instance.isLoggedIn) return '/login';
-    return StorageService.isOnboardingComplete() ? '/home' : '/onboarding';
+    return '/home';
   }
 
   /// Leaves the splash exactly once, whichever trigger fires first.

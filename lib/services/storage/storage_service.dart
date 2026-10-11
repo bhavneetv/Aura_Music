@@ -496,6 +496,16 @@ class StorageService {
     await box.put('listening_history', jsonEncode([]));
   }
 
+  static int getSyncedWatchHistoryCount() {
+    final box = Hive.box(_historyBox);
+    return (box.get('synced_watch_history_count', defaultValue: 0) as num).toInt();
+  }
+
+  static Future<void> setSyncedWatchHistoryCount(int count) async {
+    final box = Hive.box(_historyBox);
+    await box.put('synced_watch_history_count', count);
+  }
+
   // ── 3D Virtual Sound / Spatial Audio ─────────────────────────
 
   static bool is3dSoundEnabled() {

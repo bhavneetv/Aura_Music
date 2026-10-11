@@ -187,9 +187,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _sectionLabel('Account'),
         const FirebaseAccountSection(),
 
-        _sectionLabel('Listening stats'),
-        const FirebaseMyStatsSection(),
-
         // ── Appearance ─────────────────────────────────────────
         _sectionLabel('Appearance'),
         _SettingsGroup(

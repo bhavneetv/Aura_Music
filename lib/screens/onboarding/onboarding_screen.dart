@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../providers/customization_provider.dart';
 import '../../services/storage/storage_service.dart';
+import '../../services/auth/auth_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Onboarding
@@ -265,7 +266,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> with Widget
     }
 
     if (mounted) {
-      context.go('/home');
+      if (!AuthService.instance.isLoggedIn) {
+        context.go('/login');
+      } else {
+        context.go('/home');
+      }
     }
   }
 

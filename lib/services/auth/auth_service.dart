@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -93,6 +94,7 @@ class AuthService {
   AppUser? get currentAppUser => _currentAppUser;
   bool get isLoggedIn => _auth.currentUser != null;
   bool get isGuest => _auth.currentUser?.isAnonymous ?? false;
+  bool get canSyncAccountPlaylists => isLoggedIn && !isGuest;
   String get currentUserId => _auth.currentUser?.uid ?? '';
   String? get currentUserEmail => _auth.currentUser?.email;
   String get currentUserName => 
@@ -399,6 +401,9 @@ class AuthService {
 
   /// Push all local playlists and favorites to Cloud Firestore under current user's UID.
   Future<String> backupUserPlaylists() async {
+    if (isGuest) {
+      return 'Guest accounts cannot sync playlists to cloud. Please sign in or link your account.';
+    }
     final uid = currentUserId;
     if (uid.isEmpty) {
       return 'Please sign in first to back up your playlists.';
@@ -538,6 +543,20 @@ class AuthService {
 
       playlistsChangedNotifier.value++;
 
+      // Sync watch history count (number only) to user profile in Firestore
+      if (!isGuest && uid.isNotEmpty) {
+        try {
+          final historyCount = StorageService.getListeningHistory().length;
+          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+            'watchHistoryCount': historyCount,
+            'lastHistorySyncedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          await StorageService.setSyncedWatchHistoryCount(historyCount);
+        } catch (he) {
+          debugPrint('backupUserPlaylists watch history count sync error: $he');
+        }
+      }
+
       return 'Successfully pushed and backed up $pushedCount playlist(s) to cloud! ☁️';
     } catch (e) {
       debugPrint('backupUserPlaylists error: $e');
@@ -548,6 +567,7 @@ class AuthService {
   /// Pull all playlists owned or joined by the current user from Cloud Firestore,
   /// and merge/restore them into local Hive storage.
   Future<int> restoreUserPlaylists() async {
+    if (isGuest) return 0;
     final uid = currentUserId;
     if (uid.isEmpty) return 0;
 
@@ -660,10 +680,44 @@ class AuthService {
       // Trigger instant UI refresh across the app
       playlistsChangedNotifier.value++;
 
+      // Pull and sync watch history count (number only) from cloud
+      if (!isGuest && uid.isNotEmpty) {
+        try {
+          final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+          if (userDoc.exists && userDoc.data() != null) {
+            final cloudCount = userDoc.data()!['watchHistoryCount'];
+            if (cloudCount is num) {
+              final localCount = StorageService.getListeningHistory().length;
+              final finalCount = math.max(localCount, cloudCount.toInt());
+              await StorageService.setSyncedWatchHistoryCount(finalCount);
+            }
+          }
+        } catch (he) {
+          debugPrint('restoreUserPlaylists watch history count pull error: $he');
+        }
+      }
+
       return restoredCount > 0 ? restoredCount : docMap.length;
     } catch (e) {
       debugPrint('restoreUserPlaylists error: $e');
       return 0;
+    }
+  }
+
+  /// Sync watch history count (integer number only) to cloud Firestore under users/{uid}
+  Future<void> syncWatchHistoryCount() async {
+    if (isGuest || !isLoggedIn) return;
+    final uid = currentUserId;
+    if (uid.isEmpty) return;
+    try {
+      final historyCount = StorageService.getListeningHistory().length;
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'watchHistoryCount': historyCount,
+        'lastHistorySyncedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      await StorageService.setSyncedWatchHistoryCount(historyCount);
+    } catch (e) {
+      debugPrint('syncWatchHistoryCount error: $e');
     }
   }
 

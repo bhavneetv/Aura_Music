@@ -251,7 +251,7 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
         Text(
-          user.email,
+          AuthService.instance.isGuest ? 'Guest Account (Local Session)' : user.email,
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: isDark ? Colors.white60 : Colors.black54),
         ),
@@ -259,22 +259,47 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: accentColor.withValues(alpha: 0.1),
+            color: AuthService.instance.isGuest
+                ? Colors.amber.withValues(alpha: 0.12)
+                : accentColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+            border: Border.all(
+              color: AuthService.instance.isGuest
+                  ? Colors.amber.withValues(alpha: 0.4)
+                  : accentColor.withValues(alpha: 0.3),
+            ),
           ),
           child: Row(
             children: [
-              Icon(Icons.cloud_done_rounded, color: accentColor, size: 24),
+              Icon(
+                AuthService.instance.isGuest ? Icons.info_outline_rounded : Icons.cloud_done_rounded,
+                color: AuthService.instance.isGuest ? Colors.amber : accentColor,
+                size: 24,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Cloud Account Active', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                     Text(
-                      'Global playlist publishing, collaboration, and instant multi-device restore enabled.',
-                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black54),
+                      AuthService.instance.isGuest ? 'Guest Account (Sync Disabled)' : 'Cloud Account Active',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: AuthService.instance.isGuest ? Colors.amber : (isDark ? Colors.white : Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AuthService.instance.isGuest
+                          ? 'Guest accounts cannot sync playlists to cloud. Please sign in or link an account in Settings to enable multi-device sync.'
+                          : 'Global playlist publishing, collaboration, and instant multi-device restore enabled.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AuthService.instance.isGuest
+                            ? (isDark ? Colors.amber.shade200 : Colors.amber.shade900)
+                            : (isDark ? Colors.white70 : Colors.black54),
+                      ),
                     ),
                   ],
                 ),
@@ -285,13 +310,16 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
         const SizedBox(height: 20),
         // Push / Backup Button
         ElevatedButton.icon(
-          onPressed: _isLoading ? null : _handleBackupPlaylists,
+          onPressed: (_isLoading || AuthService.instance.isGuest) ? null : _handleBackupPlaylists,
           icon: _isLoading
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
               : const Icon(Icons.cloud_upload_rounded, color: Colors.black),
-          label: const Text('Push / Backup Playlists to Cloud ☁️', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+          label: Text(
+            AuthService.instance.isGuest ? 'Cloud Playlist Sync Disabled (Guest)' : 'Push / Backup Playlists to Cloud ☁️',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+          ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: accentColor,
+            backgroundColor: AuthService.instance.isGuest ? Colors.grey.shade400 : accentColor,
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -299,17 +327,20 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
         const SizedBox(height: 10),
         // Pull / Restore Button
         ElevatedButton.icon(
-          onPressed: _isLoading ? null : _handlePullPlaylists,
+          onPressed: (_isLoading || AuthService.instance.isGuest) ? null : _handlePullPlaylists,
           icon: _isLoading
               ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: accentColor))
-              : Icon(Icons.cloud_download_rounded, color: accentColor),
-          label: Text('Pull / Restore Playlists from Cloud 📥', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+              : Icon(Icons.cloud_download_rounded, color: AuthService.instance.isGuest ? Colors.grey : accentColor),
+          label: Text(
+            AuthService.instance.isGuest ? 'Cloud Playlist Restore Disabled (Guest)' : 'Pull / Restore Playlists from Cloud 📥',
+            style: TextStyle(fontWeight: FontWeight.bold, color: AuthService.instance.isGuest ? Colors.grey : (isDark ? Colors.white : Colors.black87)),
+          ),
           style: ElevatedButton.styleFrom(
             backgroundColor: isDark ? const Color(0xFF22222E) : const Color(0xFFF0F0F5),
-            foregroundColor: isDark ? Colors.white : Colors.black87,
+            foregroundColor: AuthService.instance.isGuest ? Colors.grey : (isDark ? Colors.white : Colors.black87),
             padding: const EdgeInsets.symmetric(vertical: 14),
             elevation: 0,
-            side: BorderSide(color: accentColor.withValues(alpha: 0.4)),
+            side: BorderSide(color: (AuthService.instance.isGuest ? Colors.grey : accentColor).withValues(alpha: 0.4)),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
