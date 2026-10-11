@@ -58,6 +58,39 @@ class StorageService {
     await saveSetting('user_name', name.trim());
   }
 
+  // ── Admin Cache ─────────────────────────────────────────────
+  static String? getAdminCachedStatsJson() {
+    return getSetting('admin_cached_stats') as String?;
+  }
+
+  static Future<void> saveAdminCachedStatsJson(String jsonStr) async {
+    await saveSetting('admin_cached_stats', jsonStr);
+  }
+
+  static String? getAdminLastSyncedAt() {
+    return getSetting('admin_last_synced_at') as String?;
+  }
+
+  static Future<void> setAdminLastSyncedAt(String dtIso) async {
+    await saveSetting('admin_last_synced_at', dtIso);
+  }
+
+  static String? getAdminCachedUsersJson() {
+    return getSetting('admin_cached_users') as String?;
+  }
+
+  static Future<void> saveAdminCachedUsersJson(String jsonStr) async {
+    await saveSetting('admin_cached_users', jsonStr);
+  }
+
+  static String? getAdminCachedPlaylistsJson() {
+    return getSetting('admin_cached_playlists') as String?;
+  }
+
+  static Future<void> saveAdminCachedPlaylistsJson(String jsonStr) async {
+    await saveSetting('admin_cached_playlists', jsonStr);
+  }
+
   static bool hasCompletedOnboarding() {
     final fromSettings = getSetting('completed_onboarding', defaultValue: false) as bool;
     try {

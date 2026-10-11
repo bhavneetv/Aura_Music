@@ -10,16 +10,15 @@ service cloud.firestore {
     // NOTE FOR ADMIN: Replace 'CHANGE_ME@gmail.com' below with your verified admin email!
     function isAdmin() {
       return request.auth != null
-        && (request.auth.token.email == 'bhanu2006v@gmail.com'
-            || request.auth.token.email == 'CHANGE_ME@gmail.com');
+        && 'email' in request.auth.token
+        && (
+          request.auth.token.email.lower() == 'bhanu2006v@gmail.com'
+          || request.auth.token.email == 'bhanu2006v@gmail.com'
+        );
     }
 
     function isAuthenticated() {
       return request.auth != null;
-    }
-
-    function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid;
     }
 
     // Ensures the user has not been blocked by an administrator
@@ -32,9 +31,7 @@ service cloud.firestore {
     // 1. BLOCKED USERS COLLECTION: blocked/{uid}
     // =========================================================================
     match /blocked/{uid} {
-      // User can check if they are blocked, admin can read any
-      allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
-      // Admin only can create/delete block documents
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == uid);
       allow write: if isAdmin();
     }
 
@@ -42,102 +39,44 @@ service cloud.firestore {
     // 2. USERS COLLECTION: users/{uid}
     // =========================================================================
     match /users/{uid} {
-      // Owner can read their document; admin can read all users (for management & metrics)
-      allow read: if isAuthenticated() && isNotBlocked() && (request.auth.uid == uid || isAdmin());
-
-      // User can create their own profile on sign-in
-      allow create: if isAuthenticated()
-        && isNotBlocked()
-        && request.auth.uid == uid
-        && request.resource.data.displayName is string
-        && request.resource.data.loginCount == 1;
-
-      // User can update their own profile, with sane limits on stats increments
-      allow update: if isAuthenticated()
-        && isNotBlocked()
-        && (request.auth.uid == uid || isAdmin())
-        // Prevent spoofing creation timestamp
-        && request.resource.data.createdAt == resource.data.createdAt
-        // Validations on stats increments (max +100 totalSongsPlayed per write)
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stats'])
-            || (request.resource.data.stats.totalSongsPlayed is number
-                && request.resource.data.stats.totalSongsPlayed >= resource.data.stats.totalSongsPlayed
-                && request.resource.data.stats.totalSongsPlayed <= resource.data.stats.totalSongsPlayed + 100));
-
-      // User can delete their own document on account deletion; admin can delete any
-      allow delete: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow read: if isAdmin() || (isAuthenticated() && isNotBlocked() && request.auth.uid == uid);
+      allow create, update: if isAdmin() || (isAuthenticated() && isNotBlocked() && request.auth.uid == uid);
+      allow delete: if isAdmin() || (isAuthenticated() && isNotBlocked() && request.auth.uid == uid);
     }
 
     // =========================================================================
     // 3. PLAYLISTS COLLECTION: playlists/{playlistId}
     // =========================================================================
     match /playlists/{playlistId} {
-      // Read allowed if:
-      // - The playlist is public, OR
-      // - The user is a member/collaborator, OR
-      // - The user is an administrator
-      allow read: if resource.data.visibility == 'public'
+      allow read: if isAdmin()
+        || resource.data.visibility == 'public'
         || resource.data.isPublic == true
         || (isAuthenticated() && isNotBlocked() && (
           request.auth.uid == resource.data.ownerUid
-          || request.auth.uid in resource.data.memberUids
-          || isAdmin()
+          || (resource.data.memberUids is list && request.auth.uid in resource.data.memberUids)
         ));
 
-      // Create allowed only if ownerUid matches the authenticated caller
-      // and max tracks is respected
-      allow create: if isAuthenticated()
-        && isNotBlocked()
-        && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.memberUids.hasAll([request.auth.uid])
-        && request.resource.data.tracks.size() <= 500;
+      allow create: if isAdmin()
+        || (isAuthenticated() && isNotBlocked() && request.resource.data.ownerUid == request.auth.uid);
 
-      // Update rules:
-      // Case A: Owner or Admin can update any field (capped at 500 tracks)
-      // Case B: Existing Collaborator can update tracks, trackCount, updatedAt if collabEnabled == true
-      // Case C: Non-member joining via invite code can update memberUids and joinedWith
-      allow update: if isAuthenticated() && isNotBlocked() && (
-        // Case A: Owner or Admin
-        ((request.auth.uid == resource.data.ownerUid || isAdmin())
-          && request.resource.data.tracks.size() <= 500)
+      allow update: if isAdmin()
+        || (isAuthenticated() && isNotBlocked() && (
+          request.auth.uid == resource.data.ownerUid
+          || (resource.data.memberUids is list && request.auth.uid in resource.data.memberUids)
+          || resource.data.collabEnabled == true
+        ));
 
-        // Case B: Collaborator editing tracks
-        || (request.auth.uid in resource.data.memberUids
-            && resource.data.collabEnabled == true
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tracks', 'trackCount', 'updatedAt'])
-            && request.resource.data.tracks.size() <= 500)
-
-        // Case C: Joining collaborative playlist with valid invite code
-        || (resource.data.collabEnabled == true
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids', 'joinedWith', 'updatedAt'])
-            && request.resource.data.memberUids.size() == resource.data.memberUids.size() + 1
-            && request.resource.data.memberUids.hasAll(resource.data.memberUids)
-            && request.auth.uid in request.resource.data.memberUids)
-      );
-
-      // Owner or Admin can delete
-      allow delete: if isAuthenticated() && isNotBlocked() && (
-        request.auth.uid == resource.data.ownerUid || isAdmin()
-      );
+      allow delete: if isAdmin()
+        || (isAuthenticated() && isNotBlocked() && request.auth.uid == resource.data.ownerUid);
     }
 
     // =========================================================================
     // 4. INVITE CODES COLLECTION: inviteCodes/{code}
     // =========================================================================
     match /inviteCodes/{code} {
-      // Any signed-in user can get or query codes; listing all codes is allowed for authenticated users
-      allow get: if isAuthenticated() && isNotBlocked();
-      allow list: if isAuthenticated() && isNotBlocked();
-
-      // Only the playlist owner can create an invite code
-      allow create: if isAuthenticated()
-        && isNotBlocked()
-        && request.resource.data.createdBy == request.auth.uid;
-
-      // Only the creator or admin can delete the invite code
-      allow delete: if isAuthenticated() && isNotBlocked() && (
-        resource.data.createdBy == request.auth.uid || isAdmin()
-      );
+      allow read: if isAuthenticated() && isNotBlocked();
+      allow create: if isAdmin() || (isAuthenticated() && isNotBlocked() && request.resource.data.createdBy == request.auth.uid);
+      allow delete: if isAdmin() || (isAuthenticated() && isNotBlocked() && resource.data.createdBy == request.auth.uid);
     }
   }
 }

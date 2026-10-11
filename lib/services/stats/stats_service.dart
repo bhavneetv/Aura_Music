@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/track.dart';
 import '../auth/auth_service.dart';
+import '../storage/storage_service.dart';
 
 class StatsService {
   static final StatsService instance = StatsService._();
@@ -97,8 +98,8 @@ class StatsService {
 
     _persistBufferLocally();
 
-    // Flush every 10 listens
-    if (_pendingListens >= 10) {
+    // Flush every 3 listens
+    if (_pendingListens >= 3) {
       flushPendingStats();
     }
   }
@@ -110,6 +111,28 @@ class StatsService {
       await prefs.setString(_kPendingArtistsKey, jsonEncode(_pendingArtists));
       await prefs.setString(_kPendingDailyKey, jsonEncode(_pendingDaily));
     } catch (_) {}
+  }
+
+  /// Force-sync local playback count to user document in Firestore.
+  Future<void> forceSyncCurrentPlayCount() async {
+    final uid = AuthService.instance.currentUserId;
+    if (uid.isEmpty) return;
+    try {
+      final localHistoryCount = StorageService.getListeningHistory().length;
+      if (localHistoryCount > 0) {
+        await _firestore.collection('users').doc(uid).set({
+          'stats': {
+            'totalSongsPlayed': localHistoryCount,
+          },
+          'watchHistoryCount': localHistoryCount,
+        }, SetOptions(merge: true));
+      }
+      if (_pendingListens > 0) {
+        await flushPendingStats();
+      }
+    } catch (e) {
+      debugPrint('forceSyncCurrentPlayCount notice: $e');
+    }
   }
 
   /// Flushes pending stats to Firestore.
@@ -137,9 +160,11 @@ class StatsService {
       final data = snapshot.data() ?? {};
       final existingStats = data['stats'] as Map<String, dynamic>? ?? {};
 
-      // Merge total listens
+      // Merge total listens, accounting for local history length
       final existingTotal = (existingStats['totalSongsPlayed'] as num?)?.toInt() ?? 0;
-      final newTotal = existingTotal + listensToFlush;
+      final localHistoryCount = StorageService.getListeningHistory().length;
+      final baseTotal = existingTotal > localHistoryCount ? existingTotal : localHistoryCount;
+      final newTotal = baseTotal + listensToFlush;
 
       // Merge and cap top artists at 20
       final existingArtistsRaw = existingStats['topArtists'] as Map<dynamic, dynamic>? ?? {};
@@ -148,8 +173,8 @@ class StatsService {
         if (k != null && v is num) mergedArtists[k.toString()] = v.toInt();
       });
 
-      artistsToFlush.forEach((artist, count) {
-        mergedArtists[artist] = (mergedArtists[artist] ?? 0) + count;
+      artistsToFlush.forEach((artist, artistListens) {
+        mergedArtists[artist] = (mergedArtists[artist] ?? 0) + artistListens;
       });
 
       // Sort by play count descending and cap to top 20
@@ -170,8 +195,8 @@ class StatsService {
         if (k != null && v is num) mergedDaily[k.toString()] = v.toInt();
       });
 
-      dailyToFlush.forEach((date, count) {
-        mergedDaily[date] = (mergedDaily[date] ?? 0) + count;
+      dailyToFlush.forEach((date, dayListens) {
+        mergedDaily[date] = (mergedDaily[date] ?? 0) + dayListens;
       });
 
       // Prune keys older than 30 days

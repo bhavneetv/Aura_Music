@@ -41,6 +41,12 @@ class AppUser {
     final providersRaw = data['providers'] as List<dynamic>? ?? [];
     final providers = providersRaw.map((e) => e.toString()).toList();
 
+    final baseStats = UserStats.fromMap(data['stats'] as Map<String, dynamic>?);
+    final historyCount = (data['watchHistoryCount'] as num?)?.toInt() ?? 0;
+    final effectiveStats = baseStats.totalSongsPlayed == 0 && historyCount > 0
+        ? baseStats.copyWith(totalSongsPlayed: historyCount)
+        : baseStats;
+
     return AppUser(
       uid: doc.id,
       displayName: (data['displayName'] as String?)?.isNotEmpty == true 
@@ -53,8 +59,40 @@ class AppUser {
       createdAt: parseTimestamp(data['createdAt']),
       lastLoginAt: parseTimestamp(data['lastLoginAt']),
       loginCount: (data['loginCount'] as num?)?.toInt() ?? 1,
-      stats: UserStats.fromMap(data['stats'] as Map<String, dynamic>?),
+      stats: effectiveStats,
       isEmailVerified: isEmailVerified,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'uid': uid,
+      'displayName': displayName,
+      'email': email,
+      'photoUrl': photoUrl,
+      'isGuest': isGuest,
+      'providers': providers,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'lastLoginAt': lastLoginAt.millisecondsSinceEpoch,
+      'loginCount': loginCount,
+      'stats': stats.toMap(),
+      'isEmailVerified': isEmailVerified,
+    };
+  }
+
+  factory AppUser.fromMap(Map<String, dynamic> map) {
+    return AppUser(
+      uid: map['uid'] as String? ?? '',
+      displayName: map['displayName'] as String? ?? 'Aura Listener',
+      email: map['email'] as String?,
+      photoUrl: map['photoUrl'] as String?,
+      isGuest: map['isGuest'] as bool? ?? false,
+      providers: List<String>.from(map['providers'] ?? []),
+      createdAt: map['createdAt'] is int ? DateTime.fromMillisecondsSinceEpoch(map['createdAt']) : DateTime.now(),
+      lastLoginAt: map['lastLoginAt'] is int ? DateTime.fromMillisecondsSinceEpoch(map['lastLoginAt']) : DateTime.now(),
+      loginCount: (map['loginCount'] as num?)?.toInt() ?? 1,
+      stats: UserStats.fromMap(map['stats'] as Map<String, dynamic>?),
+      isEmailVerified: map['isEmailVerified'] as bool? ?? false,
     );
   }
 

@@ -80,6 +80,26 @@ class Playlist {
     );
   }
 
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'ownerUid': ownerUid,
+      'ownerName': ownerName,
+      'memberUids': memberUids,
+      'visibility': visibility,
+      'isPublic': isPublic,
+      'collabEnabled': collabEnabled,
+      'type': type,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'updatedAt': updatedAt.millisecondsSinceEpoch,
+      'trackCount': tracks.length,
+      'tracks': tracks.map((t) => t.toMap()).toList(),
+      if (shareCode != null && shareCode!.isNotEmpty) 'shareCode': shareCode,
+    };
+  }
+
   Map<String, dynamic> toFirestore() {
     return {
       'name': name,

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../models/app_user.dart';
+import '../../models/user_stats.dart';
 import '../../models/user_model.dart';
 import '../../models/playlist.dart';
 import '../../models/playlist_track.dart';
@@ -57,6 +58,23 @@ class AuthService {
 
       _userDocSub?.cancel();
       if (firebaseUser != null) {
+        _userService.syncUserOnLogin(firebaseUser).catchError((e) {
+          debugPrint('Auth init user sync error: $e');
+          return AppUser(
+            uid: firebaseUser.uid,
+            displayName: firebaseUser.displayName ?? 'Aura Listener',
+            email: firebaseUser.email,
+            isGuest: firebaseUser.isAnonymous,
+            providers: firebaseUser.providerData
+                .map((p) => p.providerId.replaceAll('.com', ''))
+                .toList(),
+            createdAt: DateTime.now(),
+            lastLoginAt: DateTime.now(),
+            loginCount: 1,
+            stats: UserStats.empty(),
+          );
+        });
+
         _userDocSub = _userService.watchUser(firebaseUser.uid, isEmailVerified: firebaseUser.emailVerified).listen((appUser) {
           _currentAppUser = appUser;
           if (appUser != null) {
@@ -150,6 +168,10 @@ class AuthService {
       final appUser = await _userService.syncUserOnLogin(user, preferredName: googleUser.displayName);
       _currentAppUser = appUser;
       await _syncLocalProfile(appUser);
+      backupUserPlaylists().catchError((e) {
+        debugPrint('Google login auto-backup error: $e');
+        return '';
+      });
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
@@ -185,6 +207,10 @@ class AuthService {
       final appUser = await _userService.syncUserOnLogin(user);
       _currentAppUser = appUser;
       await _syncLocalProfile(appUser);
+      backupUserPlaylists().catchError((e) {
+        debugPrint('Email login auto-backup error: $e');
+        return '';
+      });
       authState.value = true;
       return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
