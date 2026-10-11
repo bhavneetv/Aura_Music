@@ -54,6 +54,9 @@ key.properties
 pdr.md
 pdrfix.md
 
+# Netlify
+.netlify/
+
 # Firebase configurations
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
