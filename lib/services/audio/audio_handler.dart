@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:audio_service/audio_service.dart';
@@ -309,13 +310,27 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   }
 
   MediaItem _trackToMediaItem(Track track) {
+    Uri? artUri;
+    if (track.artworkUrl.isNotEmpty) {
+      if (track.artworkUrl.startsWith('http://') || track.artworkUrl.startsWith('https://')) {
+        artUri = Uri.tryParse(track.artworkUrl);
+      } else {
+        final cleanPath = track.artworkUrl.startsWith('file://')
+            ? Uri.parse(track.artworkUrl).toFilePath()
+            : track.artworkUrl;
+        if (File(cleanPath).existsSync()) {
+          artUri = Uri.file(cleanPath);
+        }
+      }
+    }
+
     return MediaItem(
       id: track.id,
       album: track.album,
       title: track.title,
       artist: track.artist,
       duration: _parseDuration(track.duration),
-      artUri: Uri.tryParse(track.artworkUrl),
+      artUri: artUri,
       extras: {
         'audioUrl': track.audioUrl,
         'genre': track.genre,

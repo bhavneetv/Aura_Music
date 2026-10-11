@@ -111,7 +111,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
   Future<void> _handleGoogleSignIn() async {
     await _checkConnectivity();
     if (_isOffline) {
-      _showError('No internet connection. Please connect to the internet to sign in.');
+      _showError('No internet connection. Login is disabled in offline mode.');
       return;
     }
 
@@ -139,7 +139,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
   Future<void> _handleGuestSignIn() async {
     await _checkConnectivity();
     if (_isOffline) {
-      _showError('No internet connection. Please connect to the internet to initialize guest profile.');
+      _showError('No internet connection. Login is disabled in offline mode.');
       return;
     }
     if (!mounted) return;
@@ -175,6 +175,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
   }
 
   void _showEmailAuthModal() {
+    _checkConnectivity();
+    if (_isOffline) {
+      _showError('No internet connection. Login is disabled in offline mode.');
+      return;
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -498,25 +503,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
           ),
 
           // 1. Google Sign-In (Primary Action)
-          _AuthButton(
-            icon: const _GoogleLogo(size: 21),
-            label: 'Continue with Google',
-            background: Colors.white,
-            foreground: const Color(0xFF1F1F1F),
-            borderColor: isDark ? null : const Color(0xFFD5D7DA),
-            onPressed: _isLoading ? null : _handleGoogleSignIn,
+          Opacity(
+            opacity: _isOffline ? 0.6 : 1.0,
+            child: _AuthButton(
+              icon: const _GoogleLogo(size: 21),
+              label: 'Continue with Google',
+              background: Colors.white,
+              foreground: const Color(0xFF1F1F1F),
+              borderColor: isDark ? null : const Color(0xFFD5D7DA),
+              onPressed: _isLoading ? null : _handleGoogleSignIn,
+            ),
           ),
 
           const SizedBox(height: 12),
 
           // 2. Email + Password
-          _AuthButton(
-            icon: Icon(Icons.mail_outline_rounded, size: 21, color: Theme.of(context).colorScheme.onSurface),
-            label: 'Email & Password',
-            background: _tint(context, 0.07),
-            foreground: Theme.of(context).colorScheme.onSurface,
-            borderColor: _tint(context, 0.1),
-            onPressed: _isLoading ? null : _showEmailAuthModal,
+          Opacity(
+            opacity: _isOffline ? 0.6 : 1.0,
+            child: _AuthButton(
+              icon: Icon(Icons.mail_outline_rounded, size: 21, color: Theme.of(context).colorScheme.onSurface),
+              label: 'Email & Password',
+              background: _tint(context, 0.07),
+              foreground: Theme.of(context).colorScheme.onSurface,
+              borderColor: _tint(context, 0.1),
+              onPressed: _isLoading ? null : _showEmailAuthModal,
+            ),
           ),
 
           const SizedBox(height: 18),
@@ -544,12 +555,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
           const SizedBox(height: 18),
 
           // 3. Continue as Guest (Secondary Action)
-          _AuthButton(
-            icon: Icon(Icons.person_pin_circle_outlined, size: 21, color: _onColor(accentColor)),
-            label: 'Continue as Guest',
-            background: accentColor,
-            foreground: _onColor(accentColor),
-            onPressed: _isLoading ? null : _handleGuestSignIn,
+          Opacity(
+            opacity: _isOffline ? 0.6 : 1.0,
+            child: _AuthButton(
+              icon: Icon(Icons.person_pin_circle_outlined, size: 21, color: _onColor(accentColor)),
+              label: 'Continue as Guest',
+              background: accentColor,
+              foreground: _onColor(accentColor),
+              onPressed: _isLoading ? null : _handleGuestSignIn,
+            ),
           ),
 
           const SizedBox(height: 14),
@@ -581,7 +595,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with TickerProviderSt
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Offline. Connect to internet to sign in.',
+              'Offline mode active. Login and account features are disabled.',
               style: TextStyle(fontSize: 12.5, height: 1.3, color: color, fontWeight: FontWeight.w600),
             ),
           ),

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../models/app_user.dart';
 import '../../models/user_stats.dart';
 import '../../models/user_model.dart';
@@ -144,10 +145,70 @@ class AuthService {
     );
   }
 
+  bool get isGoogleLinked =>
+      (_auth.currentUser?.providerData.any((p) => p.providerId.contains('google')) ?? false) ||
+      (_currentAppUser?.providers.contains('google') ?? false);
+
+  bool get isEmailPasswordLinked =>
+      (_auth.currentUser?.providerData.any((p) => p.providerId.contains('password')) ?? false) ||
+      (_currentAppUser?.providers.contains('password') ?? false);
+
+  String? get googleEmail {
+    final user = _auth.currentUser;
+    if (user != null) {
+      for (final p in user.providerData) {
+        if (p.providerId.contains('google') && p.email != null && p.email!.isNotEmpty) {
+          return p.email;
+        }
+      }
+    }
+    if (_currentAppUser?.linkedGoogleEmail?.isNotEmpty == true) {
+      return _currentAppUser!.linkedGoogleEmail;
+    }
+    if (isGoogleLinked && user?.email != null && user!.email!.isNotEmpty) {
+      return user.email;
+    }
+    return null;
+  }
+
+  String? get passwordEmail {
+    final user = _auth.currentUser;
+    if (user != null) {
+      for (final p in user.providerData) {
+        if (p.providerId.contains('password') && p.email != null && p.email!.isNotEmpty) {
+          return p.email;
+        }
+      }
+    }
+    if (_currentAppUser?.linkedPasswordEmail?.isNotEmpty == true) {
+      return _currentAppUser!.linkedPasswordEmail;
+    }
+    if (isEmailPasswordLinked && user?.email != null && user!.email!.isNotEmpty) {
+      return user.email;
+    }
+    return null;
+  }
+
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  /// Check whether the device currently has active network connectivity.
+  Future<bool> isOnline() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (results.contains(ConnectivityResult.none) || results.isEmpty) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   // --- 1. Google Sign-In ---
   Future<AuthResult> signInWithGoogle() async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Sign-in is disabled in offline mode.');
+    }
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
@@ -196,6 +257,9 @@ class AuthService {
 
   // --- 2. Email + Password Sign In ---
   Future<AuthResult> signInWithEmail(String email, String password) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Sign-in is disabled in offline mode.');
+    }
     try {
       final credential = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
@@ -226,6 +290,9 @@ class AuthService {
 
   // --- 3. Email + Password Sign Up ---
   Future<AuthResult> signUpWithEmail(String name, String email, String password) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Account registration is disabled in offline mode.');
+    }
     try {
       final credential = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
@@ -262,6 +329,9 @@ class AuthService {
 
   // --- 4. Guest / Anonymous Sign In ---
   Future<AuthResult> signInAsGuest(String displayName) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Guest sign-in is disabled in offline mode.');
+    }
     final name = displayName.trim();
     if (name.length < 2 || name.length > 24) {
       return AuthResult.fail('Display name must be between 2 and 24 characters.');
@@ -288,6 +358,9 @@ class AuthService {
 
   // --- 5. Account Linking: Add Google to Email/Password or Guest ---
   Future<AuthResult> linkGoogleAccount() async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Account linking is disabled in offline mode.');
+    }
     final user = _auth.currentUser;
     if (user == null) return AuthResult.fail('No active session.');
 
@@ -309,9 +382,20 @@ class AuthService {
       final providers = updatedUser.providerData
           .map((p) => p.providerId.replaceAll('.com', ''))
           .toList();
-      await _userService.updateProviders(updatedUser.uid, providers, isGuest: false);
+      await _userService.updateProviders(
+        updatedUser.uid,
+        providers,
+        isGuest: false,
+        linkedGoogleEmail: googleUser.email.trim(),
+      );
 
-      return AuthResult.ok();
+      final appUser = await _userService.getUser(updatedUser.uid, isEmailVerified: updatedUser.emailVerified);
+      if (appUser != null) {
+        _currentAppUser = appUser;
+      }
+      authState.value = true;
+
+      return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
       return AuthResult.fail(_mapAuthError(e));
     } catch (e) {
@@ -321,6 +405,9 @@ class AuthService {
 
   // --- 6. Account Linking: Add Email & Password to Google or Guest ---
   Future<AuthResult> linkEmailPassword(String email, String password) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Account linking is disabled in offline mode.');
+    }
     final user = _auth.currentUser;
     if (user == null) return AuthResult.fail('No active session.');
 
@@ -340,9 +427,20 @@ class AuthService {
       final providers = updatedUser.providerData
           .map((p) => p.providerId.replaceAll('.com', ''))
           .toList();
-      await _userService.updateProviders(updatedUser.uid, providers, isGuest: false);
+      await _userService.updateProviders(
+        updatedUser.uid,
+        providers,
+        isGuest: false,
+        linkedPasswordEmail: email.trim(),
+      );
 
-      return AuthResult.ok();
+      final appUser = await _userService.getUser(updatedUser.uid, isEmailVerified: updatedUser.emailVerified);
+      if (appUser != null) {
+        _currentAppUser = appUser;
+      }
+      authState.value = true;
+
+      return AuthResult.ok(appUser);
     } on FirebaseAuthException catch (e) {
       return AuthResult.fail(_mapAuthError(e));
     } catch (e) {
@@ -358,6 +456,9 @@ class AuthService {
 
   // --- 8. Password Reset ---
   Future<AuthResult> sendPasswordReset(String email) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Password reset is disabled in offline mode.');
+    }
     try {
       await _auth.sendPasswordResetEmail(email: email.trim());
       return AuthResult.ok();
@@ -370,6 +471,9 @@ class AuthService {
 
   // --- 9. Email Verification ---
   Future<AuthResult> sendEmailVerification() async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Verification is disabled in offline mode.');
+    }
     final user = _auth.currentUser;
     if (user == null) return AuthResult.fail('No active user.');
     try {
@@ -384,6 +488,9 @@ class AuthService {
 
   // --- 10. Update Profile ---
   Future<AuthResult> updateDisplayName(String newName) async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Profile update is disabled in offline mode.');
+    }
     final user = _auth.currentUser;
     if (user == null) return AuthResult.fail('Not signed in.');
     final trimmed = newName.trim();
@@ -402,6 +509,10 @@ class AuthService {
 
   // --- 11. Sign Out ---
   Future<void> signOut() async {
+    if (!await isOnline()) {
+      debugPrint('AuthService: Sign-out is disabled in offline mode.');
+      return;
+    }
     try {
       await _googleSignIn.signOut();
     } catch (_) {}
@@ -415,6 +526,9 @@ class AuthService {
 
   // --- 12. Delete Account ---
   Future<AuthResult> deleteAccount() async {
+    if (!await isOnline()) {
+      return AuthResult.fail('Internet connection required. Account deletion is disabled in offline mode.');
+    }
     final user = _auth.currentUser;
     if (user == null) return AuthResult.fail('Not signed in.');
 
@@ -437,6 +551,9 @@ class AuthService {
 
   /// Push all local playlists and favorites to Cloud Firestore under current user's UID.
   Future<String> backupUserPlaylists() async {
+    if (!await isOnline()) {
+      return 'Account sync is disabled in offline mode. Connect to the internet to back up playlists.';
+    }
     if (isGuest) {
       return 'Guest accounts cannot sync playlists to cloud. Please sign in or link your account.';
     }
@@ -603,6 +720,7 @@ class AuthService {
   /// Pull all playlists owned or joined by the current user from Cloud Firestore,
   /// and merge/restore them into local Hive storage.
   Future<int> restoreUserPlaylists() async {
+    if (!await isOnline()) return 0;
     if (isGuest) return 0;
     final uid = currentUserId;
     if (uid.isEmpty) return 0;
@@ -742,6 +860,7 @@ class AuthService {
 
   /// Sync watch history count (integer number only) to cloud Firestore under users/{uid}
   Future<void> syncWatchHistoryCount() async {
+    if (!await isOnline()) return;
     if (isGuest || !isLoggedIn) return;
     final uid = currentUserId;
     if (uid.isEmpty) return;

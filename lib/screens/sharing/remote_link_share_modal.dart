@@ -9,6 +9,7 @@ import '../../themes/app_theme.dart';
 import '../handoff/nearby_share_screen.dart';
 import '../../services/storage/storage_service.dart';
 import '../../widgets/playlist_imported_dialog.dart';
+import '../../services/sync/playlist_cloud_sync_service.dart';
 
 class ShareOptionsModal extends ConsumerWidget {
   final List<Track> tracks;
@@ -30,6 +31,7 @@ class ShareOptionsModal extends ConsumerWidget {
   }) {
     return showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => ShareOptionsModal(
         tracks: tracks,
@@ -45,15 +47,27 @@ class ShareOptionsModal extends ConsumerWidget {
     final accentColor = ref.watch(customizationProvider).accentColor;
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF18181C) : Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 18,
+            bottom: MediaQuery.of(context).padding.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           Center(
             child: Container(
               width: 40,
@@ -251,7 +265,9 @@ class ShareOptionsModal extends ConsumerWidget {
           const SizedBox(height: 12),
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 
   static void _showImportPlaylistBottomSheet(BuildContext context, WidgetRef ref) {
@@ -421,12 +437,58 @@ class ShareOptionsModal extends ConsumerWidget {
                               return;
                             }
 
+                            FocusScope.of(sheetContext).unfocus();
+
                             setModalState(() {
                               isLoading = true;
                               errorMessage = null;
                             });
 
                             try {
+                              // 1. Attempt Cloud Share Code lookup (e.g. AURA-7K9X2B or bare code)
+                              final cloudByCode = await PlaylistCloudSyncService.instance.fetchPlaylistByShareCode(rawText);
+                              if (cloudByCode != null) {
+                                final List<Track> tracks = List<Track>.from(cloudByCode['tracks'] as List? ?? []);
+                                final newPl = {
+                                  'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                                  'name': cloudByCode['name']?.toString() ?? 'Shared Playlist',
+                                  'description': cloudByCode['description']?.toString() ?? 'Imported via Playlist Code',
+                                  'authorName': cloudByCode['authorName']?.toString() ?? 'Community Member',
+                                  'ownerId': cloudByCode['ownerId']?.toString() ?? '',
+                                  'ownerEmail': cloudByCode['ownerEmail']?.toString() ?? '',
+                                  'ownerName': cloudByCode['authorName']?.toString() ?? '',
+                                  'isImported': true,
+                                  'isPublic': cloudByCode['isPublic'] == true,
+                                  'isSyncEnabled': cloudByCode['isSyncEnabled'] == true,
+                                  'shareCode': cloudByCode['shareCode']?.toString() ?? rawText.toUpperCase(),
+                                  'syncId': cloudByCode['syncId']?.toString(),
+                                  'trackIds': tracks.map((t) => t.id).toList(),
+                                  'syncedTrackIds': tracks.map((t) => t.id).toList(),
+                                  'tracks': tracks.map((t) => t.toJson()).toList(),
+                                };
+                                final playlists = StorageService.getPlaylists();
+                                playlists.insert(0, newPl);
+                                await StorageService.savePlaylists(playlists);
+
+                                final importEvent = PlaylistImportEvent(
+                                  title: newPl['name'].toString(),
+                                  description: newPl['description'].toString(),
+                                  trackCount: tracks.length,
+                                  tracks: tracks,
+                                  fromQrScan: false,
+                                );
+                                PlaylistLinkShareService.notifyImport(importEvent);
+
+                                if (sheetContext.mounted) {
+                                  Navigator.pop(sheetContext);
+                                }
+                                if (context.mounted) {
+                                  PlaylistImportSuccessDialog.show(context, importEvent, ref);
+                                }
+                                return;
+                              }
+
+                              // 2. Attempt Aura Link or code decode
                               final decoded = await PlaylistLinkShareService.instance.decodeShareableLinkAsync(rawText);
                               if (decoded == null || decoded.tracks.isEmpty) {
                                 setModalState(() {
@@ -475,15 +537,33 @@ class ShareOptionsModal extends ConsumerWidget {
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: accentColor,
+                      disabledBackgroundColor: accentColor.withValues(alpha: 0.6),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       elevation: 2,
                     ),
                     child: isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Adding Playlist...',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ],
                           )
                         : const Text(
                             'Add Playlist',

@@ -172,7 +172,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? 6.0
         : ((customBranding.navBarStyle == 'os_style')
             ? (PlatformInfo.isIOS ? bottomInset + 70.0 : (bottomInset > 0 ? bottomInset + 70.0 : 70.0))
-            : (bottomMargin + 60.0));
+            : (bottomMargin + 54.0));
 
     return Scaffold(
       extendBody: true,

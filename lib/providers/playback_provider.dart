@@ -297,17 +297,21 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       }
 
       // Preload next track audio immediately as soon as track starts playing for zero-latency gapless & crossfade playback
-      // NOTE: Skip YouTube tracks — their stream URLs expire quickly and preloading them
-      // would cache a stale URL that causes 403 errors when the fade player tries to use it.
       if (state.isPlaying && !_isTransitioning && pos.inSeconds >= 2 && !_isNextTrackPreloaded) {
         final nextIdx = state.currentIndex + 1;
         if (nextIdx < state.queue.length) {
-          final nextTrack = state.queue[nextIdx];
-          final isNextYT = nextTrack.isYouTube || 
+          final rawNextTrack = state.queue[nextIdx];
+          final nextTrack = _resolveSingleTrackWithLocalDownload(rawNextTrack);
+          final bool isNextLocal = !nextTrack.audioUrl.startsWith('http') && 
+              File(nextTrack.audioUrl).existsSync() && 
+              File(nextTrack.audioUrl).lengthSync() > 0;
+          final isNextRemoteYT = !isNextLocal && (nextTrack.isYouTube || 
               nextTrack.youtubeVideoId != null || 
-              nextTrack.id.startsWith('yt_');
-          if (!isNextYT && nextTrack.audioUrl.isNotEmpty && 
-              (nextTrack.audioUrl.startsWith('http') || File(nextTrack.audioUrl).existsSync())) {
+              nextTrack.id.startsWith('yt_'));
+
+          // Local tracks and stable remote streams can be preloaded; avoid expiring remote YouTube streams
+          if (!isNextRemoteYT && nextTrack.audioUrl.isNotEmpty && 
+              (nextTrack.audioUrl.startsWith('http') || isNextLocal)) {
             _isNextTrackPreloaded = true;
             _handler.preloadNextTrack(nextTrack);
           }
@@ -609,7 +613,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final file = File(track.audioUrl);
       if (file.existsSync() && file.lengthSync() > 0) return true;
     }
-    final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
+    final downloadedPath = StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist);
     if (downloadedPath != null && downloadedPath.isNotEmpty) {
       final file = File(downloadedPath);
       if (file.existsSync() && file.lengthSync() > 0) return true;
@@ -618,8 +622,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   }
 
   Track _resolveSingleTrackWithLocalDownload(Track track) {
-    final downloadedAudio = StorageService.getDownloadedTrackPath(track.id);
-    final downloadedArt = StorageService.getDownloadedArtworkPath(track.id);
+    final downloadedAudio = StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist);
+    final downloadedArt = StorageService.getDownloadedArtworkPath(track.id, title: track.title);
 
     String audioUrl = track.audioUrl;
     if (downloadedAudio != null && File(downloadedAudio).existsSync() && File(downloadedAudio).lengthSync() > 0) {
@@ -822,7 +826,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       audioUrl = audioUrl.replaceAll('_320.', '_160.');
     }
 
-    final downloadedPath = StorageService.getDownloadedTrackPath(track.id);
+    final downloadedPath = StorageService.getDownloadedTrackPath(track.id, title: track.title, artist: track.artist);
     if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
       audioUrl = downloadedPath;
     }
@@ -832,17 +836,21 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       return;
     }
 
-    // CRITICAL FIX: YouTube stream URLs (googlevideo.com) expire quickly and cause
-    // 403 Forbidden errors. ALWAYS resolve a fresh URL for YouTube tracks at playback
-    // time, even if we have a previously cached URL. JioSaavn CDN URLs are stable.
-    final bool isYouTubeTrack = track.isYouTube || 
+    // Verify whether this track already exists on device storage
+    final bool isLocalFile = !audioUrl.startsWith('http') && 
+        File(audioUrl).existsSync() && 
+        File(audioUrl).lengthSync() > 0;
+
+    // CRITICAL FIX: NEVER attempt network resolution if the track is already downloaded to local storage!
+    // Online stream resolution is ONLY needed for remote tracks.
+    final bool isYouTubeTrack = !isLocalFile && (track.isYouTube || 
         track.youtubeVideoId != null || 
         track.id.startsWith('yt_') ||
-        audioUrl.contains('googlevideo.com');
+        audioUrl.contains('googlevideo.com'));
     
-    final bool needsResolution = audioUrl.isEmpty || 
+    final bool needsResolution = !isLocalFile && (audioUrl.isEmpty || 
         (!audioUrl.startsWith('http') && !File(audioUrl).existsSync()) ||
-        isYouTubeTrack; // Always re-resolve YouTube tracks
+        isYouTubeTrack);
 
     if (needsResolution) {
       print('[AURA-PLAY] Resolving ${isYouTubeTrack ? "FRESH YouTube" : ""} audioUrl for "${track.title}" (id: ${track.id}, source: ${track.source})...');
@@ -1080,6 +1088,11 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   Future<void> _preloadUpcomingTracks() async {
     final curIdx = state.currentIndex;
     if (curIdx < 0) return;
+
+    // Do NOT attempt online preload requests if device is offline
+    final offline = await _checkIsOffline();
+    if (offline) return;
+
     final endIdx = math.min(state.queue.length, curIdx + 4);
 
     for (int nextIdx = curIdx + 1; nextIdx < endIdx; nextIdx++) {
@@ -1093,7 +1106,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           nextTrackItem.id.startsWith('yt_');
       if (isYT) continue;
       
-      final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id);
+      final localPath = StorageService.getDownloadedTrackPath(nextTrackItem.id, title: nextTrackItem.title, artist: nextTrackItem.artist);
       if (localPath == null || !File(localPath).existsSync()) {
         try {
           final freshUrl = await SourceManager.instance.getStreamUrl(nextTrackItem);
@@ -1434,17 +1447,21 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final nextTrackItem = state.queue[nextIdx];
 
       if (isCrossfade && StorageService.isCrossfadeEnabled()) {
-        var targetTrack = nextTrackItem;
+        var targetTrack = _resolveSingleTrackWithLocalDownload(nextTrackItem);
         String audioUrl = targetTrack.audioUrl;
         if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
           audioUrl = audioUrl.replaceAll('_320.', '_160.');
         }
-        final downloadedPath = StorageService.getDownloadedTrackPath(targetTrack.id);
+        final downloadedPath = StorageService.getDownloadedTrackPath(targetTrack.id, title: targetTrack.title, artist: targetTrack.artist);
         if (downloadedPath != null && File(downloadedPath).existsSync() && File(downloadedPath).lengthSync() > 0) {
           audioUrl = downloadedPath;
         }
 
-        if (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync())) {
+        final bool isTargetLocal = !audioUrl.startsWith('http') && 
+            File(audioUrl).existsSync() && 
+            File(audioUrl).lengthSync() > 0;
+
+        if (!isTargetLocal && (audioUrl.isEmpty || (!audioUrl.startsWith('http') && !File(audioUrl).existsSync()))) {
           _handler.logPlaybackEvent(
             eventName: 'CROSSFADE_RESOLVING_URL',
             currentTrackId: targetTrack.id,

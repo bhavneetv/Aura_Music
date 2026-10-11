@@ -36,6 +36,23 @@ class UserService {
 
     if (!snapshot.exists) {
       // First login for this user! Cost: 1 write
+      String? linkedGoogleEmail;
+      String? linkedPasswordEmail;
+      for (final p in firebaseUser.providerData) {
+        if (p.providerId.contains('google') && p.email != null && p.email!.isNotEmpty) {
+          linkedGoogleEmail = p.email;
+        }
+        if (p.providerId.contains('password') && p.email != null && p.email!.isNotEmpty) {
+          linkedPasswordEmail = p.email;
+        }
+      }
+      if (providers.contains('google') && linkedGoogleEmail == null && firebaseUser.email != null) {
+        linkedGoogleEmail = firebaseUser.email;
+      }
+      if (providers.contains('password') && linkedPasswordEmail == null && firebaseUser.email != null) {
+        linkedPasswordEmail = firebaseUser.email;
+      }
+
       final newUser = AppUser(
         uid: firebaseUser.uid,
         displayName: displayName,
@@ -48,6 +65,8 @@ class UserService {
         loginCount: 1,
         stats: UserStats.empty(),
         isEmailVerified: firebaseUser.emailVerified,
+        linkedGoogleEmail: linkedGoogleEmail,
+        linkedPasswordEmail: linkedPasswordEmail,
       );
 
       await docRef.set(newUser.toFirestore());
@@ -65,6 +84,21 @@ class UserService {
         'loginCount': existingLoginCount + 1,
         'providers': existingProviders.toList(),
       };
+
+      for (final p in firebaseUser.providerData) {
+        if (p.providerId.contains('google') && p.email != null && p.email!.isNotEmpty) {
+          updates['linkedGoogleEmail'] = p.email;
+        }
+        if (p.providerId.contains('password') && p.email != null && p.email!.isNotEmpty) {
+          updates['linkedPasswordEmail'] = p.email;
+        }
+      }
+      if (existingProviders.contains('google') && !updates.containsKey('linkedGoogleEmail') && data['linkedGoogleEmail'] == null && firebaseUser.email != null) {
+        updates['linkedGoogleEmail'] = firebaseUser.email;
+      }
+      if (existingProviders.contains('password') && !updates.containsKey('linkedPasswordEmail') && data['linkedPasswordEmail'] == null && firebaseUser.email != null) {
+        updates['linkedPasswordEmail'] = firebaseUser.email;
+      }
 
       if (firebaseUser.email != null) {
         updates['email'] = firebaseUser.email;
@@ -119,13 +153,24 @@ class UserService {
     });
   }
 
-  /// Updates providers list after linking/unlinking credentials.
-  /// Cost: 1 write.
-  Future<void> updateProviders(String uid, List<String> providers, {bool isGuest = false}) async {
-    await _usersCol.doc(uid).update({
+  Future<void> updateProviders(
+    String uid,
+    List<String> providers, {
+    bool isGuest = false,
+    String? linkedPasswordEmail,
+    String? linkedGoogleEmail,
+  }) async {
+    final updates = <String, dynamic>{
       'providers': providers,
       'isGuest': isGuest,
-    });
+    };
+    if (linkedPasswordEmail != null && linkedPasswordEmail.isNotEmpty) {
+      updates['linkedPasswordEmail'] = linkedPasswordEmail;
+    }
+    if (linkedGoogleEmail != null && linkedGoogleEmail.isNotEmpty) {
+      updates['linkedGoogleEmail'] = linkedGoogleEmail;
+    }
+    await _usersCol.doc(uid).update(updates);
   }
 
   /// Deletes user document upon account deletion.

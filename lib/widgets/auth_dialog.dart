@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../providers/customization_provider.dart';
 import '../services/auth/auth_service.dart';
 
@@ -18,6 +19,21 @@ class AuthModalDialog extends ConsumerStatefulWidget {
     VoidCallback? onLoggedIn,
     String? featurePrompt,
   }) async {
+    final connResults = await Connectivity().checkConnectivity();
+    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account features are unavailable in offline mode. Connect to the internet first.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return false;
+    }
+
+    if (!context.mounted) return false;
+
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -54,6 +70,15 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handleSubmit() async {
+    final connResults = await Connectivity().checkConnectivity();
+    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Internet connection required. Login is disabled in offline mode.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -102,6 +127,19 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
   }
 
   Future<void> _handleLogout() async {
+    final connResults = await Connectivity().checkConnectivity();
+    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot log out in offline mode. Connect to the internet first.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
     await AuthService.instance.logout();
     if (mounted) {
       Navigator.pop(context, false);
@@ -118,6 +156,19 @@ class _AuthModalDialogState extends ConsumerState<AuthModalDialog> {
     final messenger = ScaffoldMessenger.of(context);
     final nav = Navigator.of(context);
     final accentColor = ref.read(customizationProvider).accentColor;
+
+    final connResults = await Connectivity().checkConnectivity();
+    if (connResults.contains(ConnectivityResult.none) || connResults.isEmpty) {
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Account sync is disabled in offline mode. Connect to the internet to back up playlists.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
 
     setState(() => _isLoading = true);
     final msg = await AuthService.instance.backupUserPlaylists();

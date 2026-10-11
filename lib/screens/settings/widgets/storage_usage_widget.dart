@@ -37,16 +37,16 @@ class PlaylistStorageDetail {
 
 class StorageUsageBreakdown {
   final int downloadedMusicBytes;
-  final int cacheAndArtBytes;
-  final int databaseBytes;
+  final int coverBytes;
+  final int cacheBytes;
   final int totalAppBytes;
   final List<PlaylistStorageDetail> downloadedPlaylists;
   final int totalDownloadedTracks;
 
   const StorageUsageBreakdown({
     required this.downloadedMusicBytes,
-    required this.cacheAndArtBytes,
-    required this.databaseBytes,
+    required this.coverBytes,
+    required this.cacheBytes,
     required this.totalAppBytes,
     required this.downloadedPlaylists,
     required this.totalDownloadedTracks,
@@ -54,8 +54,8 @@ class StorageUsageBreakdown {
 
   String get formattedTotal => StorageUsageHelper.formatBytes(totalAppBytes);
   String get formattedMusic => StorageUsageHelper.formatBytes(downloadedMusicBytes);
-  String get formattedCache => StorageUsageHelper.formatBytes(cacheAndArtBytes);
-  String get formattedDb => StorageUsageHelper.formatBytes(databaseBytes);
+  String get formattedCover => StorageUsageHelper.formatBytes(coverBytes);
+  String get formattedCache => StorageUsageHelper.formatBytes(cacheBytes);
 }
 
 // ============================================================================
@@ -74,9 +74,10 @@ class StorageUsageHelper {
 
   static Future<StorageUsageBreakdown> getBreakdown() async {
     int downloadedMusicBytes = 0;
-    int cacheAndArtBytes = 0;
-    int databaseBytes = 0;
+    int coverBytes = 0;
+    int cacheBytes = 0;
     final Map<String, int> trackSizeBytes = {};
+    final Set<String> seenCoverPaths = {};
     String? docDirPath;
 
     // 1. Calculate physical files in downloads directory
@@ -88,9 +89,15 @@ class StorageUsageHelper {
         for (final entity in downloadsDir.listSync(recursive: true, followLinks: false)) {
           if (entity is File) {
             final len = entity.lengthSync();
-            final name = entity.uri.pathSegments.last;
-            if (name.endsWith('_cover.jpg') || name.endsWith('_art.jpg')) {
-              cacheAndArtBytes += len;
+            final name = entity.uri.pathSegments.last.toLowerCase();
+            if (name.endsWith('_cover.jpg') ||
+                name.endsWith('_art.jpg') ||
+                name.endsWith('.jpg') ||
+                name.endsWith('.jpeg') ||
+                name.endsWith('.png') ||
+                name.endsWith('.webp')) {
+              coverBytes += len;
+              seenCoverPaths.add(entity.path);
             } else {
               downloadedMusicBytes += len;
               final dotIdx = name.lastIndexOf('.');
@@ -108,11 +115,12 @@ class StorageUsageHelper {
       for (final entry in downloadedTracksMap.entries) {
         final trackId = entry.key;
         final artPath = StorageService.getDownloadedArtworkPath(trackId);
-        if (artPath != null) {
+        if (artPath != null && !seenCoverPaths.contains(artPath)) {
           final artFile = File(artPath);
           if (artFile.existsSync()) {
             final artLen = artFile.lengthSync();
-            cacheAndArtBytes += artLen;
+            coverBytes += artLen;
+            seenCoverPaths.add(artPath);
             trackSizeBytes[trackId] = (trackSizeBytes[trackId] ?? 0) + artLen;
           }
         }
@@ -125,21 +133,7 @@ class StorageUsageHelper {
       if (tempDir.existsSync()) {
         for (final entity in tempDir.listSync(recursive: true, followLinks: false)) {
           if (entity is File) {
-            cacheAndArtBytes += entity.lengthSync();
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 4. Hive database files
-    try {
-      if (docDirPath != null) {
-        final docDir = Directory(docDirPath);
-        if (docDir.existsSync()) {
-          for (final entity in docDir.listSync(recursive: false, followLinks: false)) {
-            if (entity is File && entity.path.endsWith('.hive')) {
-              databaseBytes += entity.lengthSync();
-            }
+            cacheBytes += entity.lengthSync();
           }
         }
       }
@@ -282,12 +276,12 @@ class StorageUsageHelper {
     // Sort by largest space used
     playlistDetails.sort((a, b) => b.totalBytes.compareTo(a.totalBytes));
 
-    final totalAppBytes = downloadedMusicBytes + cacheAndArtBytes + databaseBytes;
+    final totalAppBytes = downloadedMusicBytes + coverBytes + cacheBytes;
 
     return StorageUsageBreakdown(
       downloadedMusicBytes: downloadedMusicBytes,
-      cacheAndArtBytes: cacheAndArtBytes,
-      databaseBytes: databaseBytes,
+      coverBytes: coverBytes,
+      cacheBytes: cacheBytes,
       totalAppBytes: totalAppBytes,
       downloadedPlaylists: playlistDetails,
       totalDownloadedTracks: totalDownloadedTracks,
@@ -378,8 +372,8 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
         setState(() {
           _breakdown = const StorageUsageBreakdown(
             downloadedMusicBytes: 0,
-            cacheAndArtBytes: 0,
-            databaseBytes: 0,
+            coverBytes: 0,
+            cacheBytes: 0,
             totalAppBytes: 0,
             downloadedPlaylists: [],
             totalDownloadedTracks: 0,
@@ -451,8 +445,8 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
     final data = _breakdown!;
     final total = max(1, data.totalAppBytes);
     final musicRatio = (data.downloadedMusicBytes / total).clamp(0.0, 1.0);
-    final cacheRatio = (data.cacheAndArtBytes / total).clamp(0.0, 1.0);
-    final dbRatio = (data.databaseBytes / total).clamp(0.0, 1.0);
+    final coverRatio = (data.coverBytes / total).clamp(0.0, 1.0);
+    final cacheRatio = (data.cacheBytes / total).clamp(0.0, 1.0);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -499,7 +493,7 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Offline songs, artwork & local cache',
+                      'Offline songs, album covers & app cache',
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark ? Colors.white54 : Colors.black54,
@@ -564,7 +558,7 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
 
           const SizedBox(height: 14),
 
-          // Multi-segment Visual Progress Bar
+          // Multi-segment Visual Progress Bar (Songs, Cover, Cache)
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Container(
@@ -582,18 +576,18 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
                               color: accent,
                             ),
                           ),
+                        if (coverRatio > 0)
+                          Expanded(
+                            flex: max(1, (coverRatio * 1000).round()),
+                            child: Container(
+                              color: const Color(0xFF38BDF8),
+                            ),
+                          ),
                         if (cacheRatio > 0)
                           Expanded(
                             flex: max(1, (cacheRatio * 1000).round()),
                             child: Container(
-                              color: const Color(0xFF00D1B2),
-                            ),
-                          ),
-                        if (dbRatio > 0)
-                          Expanded(
-                            flex: max(1, (dbRatio * 1000).round()),
-                            child: Container(
-                              color: const Color(0xFFA855F7),
+                              color: const Color(0xFFF59E0B),
                             ),
                           ),
                       ],
@@ -603,27 +597,27 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
 
           const SizedBox(height: 12),
 
-          // Category Legend Chips
+          // Category Legend Chips (Songs, Cover, Cache)
           Wrap(
             spacing: 14,
             runSpacing: 8,
             children: [
               _buildLegendItem(
                 color: accent,
-                label: 'Offline Music',
+                label: 'Songs',
                 size: data.formattedMusic,
                 isDark: isDark,
               ),
               _buildLegendItem(
-                color: const Color(0xFF00D1B2),
-                label: 'Covers & Cache',
-                size: data.formattedCache,
+                color: const Color(0xFF38BDF8),
+                label: 'Cover',
+                size: data.formattedCover,
                 isDark: isDark,
               ),
               _buildLegendItem(
-                color: const Color(0xFFA855F7),
-                label: 'Database',
-                size: data.formattedDb,
+                color: const Color(0xFFF59E0B),
+                label: 'Cache',
+                size: data.formattedCache,
                 isDark: isDark,
               ),
             ],

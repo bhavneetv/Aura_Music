@@ -637,10 +637,19 @@ class StorageService {
       final Map decoded = jsonDecode(raw.toString()) as Map;
       final Map<String, String> result = {};
       decoded.forEach((key, value) {
+        String? path;
+        String? trackId;
         if (value is Map) {
-          result[key.toString()] = value['localPath']?.toString() ?? '';
+          path = value['localPath']?.toString() ?? '';
+          trackId = value['id']?.toString();
         } else {
-          result[key.toString()] = value.toString();
+          path = value.toString();
+        }
+        if (path.isNotEmpty && File(path).existsSync() && File(path).lengthSync() > 0) {
+          result[key.toString()] = path;
+          if (trackId != null && trackId.isNotEmpty) {
+            result[trackId] = path;
+          }
         }
       });
       return result;
@@ -660,14 +669,14 @@ class StorageService {
       decoded.forEach((key, val) {
         if (val is Map) {
           final localPath = val['localPath']?.toString() ?? '';
-          if (localPath.isNotEmpty) {
+          if (localPath.isNotEmpty && File(localPath).existsSync() && File(localPath).lengthSync() > 0) {
             final localArt = val['localArtworkPath']?.toString() ?? '';
             final remoteArt = val['artworkUrl']?.toString() ?? '';
 
-            // Keep remote HTTP URL as primary artworkUrl so online mode always loads network image
-            String finalArt = (remoteArt.startsWith('http://') || remoteArt.startsWith('https://'))
-                ? remoteArt
-                : (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0 ? localArt : remoteArt);
+            // Prioritize valid local artwork file for offline reliability
+            String finalArt = (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0)
+                ? localArt
+                : remoteArt;
 
             tracks.add(
               Track(
@@ -698,9 +707,47 @@ class StorageService {
     }
   }
 
-  static String? getDownloadedTrackPath(String trackId) {
+  static String? getDownloadedTrackPath(String trackId, {String? title, String? artist}) {
     final downloads = getDownloadedTracks();
-    return downloads[trackId];
+    if (downloads.containsKey(trackId)) {
+      return downloads[trackId];
+    }
+    // Tolerance for yt_ prefix differences
+    if (trackId.startsWith('yt_')) {
+      final rawId = trackId.substring(3);
+      if (downloads.containsKey(rawId)) return downloads[rawId];
+    } else {
+      final withYt = 'yt_$trackId';
+      if (downloads.containsKey(withYt)) return downloads[withYt];
+    }
+
+    // Fallback: search downloaded metadata by matching title and artist
+    if (title != null && title.trim().isNotEmpty && Hive.isBoxOpen(_downloadsBox)) {
+      try {
+        final box = Hive.box(_downloadsBox);
+        final raw = box.get('downloaded_tracks');
+        if (raw != null) {
+          final Map decoded = jsonDecode(raw.toString()) as Map;
+          final cleanTitle = title.trim().toLowerCase();
+          final cleanArtist = artist?.trim().toLowerCase() ?? '';
+          for (final val in decoded.values) {
+            if (val is Map) {
+              final tTitle = val['title']?.toString().trim().toLowerCase() ?? '';
+              final tArtist = val['artist']?.toString().trim().toLowerCase() ?? '';
+              if (tTitle == cleanTitle) {
+                if (cleanArtist.isEmpty || tArtist.isEmpty || tArtist == cleanArtist || tArtist.contains(cleanArtist) || cleanArtist.contains(tArtist)) {
+                  final localPath = val['localPath']?.toString() ?? '';
+                  if (localPath.isNotEmpty && File(localPath).existsSync() && File(localPath).lengthSync() > 0) {
+                    return localPath;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
   }
 
   static String? getRemoteArtworkUrl(String trackId) {
@@ -721,18 +768,36 @@ class StorageService {
     return null;
   }
 
-  static String? getDownloadedArtworkPath(String trackId) {
+  static String? getDownloadedArtworkPath(String trackId, {String? title}) {
     if (!Hive.isBoxOpen(_downloadsBox)) return null;
     final box = Hive.box(_downloadsBox);
     final raw = box.get('downloaded_tracks');
     if (raw == null) return null;
     try {
       final Map decoded = jsonDecode(raw.toString()) as Map;
-      final val = decoded[trackId];
+      var val = decoded[trackId];
+      if (val == null && trackId.startsWith('yt_')) {
+        val = decoded[trackId.substring(3)];
+      } else if (val == null) {
+        val = decoded['yt_$trackId'];
+      }
       if (val is Map) {
         final localArt = val['localArtworkPath']?.toString() ?? '';
         if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
           return localArt;
+        }
+      }
+
+      // Fallback matching by title
+      if (title != null && title.trim().isNotEmpty) {
+        final cleanTitle = title.trim().toLowerCase();
+        for (final item in decoded.values) {
+          if (item is Map && (item['title']?.toString().trim().toLowerCase() == cleanTitle)) {
+            final localArt = item['localArtworkPath']?.toString() ?? '';
+            if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
+              return localArt;
+            }
+          }
         }
       }
     } catch (_) {}

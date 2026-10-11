@@ -60,7 +60,7 @@ class SyncService {
       final isOnline = hasWifi || hasCellular || hasEthernet;
 
       if (!isOnline) {
-        return 'Offline. Changes are queued in offline cache and will sync automatically when back online.';
+        return 'Account & database sync is disabled in offline mode.';
       }
 
       if (syncWifiOnly.value && !hasWifi && !hasEthernet) {

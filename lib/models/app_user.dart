@@ -13,6 +13,8 @@ class AppUser {
   final int loginCount;
   final UserStats stats;
   final bool isEmailVerified;
+  final String? linkedPasswordEmail;
+  final String? linkedGoogleEmail;
 
   const AppUser({
     required this.uid,
@@ -26,6 +28,8 @@ class AppUser {
     required this.loginCount,
     required this.stats,
     this.isEmailVerified = false,
+    this.linkedPasswordEmail,
+    this.linkedGoogleEmail,
   });
 
   factory AppUser.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc, {bool isEmailVerified = false}) {
@@ -61,6 +65,8 @@ class AppUser {
       loginCount: (data['loginCount'] as num?)?.toInt() ?? 1,
       stats: effectiveStats,
       isEmailVerified: isEmailVerified,
+      linkedPasswordEmail: data['linkedPasswordEmail'] as String?,
+      linkedGoogleEmail: data['linkedGoogleEmail'] as String?,
     );
   }
 
@@ -77,6 +83,8 @@ class AppUser {
       'loginCount': loginCount,
       'stats': stats.toMap(),
       'isEmailVerified': isEmailVerified,
+      if (linkedPasswordEmail != null) 'linkedPasswordEmail': linkedPasswordEmail,
+      if (linkedGoogleEmail != null) 'linkedGoogleEmail': linkedGoogleEmail,
     };
   }
 
@@ -93,6 +101,8 @@ class AppUser {
       loginCount: (map['loginCount'] as num?)?.toInt() ?? 1,
       stats: UserStats.fromMap(map['stats'] as Map<String, dynamic>?),
       isEmailVerified: map['isEmailVerified'] as bool? ?? false,
+      linkedPasswordEmail: map['linkedPasswordEmail'] as String?,
+      linkedGoogleEmail: map['linkedGoogleEmail'] as String?,
     );
   }
 
@@ -107,6 +117,8 @@ class AppUser {
       'lastLoginAt': Timestamp.fromDate(lastLoginAt),
       'loginCount': loginCount,
       'stats': stats.toMap(),
+      if (linkedPasswordEmail != null) 'linkedPasswordEmail': linkedPasswordEmail,
+      if (linkedGoogleEmail != null) 'linkedGoogleEmail': linkedGoogleEmail,
     };
   }
 
@@ -121,6 +133,8 @@ class AppUser {
     int? loginCount,
     UserStats? stats,
     bool? isEmailVerified,
+    String? linkedPasswordEmail,
+    String? linkedGoogleEmail,
   }) {
     return AppUser(
       uid: uid,
@@ -134,6 +148,8 @@ class AppUser {
       loginCount: loginCount ?? this.loginCount,
       stats: stats ?? this.stats,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
+      linkedPasswordEmail: linkedPasswordEmail ?? this.linkedPasswordEmail,
+      linkedGoogleEmail: linkedGoogleEmail ?? this.linkedGoogleEmail,
     );
   }
 }

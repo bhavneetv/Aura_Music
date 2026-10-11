@@ -264,12 +264,12 @@ class AdaptiveNavigationBar extends StatelessWidget {
       // Like the system bar, the labels grow only a little with large text.
       maxScaleFactor: 1.15,
       child: Padding(
-        padding: EdgeInsets.only(left: 16, right: 16, bottom: bottomMargin),
+        padding: EdgeInsets.only(left: 20, right: 20, bottom: bottomMargin),
         child: Center(
           heightFactor: 1,
           child: ConstrainedBox(
-            // Stays a compact capsule on tablets and in landscape
-            constraints: const BoxConstraints(maxWidth: 560),
+            // Stays a compact, sleek floating capsule
+            constraints: const BoxConstraints(maxWidth: 345),
             child: Row(
               children: [
                 Expanded(
@@ -284,7 +284,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
                   ),
                 ),
                 if (searchIndex >= 0) ...[
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   _GlassSearchButton(
                     spec: specFor(searchIndex),
                     isSelected: selectedIndex == searchIndex,
@@ -406,7 +406,7 @@ class AdaptiveNavigationBar extends StatelessWidget {
 // what is behind it, a bright rim, and a lens that slides to the selected tab.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const double _barHeight = 64;
+const double _barHeight = 52;
 
 /// Movement with a small overshoot, so the lens settles like liquid.
 const Cubic _liquid = Cubic(0.3, 1.3, 0.5, 1.0);
@@ -458,7 +458,7 @@ class _GlassTabCapsuleState extends State<_GlassTabCapsule> {
     if (selectedPosition >= 0) _lensPosition = selectedPosition;
     final lensPosition = _lensPosition.clamp(0, math.max(0, widget.tabs.length - 1)).toInt();
 
-    const inset = 5.0;
+    const inset = 3.5;
 
     return SizedBox(
       height: _barHeight,
@@ -538,7 +538,7 @@ class _GlassSearchButton extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             Padding(
-              padding: const EdgeInsets.all(5),
+              padding: const EdgeInsets.all(3.5),
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 220),
                 opacity: isSelected ? 1.0 : 0.0,
@@ -646,11 +646,11 @@ class _GlassTabState extends State<_GlassTab> {
                     child: Icon(
                       t > 0.5 ? widget.spec.selectedIcon : widget.spec.icon,
                       color: color,
-                      size: widget.showLabel ? 23 : 25,
+                      size: widget.showLabel ? 20.0 : 21.0,
                     ),
                   ),
                   if (widget.showLabel) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text(
@@ -660,7 +660,7 @@ class _GlassTabState extends State<_GlassTab> {
                         style: TextStyle(
                           color: color,
                           fontWeight: t > 0.5 ? FontWeight.w700 : FontWeight.w600,
-                          fontSize: 10.5,
+                          fontSize: 9.5,
                           height: 1.2,
                           fontFamily: 'Outfit',
                         ),

@@ -203,6 +203,9 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
         _playlistTracks.add(track);
       }
     }
+
+    _isPlaylistDownloaded = _playlistTracks.isNotEmpty &&
+        _playlistTracks.every((t) => DownloadService.instance.isDownloaded(t.id));
   }
 
   Future<void> _persistPlaylist(Map<String, dynamic> updated) async {

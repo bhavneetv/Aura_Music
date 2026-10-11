@@ -47,7 +47,32 @@ class AppArtworkImage extends StatelessWidget {
 
     String targetUrl = artworkUrl.trim();
 
-    // If targetUrl is local or empty, but we have a trackId, check if a remote HTTP artwork URL exists
+    // 1. Prioritize local downloaded cover art if available on disk (0ms latency, 100% offline)
+    String? localPath;
+    if (targetUrl.isNotEmpty && (targetUrl.startsWith('/') || targetUrl.startsWith('file://'))) {
+      localPath = targetUrl.startsWith('file://') ? Uri.parse(targetUrl).toFilePath() : targetUrl;
+    } else if (trackId != null && trackId!.isNotEmpty) {
+      localPath = StorageService.getDownloadedArtworkPath(trackId!);
+    }
+
+    if (localPath != null && localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (file.existsSync() && file.lengthSync() > 0) {
+        Widget fileImage = Image.file(
+          file,
+          width: width,
+          height: height,
+          fit: fit,
+          errorBuilder: (_, __, ___) => fallback,
+        );
+        if (borderRadius != null) {
+          return ClipRRect(borderRadius: borderRadius!, child: fileImage);
+        }
+        return fileImage;
+      }
+    }
+
+    // 2. If targetUrl is empty but we have a trackId, check if remote HTTP URL is recorded
     if ((targetUrl.isEmpty || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) &&
         trackId != null &&
         trackId!.isNotEmpty) {
@@ -57,7 +82,7 @@ class AppArtworkImage extends StatelessWidget {
       }
     }
 
-    // 1. If HTTP/HTTPS network URL is available, try Image.network
+    // 3. Render remote HTTP/HTTPS network image if available
     if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
       Widget netImage = Image.network(
         targetUrl,
@@ -65,7 +90,7 @@ class AppArtworkImage extends StatelessWidget {
         height: height,
         fit: fit,
         errorBuilder: (_, __, ___) {
-          // Network image failed (e.g. device is offline). Try rendering local downloaded cover art file.
+          // If offline and remote fails, try fallback to downloaded art
           if (trackId != null && trackId!.isNotEmpty) {
             final offlineArt = StorageService.getDownloadedArtworkPath(trackId!);
             if (offlineArt != null) {
@@ -91,37 +116,7 @@ class AppArtworkImage extends StatelessWidget {
       return netImage;
     }
 
-    // 2. Check local file path or downloaded artwork file
-    String localPath = targetUrl;
-    if (localPath.startsWith('file://')) {
-      localPath = Uri.parse(localPath).toFilePath();
-    }
-
-    if (localPath.isEmpty && trackId != null && trackId!.isNotEmpty) {
-      final downloadedArt = StorageService.getDownloadedArtworkPath(trackId!);
-      if (downloadedArt != null) {
-        localPath = downloadedArt;
-      }
-    }
-
-    if (localPath.isNotEmpty) {
-      final file = File(localPath);
-      if (file.existsSync() && file.lengthSync() > 0) {
-        Widget fileImage = Image.file(
-          file,
-          width: width,
-          height: height,
-          fit: fit,
-          errorBuilder: (_, __, ___) => fallback,
-        );
-        if (borderRadius != null) {
-          return ClipRRect(borderRadius: borderRadius!, child: fileImage);
-        }
-        return fileImage;
-      }
-    }
-
-    // 3. Fallback gradient
+    // 4. Fallback gradient
     if (borderRadius != null) {
       return ClipRRect(borderRadius: borderRadius!, child: fallback);
     }

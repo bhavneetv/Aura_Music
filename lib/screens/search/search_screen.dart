@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../models/track.dart';
 import '../../providers/playback_provider.dart';
 import '../../providers/music_provider.dart';
@@ -195,7 +196,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with TickerProvider
     });
   }
 
-  void _toggleAiMode() {
+  Future<void> _toggleAiMode() async {
+    final connResults = await Connectivity().checkConnectivity();
+    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    if (isOffline) {
+      triggerHaptic(HapticFeedbackType.light);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI Playlist Search is unavailable offline. Connect to the internet to use AI Curator.'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
     triggerHaptic(HapticFeedbackType.light);
     setState(() {
       _isAiMode = !_isAiMode;
@@ -480,6 +496,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> with TickerProvider
   // updates, which tell the curating animation which step is running.
   Future<void> _executeAiSearch(String query) async {
     if (query.trim().isEmpty) return;
+    final connResults = await Connectivity().checkConnectivity();
+    final isOffline = connResults.contains(ConnectivityResult.none) || connResults.isEmpty;
+    if (isOffline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI Playlist Search is unavailable offline. Connect to the internet to use AI Curator.'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
     setState(() {
       _isAiLoading = true;
       _aiLoadingText = 'Finding best match for you...';
@@ -683,7 +713,7 @@ Output ONLY valid JSON:
 
   /// "Artist • Genre", or just the artist when there is no genre.
   String _artistLine(Track track) {
-    final genre = '${track.genre}'.trim();
+    final genre = track.genre.trim();
     return (genre.isEmpty || genre == 'null') ? track.artist : '${track.artist} • $genre';
   }
 
