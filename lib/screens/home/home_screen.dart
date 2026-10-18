@@ -10,6 +10,7 @@ import '../../providers/music_provider.dart';
 import '../../providers/customization_provider.dart';
 import '../../themes/app_theme.dart';
 import '../../widgets/mini_player.dart';
+import '../../widgets/web_player_bar.dart';
 import '../../widgets/app_artwork_image.dart';
 import '../../widgets/shimmer_placeholders/shimmer_placeholder.dart';
 import '../search/search_screen.dart';
@@ -161,6 +162,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         break;
       default:
         tabBody = Container();
+    }
+
+    final bool isDesktopWeb = (kIsWeb && MediaQuery.of(context).size.width >= 600) || MediaQuery.of(context).size.width >= 800;
+    final currentTrack = ref.watch(playbackProvider.select((s) => s.currentTrack));
+
+    if (isDesktopWeb) {
+      return Scaffold(
+        extendBody: false,
+        bottomNavigationBar: RepaintBoundary(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (currentTrack != null) const WebPlayerBar(),
+              _buildBottomNavigationBar(context, customBranding.accentColor, customBranding.navBarStyle),
+            ],
+          ),
+        ),
+        body: SafeArea(
+          top: false,
+          bottom: false,
+          child: NetworkStatusBanner(
+            child: tabBody,
+          ),
+        ),
+      );
     }
 
     final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;

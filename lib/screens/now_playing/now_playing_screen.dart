@@ -588,7 +588,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   }
 
   Widget _buildStage(PlaybackState state, PlaybackNotifier notifier, Track track, bool isDark, Color accentColor) {
-    final screenW = MediaQuery.of(context).size.width;
+    final screenW = math.min(MediaQuery.of(context).size.width, 500.0);
     // The skins draw themselves from the screen width. Laying them out at
     // that size and letting FittedBox scale the result means they always fit
     // the space this screen can spare, on any device or orientation.
@@ -3108,10 +3108,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
           child: _buildAmberGlowStage(track, accentColor, isDark),
         );
       case 'minimal':
+        final minSize = math.min(MediaQuery.of(context).size.width * 0.68, 330.0);
         return Center(
           child: Container(
-            width: MediaQuery.of(context).size.width * 0.68,
-            height: MediaQuery.of(context).size.width * 0.68,
+            width: minSize,
+            height: minSize,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
@@ -3128,6 +3129,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         );
       case 'vinyl':
       default:
+        final vinylSize = math.min(MediaQuery.of(context).size.width * 0.72, 340.0);
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -3135,7 +3137,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               alignment: Alignment.center,
               child: Transform.rotate(
                 angle: angle,
-                child: VinylRecordWidget(size: MediaQuery.of(context).size.width * 0.72),
+                child: VinylRecordWidget(size: vinylSize),
               ),
             ),
             Positioned(
@@ -3155,7 +3157,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   }
 
   Widget _buildNeonDisc(Track track, Color accentColor, bool isDark) {
-    final size = MediaQuery.of(context).size.width * 0.70;
+    final size = math.min(MediaQuery.of(context).size.width * 0.70, 340.0);
     return Container(
       width: size,
       height: size,
@@ -3195,7 +3197,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   }
 
   Widget _buildAmberGlowStage(Track track, Color accentColor, bool isDark) {
-    final size = MediaQuery.of(context).size.width * 0.70;
+    final size = math.min(MediaQuery.of(context).size.width * 0.70, 340.0);
     return Container(
       width: size,
       height: size,
@@ -3232,7 +3234,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   // ── Custom Skins Painters ────────────────────────────────────
 
   Widget _buildCDDisc(Track track, bool isDark) {
-    final size = MediaQuery.of(context).size.width * 0.70;
+    final size = math.min(MediaQuery.of(context).size.width * 0.70, 340.0);
     return Container(
       width: size,
       height: size,
@@ -3273,7 +3275,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
   }
 
   Widget _buildCassetteTape(Track track, double angle, bool isDark) {
-    final size = MediaQuery.of(context).size.width * 0.8;
+    final size = math.min(MediaQuery.of(context).size.width * 0.8, 360.0);
     return Container(
       width: size,
       height: size * 0.6,
@@ -3424,8 +3426,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
         borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24))
       ),
       builder: (context) {
+        final addingIndices = <int>{};
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (modalCtx, setModalState) {
             return Container(
               padding: const EdgeInsets.all(24),
               height: 400,
@@ -3469,6 +3472,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                           final trackIds = List<String>.from(pl['trackIds'] ?? []);
                           final alreadyContains = tracksList.any((t) => t is Map && t['id'] == track.id) || trackIds.contains(track.id);
                           final songCount = tracksList.isNotEmpty ? tracksList.length : trackIds.length;
+                          final isAdding = addingIndices.contains(index);
 
                           return ListTile(
                             leading: Container(
@@ -3485,83 +3489,94 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Text('$songCount songs'),
-                            trailing: alreadyContains
-                                ? Icon(Icons.check_circle_rounded, color: customBranding.accentColor)
-                                : const Icon(Icons.add_circle_outline_rounded, color: Colors.grey),
-                            onTap: () async {
-                              if (!alreadyContains) {
-                                final authorName = AuthService.instance.currentUserName.isNotEmpty
-                                    ? AuthService.instance.currentUserName
-                                    : StorageService.getUserAuthorName();
-                                final authorUid = AuthService.instance.currentUserId;
-                                final stampedTrack = track.copyWith(
-                                  addedBy: (track.addedBy != null && track.addedBy!.isNotEmpty)
-                                      ? track.addedBy
-                                      : authorName,
-                                );
-                                final trackMap = stampedTrack.toJson();
-                                trackMap['addedBy'] = stampedTrack.addedBy;
-                                trackMap['addedByUid'] = authorUid;
+                            trailing: isAdding
+                                ? SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(customBranding.accentColor),
+                                    ),
+                                  )
+                                : Icon(
+                                    alreadyContains ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
+                                    color: alreadyContains ? Colors.greenAccent.shade400 : Colors.grey,
+                                  ),
+                            onTap: (isAdding || alreadyContains)
+                                ? null
+                                : () async {
+                                    setModalState(() {
+                                      addingIndices.add(index);
+                                    });
+                                    try {
+                                      final authorName = AuthService.instance.currentUserName.isNotEmpty
+                                          ? AuthService.instance.currentUserName
+                                          : StorageService.getUserAuthorName();
+                                      final authorUid = AuthService.instance.currentUserId;
+                                      final stampedTrack = track.copyWith(
+                                        addedBy: (track.addedBy != null && track.addedBy!.isNotEmpty)
+                                            ? track.addedBy
+                                            : authorName,
+                                      );
+                                      final trackMap = stampedTrack.toJson();
+                                      trackMap['addedBy'] = stampedTrack.addedBy;
+                                      trackMap['addedByUid'] = authorUid;
 
-                                trackIds.add(track.id);
-                                tracksList.add(trackMap);
-                                playlists[index]['trackIds'] = trackIds;
-                                playlists[index]['tracks'] = tracksList;
-                                await StorageService.savePlaylists(playlists);
+                                      trackIds.add(track.id);
+                                      tracksList.add(trackMap);
+                                      playlists[index]['trackIds'] = trackIds;
+                                      playlists[index]['tracks'] = tracksList;
+                                      await StorageService.savePlaylists(playlists);
 
-                                // If playlist is collaborative, auto sync addition to Firestore (guests can contribute too)
-                                if (pl['isSyncEnabled'] == true) {
-                                  final pid = pl['id']?.toString() ?? '';
-                                  if (pid.isNotEmpty) {
-                                    () async {
-                                      try {
-                                        if (!AuthService.instance.isLoggedIn) {
-                                          await AuthService.instance.ensureAnonymousSession();
+                                      // If playlist is collaborative, auto sync addition to Firestore (guests can contribute too)
+                                      if (pl['isSyncEnabled'] == true) {
+                                        final pid = pl['id']?.toString() ?? '';
+                                        if (pid.isNotEmpty) {
+                                          () async {
+                                            try {
+                                              if (!AuthService.instance.isLoggedIn) {
+                                                await AuthService.instance.ensureAnonymousSession();
+                                              }
+                                              final effectiveUid = AuthService.instance.currentUserId.isNotEmpty
+                                                  ? AuthService.instance.currentUserId
+                                                  : (authorUid.isNotEmpty ? authorUid : StorageService.getDeviceId());
+                                              final currentTracks = tracksList.map((t) => Track.fromJson(Map<String, dynamic>.from(t as Map))).toList();
+                                              final baseIds = List<String>.from(pl['syncedTrackIds'] as List? ?? []);
+                                              final synced = await PlaylistRepository().syncPlaylistTracks(
+                                                playlistId: pid,
+                                                callerUid: effectiveUid,
+                                                callerName: authorName,
+                                                localTracks: currentTracks,
+                                                deletedTrackIds: List<String>.from(pl['deletedTrackIds'] as List? ?? []),
+                                                baseTrackIds: baseIds,
+                                              );
+                                              if (synced.isNotEmpty) {
+                                                pl['syncedTrackIds'] = synced.map((t) => t.id).toList();
+                                                StorageService.updatePlaylist(pid, pl);
+                                              }
+                                            } catch (e) {
+                                              debugPrint('NowPlaying auto sync notice: $e');
+                                            }
+                                          }();
                                         }
-                                        final effectiveUid = AuthService.instance.currentUserId.isNotEmpty
-                                            ? AuthService.instance.currentUserId
-                                            : (authorUid.isNotEmpty ? authorUid : StorageService.getDeviceId());
-                                        final currentTracks = tracksList.map((t) => Track.fromJson(Map<String, dynamic>.from(t as Map))).toList();
-                                        final baseIds = List<String>.from(pl['syncedTrackIds'] as List? ?? []);
-                                        final synced = await PlaylistRepository().syncPlaylistTracks(
-                                          playlistId: pid,
-                                          callerUid: effectiveUid,
-                                          callerName: authorName,
-                                          localTracks: currentTracks,
-                                          deletedTrackIds: List<String>.from(pl['deletedTrackIds'] as List? ?? []),
-                                          baseTrackIds: baseIds,
-                                        );
-                                        if (synced.isNotEmpty) {
-                                          pl['syncedTrackIds'] = synced.map((t) => t.id).toList();
-                                          StorageService.updatePlaylist(pid, pl);
-                                        }
-                                      } catch (e) {
-                                        debugPrint('NowPlaying auto sync notice: $e');
                                       }
-                                    }();
-                                  }
-                                }
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Added "${track.title}" to ${pl['name']}'),
-                                      backgroundColor: customBranding.accentColor,
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                                }
-                              } else {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('"${track.title}" is already in ${pl['name']}'),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                                }
-                              }
-                              Navigator.pop(context);
-                            },
+                                      if (modalCtx.mounted) {
+                                        ScaffoldMessenger.of(modalCtx).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Added "${track.title}" to ${pl['name']}'),
+                                            backgroundColor: customBranding.accentColor,
+                                            behavior: SnackBarBehavior.floating,
+                                          ),
+                                        );
+                                      }
+                                    } finally {
+                                      if (modalCtx.mounted) {
+                                        setModalState(() {
+                                          addingIndices.remove(index);
+                                        });
+                                      }
+                                    }
+                                  },
                           );
                         },
                       ),

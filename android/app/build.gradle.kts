@@ -13,6 +13,7 @@ plugins {
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 var hasValidKeystore = false
+val isCI = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
 
 if (keystorePropertiesFile.exists()) {
     try {
@@ -27,26 +28,47 @@ if (keystorePropertiesFile.exists()) {
             !keyAlias.isNullOrBlank() && !storeFileStr.isNullOrBlank()) {
             val sFile = file(storeFileStr)
             if (sFile.exists() && sFile.length() > 0) {
-                // Verify password and alias using Java KeyStore API
-                val ks = KeyStore.getInstance(KeyStore.getDefaultType())
-                FileInputStream(sFile).use { fis ->
-                    ks.load(fis, storePassword.toCharArray())
+                // Verify password and alias using Java KeyStore API (supports PKCS12 and JKS)
+                val ks = try {
+                    KeyStore.getInstance("PKCS12").apply {
+                        FileInputStream(sFile).use { fis -> load(fis, storePassword.toCharArray()) }
+                    }
+                } catch (e: Exception) {
+                    KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                        FileInputStream(sFile).use { fis -> load(fis, storePassword.toCharArray()) }
+                    }
                 }
                 if (ks.containsAlias(keyAlias)) {
                     hasValidKeystore = true
+                } else {
+                    val msg = "AURA ERROR: Keystore alias '$keyAlias' not found in ${sFile.absolutePath}"
+                    if (isCI) throw GradleException(msg) else println(msg)
                 }
+            } else {
+                val msg = "AURA ERROR: Keystore file '$storeFileStr' does not exist or is empty (resolved: ${sFile.absolutePath})"
+                if (isCI) throw GradleException(msg) else println(msg)
             }
+        } else {
+            val msg = "AURA ERROR: key.properties is missing required fields (storePassword, keyPassword, keyAlias, storeFile)"
+            if (isCI) throw GradleException(msg) else println(msg)
         }
     } catch (e: Exception) {
-        println("AURA WARNING: Release keystore validation failed (${e.message}). Falling back to debug signing.")
-        hasValidKeystore = false
+        val msg = "AURA ERROR: Release keystore validation failed (${e.message})."
+        if (isCI) {
+            throw GradleException(msg, e)
+        } else {
+            println("$msg Falling back to debug signing.")
+            hasValidKeystore = false
+        }
     }
+} else if (isCI) {
+    throw GradleException("AURA ERROR: key.properties not found in CI build! Release APK cannot be signed.")
 }
 
-// Load version.properties for central app versioning (checks both root and android directories)
+// Load version.properties for central app versioning (prioritizes root version.properties, with android/ fallback)
 val versionPropertiesFile = run {
-    val fInAndroid = rootProject.file("version.properties")
-    if (fInAndroid.exists()) fInAndroid else rootProject.file("../version.properties")
+    val fInRoot = rootProject.file("../version.properties")
+    if (fInRoot.exists()) fInRoot else rootProject.file("version.properties")
 }
 val versionProperties = Properties()
 if (versionPropertiesFile.exists()) {
@@ -73,13 +95,17 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = if (versionPropertiesFile.exists() && versionProperties.containsKey("VERSION_CODE")) {
             (versionProperties["VERSION_CODE"] as String).trim().toInt()
-        } else {
+        } else if (flutter.versionCode > 0) {
             flutter.versionCode
+        } else {
+            70
         }
         versionName = if (versionPropertiesFile.exists() && versionProperties.containsKey("VERSION_NAME")) {
             (versionProperties["VERSION_NAME"] as String).trim()
-        } else {
+        } else if (!flutter.versionName.isNullOrBlank()) {
             flutter.versionName
+        } else {
+            "7.0"
         }
     }
 
@@ -90,12 +116,18 @@ android {
                 keyPassword = keystoreProperties["keyPassword"] as String
                 storeFile = file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
 
     buildTypes {
         release {
+            if (isCI && !hasValidKeystore) {
+                throw GradleException("AURA ERROR: Release build type cannot use debug signing in CI.")
+            }
             signingConfig = if (hasValidKeystore) {
                 signingConfigs.getByName("release")
             } else {

@@ -49,27 +49,12 @@ class DownloadService extends ChangeNotifier {
 
   bool isDownloaded(String trackId) {
     if (kIsWeb) return false;
-    final localPath = getLocalPath(trackId);
-    if (localPath == null) return false;
-    try {
-      final file = File(localPath);
-      return file.existsSync() && file.lengthSync() > 0;
-    } catch (_) {
-      return false;
-    }
+    return StorageService.isTrackDownloaded(trackId);
   }
 
   String? getLocalPath(String trackId) {
     if (kIsWeb) return null;
-    final mapped = StorageService.getDownloadedTracks();
-    if (!mapped.containsKey(trackId)) return null;
-    try {
-      final file = File(mapped[trackId]!);
-      if (file.existsSync() && file.lengthSync() > 0) {
-        return file.path;
-      }
-    } catch (_) {}
-    return null;
+    return StorageService.getDownloadedTrackPath(trackId);
   }
 
   // ── Download Actions ────────────────────────────────────────

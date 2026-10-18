@@ -37,6 +37,11 @@ class AuthService {
     clientId: kIsWeb
         ? '99053788865-89nobspq91is6u3b6rghlrm6t53omhpf.apps.googleusercontent.com'
         : null,
+    serverClientId: '99053788865-89nobspq91is6u3b6rghlrm6t53omhpf.apps.googleusercontent.com',
+    scopes: const [
+      'email',
+      'profile',
+    ],
   );
   final UserService _userService = UserService();
 

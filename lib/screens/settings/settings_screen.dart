@@ -169,7 +169,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeMode = ref.watch(themeModeProvider);
     final branding = ref.watch(customizationProvider);
     final sourceMode = ref.watch(sourceModeProvider);
-    final playback = ref.watch(playbackProvider);
+    final playerSkin = ref.watch(playbackProvider.select((s) => s.playerSkin));
+    final playerScreenTheme = ref.watch(playbackProvider.select((s) => s.playerScreenTheme));
+    final playbackSpeed = ref.watch(playbackProvider.select((s) => s.playbackSpeed));
+    final gaplessPlayback = ref.watch(playbackProvider.select((s) => s.gaplessPlayback));
+    final volumeNormalization = ref.watch(playbackProvider.select((s) => s.volumeNormalization));
+    final sleepTimerMinutes = ref.watch(playbackProvider.select((s) => s.sleepTimerMinutes));
+    final sleepTimerTimeRemaining = ref.watch(playbackProvider.select((s) => s.sleepTimerTimeRemaining));
     final playbackNotifier = ref.read(playbackProvider.notifier);
     final accent = branding.accentColor;
 
@@ -207,7 +213,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _SettingsRow(
               icon: Icons.album_rounded,
               title: 'Player skin',
-              value: _labelFor(_skinOptions, playback.playerSkin),
+              value: _labelFor(_skinOptions, playerSkin),
               accent: accent,
               onTap: _showSkinSheet,
             ),
@@ -216,7 +222,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Player screen theme',
               value: _labelFor(
                 _screenThemeOptions,
-                playback.playerScreenTheme,
+                playerScreenTheme,
                 fallback: 'Normal (Classic)',
               ),
               accent: accent,
@@ -246,7 +252,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _SettingsRow(
               icon: Icons.speed_rounded,
               title: 'Playback speed',
-              value: '${playback.playbackSpeed}x',
+              value: '${playbackSpeed}x',
               accent: accent,
               onTap: _showPlaybackSpeedSheet,
             ),
@@ -254,7 +260,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               icon: Icons.all_inclusive_rounded,
               title: 'Gapless playback',
               subtitle: 'Start the next track immediately, without delay',
-              value: playback.gaplessPlayback,
+              value: gaplessPlayback,
               accent: accent,
               onChanged: (val) {
                 playbackNotifier.toggleGaplessPlayback();
@@ -287,7 +293,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               icon: Icons.volume_up_rounded,
               title: 'Volume normalization',
               subtitle: 'Dampen spikes for a balanced sound',
-              value: playback.volumeNormalization,
+              value: volumeNormalization,
               accent: accent,
               onChanged: (val) {
                 playbackNotifier.toggleVolumeNormalization();
@@ -296,8 +302,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _SettingsRow(
               icon: Icons.bedtime_rounded,
               title: 'Sleep timer',
-              value: playback.sleepTimerMinutes != null
-                  ? '${playback.sleepTimerMinutes} min · ${_formatDurationRemaining(playback.sleepTimerTimeRemaining)} left'
+              value: sleepTimerMinutes != null
+                  ? '$sleepTimerMinutes min · ${_formatDurationRemaining(sleepTimerTimeRemaining)} left'
                   : 'Off',
               accent: accent,
               onTap: _showSleepTimerSheet,

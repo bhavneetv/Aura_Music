@@ -705,12 +705,219 @@ Output ONLY valid JSON:
     );
   }
 
+  void _addToPlaylist(Track track) {
+    triggerHaptic(HapticFeedbackType.medium);
+    _showAddToPlaylistBottomSheet(track);
+  }
+
+  void _showAddToPlaylistBottomSheet(Track track) {
+    final accentColor = ref.read(customizationProvider).accentColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final playlists = StorageService.getPlaylists();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF141418) : const Color(0xFFF7F7F9),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        final addingIndices = <int>{};
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              height: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Add to Playlist',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      ),
+                      TextButton.icon(
+                        icon: Icon(Icons.add, color: accentColor, size: 18),
+                        label: Text('New Playlist', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _showCreatePlaylistDialog(track);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (playlists.isEmpty)
+                    const Expanded(
+                      child: Center(
+                        child: Text(
+                          'No playlists created yet. Tap "New Playlist" above!',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: playlists.length,
+                        itemBuilder: (context, index) {
+                          final pl = playlists[index];
+                          final tracksList = List.from(pl['tracks'] ?? []);
+                          final trackIds = List<String>.from(pl['trackIds'] ?? []);
+                          final alreadyContains = tracksList.any((t) => t is Map && t['id'] == track.id) || trackIds.contains(track.id);
+                          final songCount = tracksList.isNotEmpty ? tracksList.length : trackIds.length;
+                          final plName = pl['name']?.toString() ?? 'Playlist ${index + 1}';
+                          final isAdding = addingIndices.contains(index);
+
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            leading: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: accentColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(Icons.music_note_rounded, color: accentColor, size: 24),
+                            ),
+                            title: Text(
+                              plName,
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                            ),
+                            subtitle: Text('$songCount ${songCount == 1 ? "song" : "songs"}'),
+                            trailing: IconButton(
+                              icon: isAdding
+                                  ? SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                                      ),
+                                    )
+                                  : Icon(
+                                      alreadyContains ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
+                                      color: alreadyContains ? Colors.greenAccent.shade400 : accentColor,
+                                    ),
+                              onPressed: (isAdding || alreadyContains)
+                                  ? null
+                                  : () async {
+                                      setModalState(() {
+                                        addingIndices.add(index);
+                                      });
+                                      try {
+                                        final updatedPlaylists = StorageService.getPlaylists();
+                                        if (index < updatedPlaylists.length) {
+                                          final target = Map<String, dynamic>.from(updatedPlaylists[index]);
+                                          final currentTracks = List.from(target['tracks'] ?? []);
+                                          final currentIds = List<String>.from(target['trackIds'] ?? []);
+
+                                          currentTracks.add(track.toJson());
+                                          currentIds.add(track.id);
+
+                                          target['tracks'] = currentTracks;
+                                          target['trackIds'] = currentIds;
+                                          updatedPlaylists[index] = target;
+                                          await StorageService.savePlaylists(updatedPlaylists);
+
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(this.context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Added "${track.title}" to $plName ✨'),
+                                                duration: const Duration(seconds: 2),
+                                                behavior: SnackBarBehavior.floating,
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      } finally {
+                                        setModalState(() {
+                                          addingIndices.remove(index);
+                                        });
+                                      }
+                                    },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showCreatePlaylistDialog(Track track) {
+    final accentColor = ref.read(customizationProvider).accentColor;
+    final textController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Create New Playlist'),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: 'Playlist Name',
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: accentColor),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentColor,
+              foregroundColor: _onColor(accentColor),
+            ),
+            onPressed: () async {
+              final name = textController.text.trim();
+              if (name.isNotEmpty) {
+                final playlists = StorageService.getPlaylists();
+                final newPlaylist = {
+                  'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                  'name': name,
+                  'createdAt': DateTime.now().toIso8601String(),
+                  'tracks': [track.toJson()],
+                  'trackIds': [track.id],
+                };
+                playlists.add(newPlaylist);
+                await StorageService.savePlaylists(playlists);
+
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Created "$name" and added "${track.title}" ✨'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Create & Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _capitalize(String text) {
     return text.split(' ').map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
   }
 
   /// "Artist • Genre", or just the artist when there is no genre.
-  String _artistLine(Track track) {
+  static String _artistLine(Track track) {
     final genre = track.genre.trim();
     return (genre.isEmpty || genre == 'null') ? track.artist : '${track.artist} • $genre';
   }
@@ -1473,102 +1680,125 @@ Output ONLY valid JSON:
     );
   }
 
-  /// A song as a card. Swipe right to add it to the queue.
+  Widget _buildSwipeTutorialBanner(Color accentColor) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            accentColor.withValues(alpha: 0.18),
+            const Color(0xFF8B5CF6).withValues(alpha: 0.18),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accentColor.withValues(alpha: 0.35),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.22),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.touch_app_rounded, size: 18, color: accentColor),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Quick Swipe Actions',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await StorageService.setSeenSearchSwipeTutorial(true);
+                  if (mounted) setState(() {});
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: accentColor.withValues(alpha: 0.22),
+                  shape: const StadiumBorder(),
+                ),
+                child: Text(
+                  'Got it!',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(Icons.arrow_forward_rounded, size: 15, color: accentColor),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        'Swipe Right: Queue',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _muted(context)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.arrow_back_rounded, size: 15, color: Color(0xFF8B5CF6)),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        'Swipe Left: Playlist',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _muted(context)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A song as a card. Swipe right to add it to the queue, or swipe left to add to a playlist.
   Widget _buildSwipeSongCard({
     required Key key,
     required Track track,
     required Color accentColor,
     required VoidCallback onPlay,
+    bool showTutorialAnimation = false,
+    VoidCallback? onTutorialComplete,
   }) {
-    return ClipRRect(
+    return _SwipeSongCardWidget(
       key: key,
-      borderRadius: BorderRadius.circular(20),
-      child: Dismissible(
-        key: key,
-        direction: DismissDirection.startToEnd,
-        confirmDismiss: (direction) async {
-          _addToQueue(track);
-          return false;
-        },
-        background: Container(
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.only(left: 20),
-          color: accentColor,
-          child: Row(
-            children: [
-              Icon(Icons.queue_music_rounded, color: _onColor(accentColor)),
-              const SizedBox(width: 8),
-              Text(
-                'Add to Queue',
-                style: TextStyle(color: _onColor(accentColor), fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-        ),
-        child: Material(
-          // Solid, so the swipe background stays hidden until you swipe.
-          color: Color.alphaBlend(_tint(context, 0.05), Theme.of(context).scaffoldBackgroundColor),
-          child: InkWell(
-            onTap: onPlay,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
-              child: Row(
-                children: [
-                  AppArtworkImage(
-                    artworkUrl: track.artworkUrl,
-                    trackId: track.id,
-                    width: 52,
-                    height: 52,
-                    fit: BoxFit.cover,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            _SourceTag(isYouTube: track.isYouTube),
-                            Expanded(
-                              child: Text(
-                                _artistLine(track),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12.5, color: _muted(context)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Play',
-                    onPressed: onPlay,
-                    icon: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: accentColor.withValues(alpha: 0.16),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(Icons.play_arrow_rounded, size: 22, color: accentColor),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+      track: track,
+      accentColor: accentColor,
+      onPlay: onPlay,
+      onAddToQueue: () => _addToQueue(track),
+      onAddToPlaylist: () => _addToPlaylist(track),
+      showTutorialAnimation: showTutorialAnimation,
+      onTutorialComplete: onTutorialComplete,
     );
   }
 
@@ -1789,6 +2019,7 @@ Output ONLY valid JSON:
     }
 
     final showAiBanner = _isAiMode && _filteredTracks.isNotEmpty;
+    final showTutorialBanner = !StorageService.hasSeenSearchSwipeTutorial() && _filteredTracks.isNotEmpty;
     final notifier = ref.read(playbackProvider.notifier);
 
     return Column(
@@ -1799,16 +2030,23 @@ Output ONLY valid JSON:
             builder: (context, constraints) {
               final columns = _columnsFor(constraints.maxWidth - _side * 2);
               final rows = (_filteredTracks.length / columns).ceil();
+              int headerCount = 0;
+              if (showTutorialBanner) headerCount++;
+              if (showAiBanner) headerCount++;
 
               return ListView.builder(
                 physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                 padding: EdgeInsets.fromLTRB(_side, 12, _side, 150),
-                itemCount: rows + (showAiBanner ? 1 : 0),
+                itemCount: rows + headerCount,
                 itemBuilder: (context, index) {
-                  if (showAiBanner && index == 0) {
+                  if (showTutorialBanner && index == 0) {
+                    return _buildSwipeTutorialBanner(accentColor);
+                  }
+                  final aiIndex = showTutorialBanner ? 1 : 0;
+                  if (showAiBanner && index == aiIndex) {
                     return _buildAiPlaylistBannerCard(context, notifier, accentColor);
                   }
-                  final row = showAiBanner ? index - 1 : index;
+                  final row = index - headerCount;
                   return _cardRow(
                     columns: columns,
                     first: row * columns,
@@ -1820,6 +2058,11 @@ Output ONLY valid JSON:
                         track: track,
                         accentColor: accentColor,
                         onPlay: () => _playSearched(track),
+                        showTutorialAnimation: showTutorialBanner && trackIndex == 0,
+                        onTutorialComplete: () async {
+                          await StorageService.setSeenSearchSwipeTutorial(true);
+                          if (mounted) setState(() {});
+                        },
                       );
                     },
                   );
@@ -2701,6 +2944,256 @@ Output ONLY valid JSON:
           ),
         );
       },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SWIPE SONG CARD WITH DEMO TUTORIAL
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _SwipeSongCardWidget extends StatefulWidget {
+  const _SwipeSongCardWidget({
+    super.key,
+    required this.track,
+    required this.accentColor,
+    required this.onPlay,
+    required this.onAddToQueue,
+    required this.onAddToPlaylist,
+    this.showTutorialAnimation = false,
+    this.onTutorialComplete,
+  });
+
+  final Track track;
+  final Color accentColor;
+  final VoidCallback onPlay;
+  final VoidCallback onAddToQueue;
+  final VoidCallback onAddToPlaylist;
+  final bool showTutorialAnimation;
+  final VoidCallback? onTutorialComplete;
+
+  @override
+  State<_SwipeSongCardWidget> createState() => _SwipeSongCardWidgetState();
+}
+
+class _SwipeSongCardWidgetState extends State<_SwipeSongCardWidget> with SingleTickerProviderStateMixin {
+  AnimationController? _demoController;
+  Animation<double>? _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showTutorialAnimation) {
+      _demoController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 3200),
+      );
+
+      _slideAnimation = TweenSequence<double>([
+        TweenSequenceItem(tween: ConstantTween<double>(0.0), weight: 10),
+        TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 65.0).chain(CurveTween(curve: Curves.easeOutCubic)), weight: 20),
+        TweenSequenceItem(tween: ConstantTween<double>(65.0), weight: 15),
+        TweenSequenceItem(tween: Tween<double>(begin: 65.0, end: -65.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 20),
+        TweenSequenceItem(tween: ConstantTween<double>(-65.0), weight: 15),
+        TweenSequenceItem(tween: Tween<double>(begin: -65.0, end: 0.0).chain(CurveTween(curve: Curves.easeOutCubic)), weight: 15),
+        TweenSequenceItem(tween: ConstantTween<double>(0.0), weight: 5),
+      ]).animate(_demoController!);
+
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted && _demoController != null) {
+          _demoController!.forward().then((_) {
+            widget.onTutorialComplete?.call();
+          });
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _demoController?.dispose();
+    super.dispose();
+  }
+
+  void _stopDemo() {
+    if (_demoController != null && _demoController!.isAnimating) {
+      _demoController!.stop();
+      widget.onTutorialComplete?.call();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardContent = Material(
+      color: Color.alphaBlend(_tint(context, 0.05), Theme.of(context).scaffoldBackgroundColor),
+      child: InkWell(
+        onTap: () {
+          _stopDemo();
+          widget.onPlay();
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
+          child: Row(
+            children: [
+              AppArtworkImage(
+                artworkUrl: widget.track.artworkUrl,
+                trackId: widget.track.id,
+                width: 52,
+                height: 52,
+                fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _SourceTag(isYouTube: widget.track.isYouTube),
+                        Expanded(
+                          child: Text(
+                            _SearchScreenState._artistLine(widget.track),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, color: _muted(context)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Play',
+                onPressed: () {
+                  _stopDemo();
+                  widget.onPlay();
+                },
+                icon: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: widget.accentColor.withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.play_arrow_rounded, size: 22, color: widget.accentColor),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final dismissibleCard = Dismissible(
+      key: widget.key ?? ValueKey('dismiss_${widget.track.id}'),
+      direction: DismissDirection.horizontal,
+      confirmDismiss: (direction) async {
+        _stopDemo();
+        if (direction == DismissDirection.startToEnd) {
+          widget.onAddToQueue();
+        } else if (direction == DismissDirection.endToStart) {
+          widget.onAddToPlaylist();
+        }
+        return false;
+      },
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        color: widget.accentColor,
+        child: Row(
+          children: [
+            Icon(Icons.queue_music_rounded, color: _onColor(widget.accentColor)),
+            const SizedBox(width: 8),
+            Text(
+              'Add to Queue',
+              style: TextStyle(color: _onColor(widget.accentColor), fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: const Color(0xFF8B5CF6),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              'Add to Playlist',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            ),
+            SizedBox(width: 8),
+            Icon(Icons.playlist_add_rounded, color: Colors.white),
+          ],
+        ),
+      ),
+      child: cardContent,
+    );
+
+    if (_slideAnimation != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedBuilder(
+          animation: _slideAnimation!,
+          builder: (context, child) {
+            final offset = _slideAnimation!.value;
+            if (offset.abs() < 0.5) {
+              return dismissibleCard;
+            }
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: Container(
+                    color: offset > 0 ? widget.accentColor : const Color(0xFF8B5CF6),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    alignment: offset > 0 ? Alignment.centerLeft : Alignment.centerRight,
+                    child: offset > 0
+                        ? Row(
+                            children: [
+                              Icon(Icons.queue_music_rounded, color: _onColor(widget.accentColor)),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Add to Queue',
+                                style: TextStyle(color: _onColor(widget.accentColor), fontWeight: FontWeight.w800),
+                              ),
+                            ],
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(
+                                'Add to Playlist',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                              ),
+                              SizedBox(width: 8),
+                              Icon(Icons.playlist_add_rounded, color: Colors.white),
+                            ],
+                          ),
+                  ),
+                ),
+                Transform.translate(
+                  offset: Offset(offset, 0),
+                  child: cardContent,
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: dismissibleCard,
     );
   }
 }

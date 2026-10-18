@@ -34,6 +34,10 @@ class StorageService {
     await Hive.openBox(_summaryBox);
     await Hive.openBox(_lyricsBox);
     await Hive.openBox(_waveformBox);
+
+    // Warm up in-memory caches on startup to guarantee 0ms UI lookups
+    _ensureDownloadsCacheLoaded();
+    getFavoriteTracks();
   }
 
   // ── Settings ────────────────────────────────────────────────
@@ -157,6 +161,18 @@ class StorageService {
     await box.put('seen_player_tutorial', true);
   }
 
+  static bool hasSeenSearchSwipeTutorial() {
+    if (!Hive.isBoxOpen(_profileBox)) return false;
+    final box = Hive.box(_profileBox);
+    return box.get('seen_search_swipe_tutorial', defaultValue: false) as bool;
+  }
+
+  static Future<void> setSeenSearchSwipeTutorial([bool seen = true]) async {
+    if (!Hive.isBoxOpen(_profileBox)) return;
+    final box = Hive.box(_profileBox);
+    await box.put('seen_search_swipe_tutorial', seen);
+  }
+
   // ── Onboarding Profile ──────────────────────────────────────
   
   static bool isOnboardingComplete() {
@@ -216,21 +232,47 @@ class StorageService {
 
   // ── Favorites ───────────────────────────────────────────────
   
+  // ── Favorites In-Memory Cache ────────────────────────────────
+  static List<Track>? _cachedFavoriteTracks;
+  static Set<String>? _cachedFavoriteTrackIds;
+
+  static void invalidateFavoritesCache() {
+    _cachedFavoriteTracks = null;
+    _cachedFavoriteTrackIds = null;
+  }
+
   static List<String> getFavoriteIds(String type) {
+    if (type == 'trackIds' && _cachedFavoriteTrackIds != null) {
+      return _cachedFavoriteTrackIds!.toList();
+    }
     final box = Hive.box(_favoritesBox);
-    return List<String>.from(box.get(type, defaultValue: <String>[]));
+    final list = List<String>.from(box.get(type, defaultValue: <String>[]));
+    if (type == 'trackIds') {
+      _cachedFavoriteTrackIds = list.toSet();
+    }
+    return list;
   }
 
   static List<Track> getFavoriteTracks() {
+    if (_cachedFavoriteTracks != null) {
+      return List<Track>.from(_cachedFavoriteTracks!);
+    }
     final box = Hive.box(_favoritesBox);
     final raw = box.get('favorite_tracks_objects');
-    if (raw == null) return [];
+    if (raw == null) {
+      _cachedFavoriteTracks = [];
+      _cachedFavoriteTrackIds = {};
+      return [];
+    }
     try {
       final List decoded = jsonDecode(raw.toString());
-      return decoded.map((e) {
+      final tracks = decoded.map((e) {
         final map = Map<String, dynamic>.from(e as Map);
         return Track.fromJson(map);
       }).where((t) => t.id.isNotEmpty).toList();
+      _cachedFavoriteTracks = tracks;
+      _cachedFavoriteTrackIds = tracks.map((t) => t.id).toSet();
+      return List<Track>.from(tracks);
     } catch (_) {
       return [];
     }
@@ -238,8 +280,8 @@ class StorageService {
 
   static Future<void> toggleFavoriteTrack(Track track) async {
     final box = Hive.box(_favoritesBox);
-    final ids = getFavoriteIds('trackIds');
-    final tracks = getFavoriteTracks();
+    final ids = List<String>.from(getFavoriteIds('trackIds'));
+    final tracks = List<Track>.from(getFavoriteTracks());
 
     final isFav = ids.contains(track.id);
     if (isFav) {
@@ -249,6 +291,9 @@ class StorageService {
       ids.add(track.id);
       tracks.insert(0, track);
     }
+
+    _cachedFavoriteTracks = tracks;
+    _cachedFavoriteTrackIds = ids.toSet();
 
     await box.put('trackIds', ids);
     final jsonList = tracks.map((t) => t.toJson()).toList();
@@ -263,10 +308,19 @@ class StorageService {
     } else {
       list.add(id);
     }
+    if (type == 'trackIds') {
+      _cachedFavoriteTrackIds = list.toSet();
+    }
     await box.put(type, list);
   }
 
   static bool isFavorite(String type, String id) {
+    if (type == 'trackIds') {
+      if (_cachedFavoriteTrackIds == null) {
+        getFavoriteIds('trackIds');
+      }
+      return _cachedFavoriteTrackIds?.contains(id) ?? false;
+    }
     return getFavoriteIds(type).contains(id);
   }
 
@@ -627,91 +681,159 @@ class StorageService {
     await saveSetting('nav_bar_style', style);
   }
 
-  // ── Downloads Tracker ───────────────────────────────────────
+  // ── Downloads Tracker & In-Memory Cache ───────────────────────
+
+  static Map<String, String>? _cachedDownloadedTracks;
+  static List<Track>? _cachedFullDownloadedTracks;
+  static Map<String, String>? _cachedDownloadedArtworkPaths;
+  static Map<String, String>? _cachedRemoteArtworkUrls;
+  static Set<String>? _cachedDownloadedIds;
+
+  static void _invalidateDownloadsCache() {
+    _cachedDownloadedTracks = null;
+    _cachedFullDownloadedTracks = null;
+    _cachedDownloadedArtworkPaths = null;
+    _cachedRemoteArtworkUrls = null;
+    _cachedDownloadedIds = null;
+  }
+
+  static void _ensureDownloadsCacheLoaded() {
+    if (_cachedDownloadedTracks != null) return;
+    if (kIsWeb || !Hive.isBoxOpen(_downloadsBox)) {
+      _cachedDownloadedTracks = {};
+      _cachedFullDownloadedTracks = [];
+      _cachedDownloadedArtworkPaths = {};
+      _cachedRemoteArtworkUrls = {};
+      _cachedDownloadedIds = {};
+      return;
+    }
+
+    final box = Hive.box(_downloadsBox);
+    final raw = box.get('downloaded_tracks');
+    final Map<String, String> tracksMap = {};
+    final List<Track> fullTracks = [];
+    final Map<String, String> artMap = {};
+    final Map<String, String> remoteArtMap = {};
+    final Set<String> idsSet = {};
+
+    if (raw != null) {
+      try {
+        final Map decoded = jsonDecode(raw.toString()) as Map;
+        final Map<String, Track> uniqueTracks = {};
+
+        decoded.forEach((key, val) {
+          String path = '';
+          String trackId = key.toString();
+          String localArt = '';
+          String remoteArt = '';
+
+          if (val is Map) {
+            path = val['localPath']?.toString() ?? '';
+            trackId = val['id']?.toString() ?? key.toString();
+            localArt = val['localArtworkPath']?.toString() ?? '';
+            remoteArt = val['artworkUrl']?.toString() ?? '';
+          } else {
+            path = val.toString();
+          }
+
+          if (path.isNotEmpty) {
+            // Verify file once when building memory cache
+            final file = File(path);
+            if (file.existsSync() && file.lengthSync() > 0) {
+              final keyStr = key.toString();
+              tracksMap[keyStr] = path;
+              idsSet.add(keyStr);
+              if (keyStr.startsWith('yt_')) {
+                idsSet.add(keyStr.substring(3));
+              } else {
+                idsSet.add('yt_$keyStr');
+              }
+
+              if (trackId.isNotEmpty) {
+                tracksMap[trackId] = path;
+                idsSet.add(trackId);
+                if (trackId.startsWith('yt_')) {
+                  idsSet.add(trackId.substring(3));
+                } else {
+                  idsSet.add('yt_$trackId');
+                }
+              }
+
+              if (localArt.isNotEmpty) {
+                final artF = File(localArt);
+                if (artF.existsSync() && artF.lengthSync() > 0) {
+                  artMap[keyStr] = localArt;
+                  if (trackId.isNotEmpty) {
+                    artMap[trackId] = localArt;
+                  }
+                }
+              }
+
+              if (remoteArt.isNotEmpty && (remoteArt.startsWith('http://') || remoteArt.startsWith('https://'))) {
+                remoteArtMap[keyStr] = remoteArt;
+                if (trackId.isNotEmpty) {
+                  remoteArtMap[trackId] = remoteArt;
+                }
+              }
+
+              if (val is Map) {
+                final finalArt = (localArt.isNotEmpty && artMap.containsKey(trackId))
+                    ? localArt
+                    : remoteArt;
+
+                final t = Track(
+                  id: trackId,
+                  title: val['title']?.toString() ?? 'Downloaded Song',
+                  artist: val['artist']?.toString() ?? 'Unknown Artist',
+                  album: val['album']?.toString() ?? 'Offline',
+                  duration: val['duration']?.toString() ?? '3:30',
+                  artworkUrl: finalArt,
+                  audioUrl: path,
+                  genre: val['genre']?.toString() ?? 'OFFLINE',
+                  source: val['source']?.toString() ?? 'jiosaavn',
+                  youtubeVideoId: val['youtubeVideoId']?.toString(),
+                );
+                if (!uniqueTracks.containsKey(t.id)) {
+                  uniqueTracks[t.id] = t;
+                }
+              }
+            }
+          }
+        });
+
+        fullTracks.addAll(uniqueTracks.values);
+      } catch (_) {}
+    }
+
+    _cachedDownloadedTracks = tracksMap;
+    _cachedFullDownloadedTracks = fullTracks;
+    _cachedDownloadedArtworkPaths = artMap;
+    _cachedRemoteArtworkUrls = remoteArtMap;
+    _cachedDownloadedIds = idsSet;
+  }
+
+  static bool isTrackDownloaded(String trackId) {
+    if (kIsWeb) return false;
+    _ensureDownloadsCacheLoaded();
+    return _cachedDownloadedIds!.contains(trackId);
+  }
 
   static Map<String, String> getDownloadedTracks() {
     if (kIsWeb) return {};
-    final box = Hive.box(_downloadsBox);
-    final raw = box.get('downloaded_tracks');
-    if (raw == null) return {};
-    try {
-      final Map decoded = jsonDecode(raw.toString()) as Map;
-      final Map<String, String> result = {};
-      decoded.forEach((key, value) {
-        String? path;
-        String? trackId;
-        if (value is Map) {
-          path = value['localPath']?.toString() ?? '';
-          trackId = value['id']?.toString();
-        } else {
-          path = value.toString();
-        }
-        if (path.isNotEmpty && File(path).existsSync() && File(path).lengthSync() > 0) {
-          result[key.toString()] = path;
-          if (trackId != null && trackId.isNotEmpty) {
-            result[trackId] = path;
-          }
-        }
-      });
-      return result;
-    } catch (_) {
-      return {};
-    }
+    _ensureDownloadsCacheLoaded();
+    return Map<String, String>.from(_cachedDownloadedTracks!);
   }
 
   static List<Track> getFullDownloadedTracks() {
     if (kIsWeb) return [];
-    if (!Hive.isBoxOpen(_downloadsBox)) return [];
-    final box = Hive.box(_downloadsBox);
-    final raw = box.get('downloaded_tracks');
-    if (raw == null) return [];
-    try {
-      final Map decoded = jsonDecode(raw.toString()) as Map;
-      final List<Track> tracks = [];
-      decoded.forEach((key, val) {
-        if (val is Map) {
-          final localPath = val['localPath']?.toString() ?? '';
-          if (localPath.isNotEmpty && File(localPath).existsSync() && File(localPath).lengthSync() > 0) {
-            final localArt = val['localArtworkPath']?.toString() ?? '';
-            final remoteArt = val['artworkUrl']?.toString() ?? '';
-
-            // Prioritize valid local artwork file for offline reliability
-            String finalArt = (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0)
-                ? localArt
-                : remoteArt;
-
-            tracks.add(
-              Track(
-                id: val['id']?.toString() ?? key.toString(),
-                title: val['title']?.toString() ?? 'Downloaded Song',
-                artist: val['artist']?.toString() ?? 'Unknown Artist',
-                album: val['album']?.toString() ?? 'Offline',
-                duration: val['duration']?.toString() ?? '3:30',
-                artworkUrl: finalArt,
-                audioUrl: localPath,
-                genre: val['genre']?.toString() ?? 'OFFLINE',
-                source: val['source']?.toString() ?? 'jiosaavn',
-                youtubeVideoId: val['youtubeVideoId']?.toString(),
-              ),
-            );
-          }
-        }
-      });
-      final Map<String, Track> uniqueTracks = {};
-      for (final t in tracks) {
-        if (!uniqueTracks.containsKey(t.id)) {
-          uniqueTracks[t.id] = t;
-        }
-      }
-      return uniqueTracks.values.toList();
-    } catch (_) {
-      return [];
-    }
+    _ensureDownloadsCacheLoaded();
+    return List<Track>.from(_cachedFullDownloadedTracks!);
   }
 
   static String? getDownloadedTrackPath(String trackId, {String? title, String? artist}) {
     if (kIsWeb) return null;
-    final downloads = getDownloadedTracks();
+    _ensureDownloadsCacheLoaded();
+    final downloads = _cachedDownloadedTracks!;
     if (downloads.containsKey(trackId)) {
       return downloads[trackId];
     }
@@ -725,86 +847,56 @@ class StorageService {
     }
 
     // Fallback: search downloaded metadata by matching title and artist
-    if (title != null && title.trim().isNotEmpty && Hive.isBoxOpen(_downloadsBox)) {
-      try {
-        final box = Hive.box(_downloadsBox);
-        final raw = box.get('downloaded_tracks');
-        if (raw != null) {
-          final Map decoded = jsonDecode(raw.toString()) as Map;
-          final cleanTitle = title.trim().toLowerCase();
-          final cleanArtist = artist?.trim().toLowerCase() ?? '';
-          for (final val in decoded.values) {
-            if (val is Map) {
-              final tTitle = val['title']?.toString().trim().toLowerCase() ?? '';
-              final tArtist = val['artist']?.toString().trim().toLowerCase() ?? '';
-              if (tTitle == cleanTitle) {
-                if (cleanArtist.isEmpty || tArtist.isEmpty || tArtist == cleanArtist || tArtist.contains(cleanArtist) || cleanArtist.contains(tArtist)) {
-                  final localPath = val['localPath']?.toString() ?? '';
-                  if (localPath.isNotEmpty && File(localPath).existsSync() && File(localPath).lengthSync() > 0) {
-                    return localPath;
-                  }
-                }
-              }
-            }
+    if (title != null && title.trim().isNotEmpty) {
+      final cleanTitle = title.trim().toLowerCase();
+      final cleanArtist = artist?.trim().toLowerCase() ?? '';
+      for (final t in _cachedFullDownloadedTracks!) {
+        final tTitle = t.title.trim().toLowerCase();
+        final tArtist = t.artist.trim().toLowerCase();
+        if (tTitle == cleanTitle) {
+          if (cleanArtist.isEmpty || tArtist.isEmpty || tArtist == cleanArtist || tArtist.contains(cleanArtist) || cleanArtist.contains(tArtist)) {
+            return t.audioUrl;
           }
         }
-      } catch (_) {}
+      }
     }
     return null;
   }
 
   static String? getRemoteArtworkUrl(String trackId) {
-    if (!Hive.isBoxOpen(_downloadsBox)) return null;
-    final box = Hive.box(_downloadsBox);
-    final raw = box.get('downloaded_tracks');
-    if (raw == null) return null;
-    try {
-      final Map decoded = jsonDecode(raw.toString()) as Map;
-      final val = decoded[trackId];
-      if (val is Map) {
-        final remote = val['artworkUrl']?.toString() ?? '';
-        if (remote.startsWith('http://') || remote.startsWith('https://')) {
-          return remote;
-        }
-      }
-    } catch (_) {}
-    return null;
+    if (kIsWeb) return null;
+    _ensureDownloadsCacheLoaded();
+    var val = _cachedRemoteArtworkUrls![trackId];
+    if (val != null) return val;
+    if (trackId.startsWith('yt_')) {
+      return _cachedRemoteArtworkUrls![trackId.substring(3)];
+    } else {
+      return _cachedRemoteArtworkUrls!['yt_$trackId'];
+    }
   }
 
   static String? getDownloadedArtworkPath(String trackId, {String? title}) {
     if (kIsWeb) return null;
-    if (!Hive.isBoxOpen(_downloadsBox)) return null;
-    final box = Hive.box(_downloadsBox);
-    final raw = box.get('downloaded_tracks');
-    if (raw == null) return null;
-    try {
-      final Map decoded = jsonDecode(raw.toString()) as Map;
-      var val = decoded[trackId];
-      if (val == null && trackId.startsWith('yt_')) {
-        val = decoded[trackId.substring(3)];
-      } else if (val == null) {
-        val = decoded['yt_$trackId'];
-      }
-      if (val is Map) {
-        final localArt = val['localArtworkPath']?.toString() ?? '';
-        if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
-          return localArt;
-        }
-      }
+    _ensureDownloadsCacheLoaded();
+    var val = _cachedDownloadedArtworkPaths![trackId];
+    if (val != null) return val;
+    if (trackId.startsWith('yt_')) {
+      val = _cachedDownloadedArtworkPaths![trackId.substring(3)];
+    } else {
+      val = _cachedDownloadedArtworkPaths!['yt_$trackId'];
+    }
+    if (val != null) return val;
 
-      // Fallback matching by title
-      if (title != null && title.trim().isNotEmpty) {
-        final cleanTitle = title.trim().toLowerCase();
-        for (final item in decoded.values) {
-          if (item is Map && (item['title']?.toString().trim().toLowerCase() == cleanTitle)) {
-            final localArt = item['localArtworkPath']?.toString() ?? '';
-            if (localArt.isNotEmpty && File(localArt).existsSync() && File(localArt).lengthSync() > 0) {
-              return localArt;
-            }
-          }
+    // Fallback matching by title
+    if (title != null && title.trim().isNotEmpty) {
+      final cleanTitle = title.trim().toLowerCase();
+      for (final t in _cachedFullDownloadedTracks!) {
+        if (t.title.trim().toLowerCase() == cleanTitle) {
+          final art = _cachedDownloadedArtworkPaths![t.id];
+          if (art != null) return art;
         }
       }
-    } catch (_) {}
+    }
     return null;
   }
 
@@ -832,6 +924,8 @@ class StorageService {
       'downloadedAt': DateTime.now().toIso8601String(),
     };
     await box.put('downloaded_tracks', jsonEncode(downloads));
+    _invalidateDownloadsCache();
+    _ensureDownloadsCacheLoaded();
   }
 
   static Future<void> deleteDownloadRecord(String trackId) async {
@@ -844,6 +938,8 @@ class StorageService {
         await box.put('downloaded_tracks', jsonEncode(downloads));
       } catch (_) {}
     }
+    _invalidateDownloadsCache();
+    _ensureDownloadsCacheLoaded();
   }
 
   // ── Downloaded Playlists ────────────────────────────────────

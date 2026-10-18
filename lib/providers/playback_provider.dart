@@ -70,6 +70,8 @@ class PlaybackState {
   final Duration? sleepTimerTimeRemaining;
   final bool isSleepTimerEndOfTrack;
 
+  final double volume; // 0.0 to 1.0
+
   // State machine fields
   final PlaybackStatus status;
   final bool playRequested;
@@ -93,6 +95,7 @@ class PlaybackState {
     this.sleepTimerMinutes,
     this.sleepTimerTimeRemaining,
     this.isSleepTimerEndOfTrack = false,
+    this.volume = 1.0,
     this.status = PlaybackStatus.idle,
     this.playRequested = false,
   });
@@ -134,6 +137,7 @@ class PlaybackState {
     int? sleepTimerMinutes,
     Duration? sleepTimerTimeRemaining,
     bool? isSleepTimerEndOfTrack,
+    double? volume,
     PlaybackStatus? status,
     bool? playRequested,
   }) {
@@ -156,6 +160,7 @@ class PlaybackState {
       sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
       sleepTimerTimeRemaining: sleepTimerTimeRemaining ?? this.sleepTimerTimeRemaining,
       isSleepTimerEndOfTrack: isSleepTimerEndOfTrack ?? this.isSleepTimerEndOfTrack,
+      volume: volume ?? this.volume,
       status: status ?? this.status,
       playRequested: playRequested ?? this.playRequested,
     );
@@ -1611,6 +1616,12 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     state = state.copyWith(playbackSpeed: speed);
     _handler.player.setSpeed(speed);
     StorageService.saveSetting('playback_speed', speed);
+  }
+
+  void setVolume(double volume) {
+    final clamped = volume.clamp(0.0, 1.0);
+    state = state.copyWith(volume: clamped);
+    _handler.player.setVolume(clamped);
   }
 
   void toggleVolumeNormalization() {

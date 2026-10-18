@@ -55,27 +55,92 @@ jobs:
 
 
       - name: Setup Android Release Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          KEY_B64="${{ secrets.KEYSTORE_BASE64 }}"
-          STORE_PASS="${{ secrets.ANDROID_STORE_PASSWORD }}"
-          KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}"
-          KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          python3 - << 'EOF'
+          import base64, os, sys, subprocess
 
-          if [ -n "$KEY_B64" ] && [ -n "$STORE_PASS" ]; then
-            echo "Decoding release keystore from secrets..."
-            echo "$KEY_B64" | tr -d '\r\n ' | base64 --decode > android/aura-release-key.jks
-            printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=../aura-release-key.jks\n" "$STORE_PASS" "${KEY_PASS:-$STORE_PASS}" "${KEY_ALIAS:-aura}" > android/key.properties
-            echo "Release keystore configured successfully."
-          else
-            echo "No KEYSTORE_BASE64 or ANDROID_STORE_PASSWORD secret found. Building with debug signing fallback."
-            rm -f android/key.properties android/aura-release-key.jks
-          fi
+          FALLBACK_KEY_B64 = "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"
+
+          raw_secret = os.environ.get("KEYSTORE_BASE64", "").strip()
+          store_pass = os.environ.get("ANDROID_STORE_PASSWORD", "").strip() or "BHanu505verma"
+          key_pass = os.environ.get("ANDROID_KEY_PASSWORD", "").strip() or store_pass
+          key_alias = os.environ.get("ANDROID_KEY_ALIAS", "").strip() or "aura"
+
+          use_fallback = True
+          os.makedirs("android", exist_ok=True)
+          target_path = "android/aura-release-key.jks"
+
+          if raw_secret and raw_secret != "?" and len(raw_secret) > 100:
+              try:
+                  secret_bytes = base64.b64decode(raw_secret)
+                  with open(target_path, "wb") as f:
+                      f.write(secret_bytes)
+                  res = subprocess.run(
+                      ["keytool", "-list", "-keystore", target_path, "-storepass", store_pass, "-alias", key_alias],
+                      capture_output=True, text=True
+                  )
+                  if res.returncode == 0:
+                      print("Custom KEYSTORE_BASE64 verified successfully with keytool.")
+                      use_fallback = False
+                  else:
+                      print(f"Custom KEYSTORE_BASE64 failed verification ({res.stderr.strip()}), falling back to canonical keystore.")
+              except Exception as e:
+                  print(f"Exception decoding KEYSTORE_BASE64 ({e}), falling back to canonical keystore.")
+
+          if use_fallback:
+              print("Writing verified canonical Aura release keystore...")
+              with open(target_path, "wb") as f:
+                  f.write(base64.b64decode(FALLBACK_KEY_B64))
+              store_pass = "BHanu505verma"
+              key_pass = "BHanu505verma"
+              key_alias = "aura"
+
+          with open("android/key.properties", "w", encoding="utf-8") as f:
+              f.write(f"storePassword={store_pass}\n")
+              f.write(f"keyPassword={key_pass}\n")
+              f.write(f"keyAlias={key_alias}\n")
+              f.write("storeFile=../aura-release-key.jks\n")
+
+          print("Keystore and android/key.properties configured successfully.")
+          EOF
+
+      - name: Verify Keystore Certificate Fingerprint
+        run: |
+          echo "Verifying release keystore with keytool..."
+          keytool -list -v -keystore android/aura-release-key.jks -storepass BHanu505verma -alias aura > keystore_info.txt
+          cat keystore_info.txt
+          grep -i "76:53:40:F6:2E:B5:7F:B2:C8:3D:9B:5D:37:39:71:B4:9A:25:1F:0C" keystore_info.txt || {
+            echo "ERROR: Release keystore certificate does NOT match Aura release certificate!"
+            exit 1
+          }
+          echo "Verified: Keystore certificate matches canonical Aura release certificate."
 
       - name: Build Release APK
-        run: flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+        run: |
+          flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation \
+            --build-name=${{ env.VERSION_NAME }} \
+            --build-number=${{ env.VERSION_CODE }} \
+            --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} \
+            --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} \
+            --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
-      - name: Verify APK
-        run: ls -lh build/app/outputs/flutter-apk/
+      - name: Verify Built APK Signing Certificate
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner | sort -V | tail -n 1)
+          echo "Using apksigner: $APKSIGNER"
+          $APKSIGNER verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk > apk_cert_info.txt
+          cat apk_cert_info.txt
+          grep -i "76:53:40:F6:2E:B5:7F:B2:C8:3D:9B:5D:37:39:71:B4:9A:25:1F:0C" apk_cert_info.txt || {
+            echo "CRITICAL ERROR: Release APK was NOT signed with the Aura release certificate!"
+            exit 1
+          }
+          echo "SUCCESS: Release APK signature confirmed identical to Aura release certificate."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

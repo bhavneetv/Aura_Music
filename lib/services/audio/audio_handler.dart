@@ -275,6 +275,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   Future<void> resetForNewTrack() async {
     cancelCrossfade();
 
+    if (kIsWeb) {
+      try { await _activePlayer.stop(); } catch (_) {}
+      try { await _fadePlayer.stop(); } catch (_) {}
+      return;
+    }
+
     // CRITICAL iOS FIX: Use pause() instead of stop() for the outgoing player.
     // Calling stop() on an AVPlayer in the background can cause iOS to aggressively
     // throttle network privileges or drop the audio session, causing the newly
@@ -288,6 +294,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   /// Silently buffers the audio of the upcoming track into the inactive player to eliminate load times.
   Future<void> preloadNextTrack(Track nextTrack) async {
+    if (kIsWeb) return; // Browser autoplay policies and HTML5 Audio elements do not support background preloading
     if (_preloadedTrack?.id == nextTrack.id) return; // Already preloaded
 
     try {
@@ -380,6 +387,33 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       await _ensureAudioSessionActive();
 
       String url = _normalizeUrl(track.audioUrl);
+
+      if (kIsWeb) {
+        // Web: single active player, stop previous song immediately so it never keeps playing, set new source and play
+        _preloadedTrack = null;
+        try { await _activePlayer.stop(); } catch (_) {}
+        try { await _fadePlayer.stop(); } catch (_) {}
+
+        logPlaybackEvent(
+          eventName: 'SET_AUDIO_SOURCE_START_WEB',
+          currentTrackId: track.id,
+          overrideAudioSource: url,
+        );
+
+        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url)));
+        await _activePlayer.setVolume(1.0);
+
+        _activePlayer.play(); // DON'T AWAIT: blocks until song finishes
+        _isTrackTransitioning = false;
+        _broadcastState();
+
+        logPlaybackEvent(
+          eventName: 'PLAY_TRACK_SUCCESS_WEB',
+          currentTrackId: track.id,
+          overrideAudioSource: url,
+        );
+        return;
+      }
 
       if (_preloadedTrack?.id == track.id) {
         logPlaybackEvent(
@@ -651,6 +685,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   // ── AudioSession / App Lifecycle ──────────────────────────────
 
   Future<void> _ensureAudioSessionActive() async {
+    if (kIsWeb) return;
     try {
       final session = await AudioSession.instance;
       final success = await session.setActive(true);
@@ -674,6 +709,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   }
 
   Future<void> _initAudioSession() async {
+    if (kIsWeb) return;
     try {
       final session = await AudioSession.instance;
 

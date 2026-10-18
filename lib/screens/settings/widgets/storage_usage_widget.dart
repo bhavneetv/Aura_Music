@@ -63,6 +63,15 @@ class StorageUsageBreakdown {
 // ============================================================================
 
 class StorageUsageHelper {
+  static StorageUsageBreakdown? _cachedBreakdown;
+  static DateTime? _lastCalculated;
+  static Future<StorageUsageBreakdown>? _inFlightCalculation;
+
+  static void invalidateCache() {
+    _cachedBreakdown = null;
+    _lastCalculated = null;
+  }
+
   static String formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';
     const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -72,7 +81,30 @@ class StorageUsageHelper {
     return '${size.toStringAsFixed(size >= 100 || clampedIndex == 0 ? 0 : 1)} ${suffixes[clampedIndex]}';
   }
 
-  static Future<StorageUsageBreakdown> getBreakdown() async {
+  static Future<StorageUsageBreakdown> getBreakdown({bool forceRefresh = false}) async {
+    if (!forceRefresh &&
+        _cachedBreakdown != null &&
+        _lastCalculated != null &&
+        DateTime.now().difference(_lastCalculated!) < const Duration(seconds: 15)) {
+      return _cachedBreakdown!;
+    }
+
+    if (_inFlightCalculation != null) {
+      return _inFlightCalculation!;
+    }
+
+    _inFlightCalculation = _computeBreakdown();
+    try {
+      final result = await _inFlightCalculation!;
+      _cachedBreakdown = result;
+      _lastCalculated = DateTime.now();
+      return result;
+    } finally {
+      _inFlightCalculation = null;
+    }
+  }
+
+  static Future<StorageUsageBreakdown> _computeBreakdown() async {
     int downloadedMusicBytes = 0;
     int coverBytes = 0;
     int cacheBytes = 0;
@@ -80,30 +112,32 @@ class StorageUsageHelper {
     final Set<String> seenCoverPaths = {};
     String? docDirPath;
 
-    // 1. Calculate physical files in downloads directory
+    // 1. Calculate physical files in downloads directory asynchronously (non-blocking)
     try {
       final docDir = await getApplicationDocumentsDirectory();
       docDirPath = docDir.path;
       final downloadsDir = Directory('${docDir.path}/downloads');
-      if (downloadsDir.existsSync()) {
-        for (final entity in downloadsDir.listSync(recursive: true, followLinks: false)) {
+      if (await downloadsDir.exists()) {
+        await for (final entity in downloadsDir.list(recursive: true, followLinks: false)) {
           if (entity is File) {
-            final len = entity.lengthSync();
-            final name = entity.uri.pathSegments.last.toLowerCase();
-            if (name.endsWith('_cover.jpg') ||
-                name.endsWith('_art.jpg') ||
-                name.endsWith('.jpg') ||
-                name.endsWith('.jpeg') ||
-                name.endsWith('.png') ||
-                name.endsWith('.webp')) {
-              coverBytes += len;
-              seenCoverPaths.add(entity.path);
-            } else {
-              downloadedMusicBytes += len;
-              final dotIdx = name.lastIndexOf('.');
-              final trackId = dotIdx > 0 ? name.substring(0, dotIdx) : name;
-              trackSizeBytes[trackId] = (trackSizeBytes[trackId] ?? 0) + len;
-            }
+            try {
+              final len = await entity.length();
+              final name = entity.uri.pathSegments.last.toLowerCase();
+              if (name.endsWith('_cover.jpg') ||
+                  name.endsWith('_art.jpg') ||
+                  name.endsWith('.jpg') ||
+                  name.endsWith('.jpeg') ||
+                  name.endsWith('.png') ||
+                  name.endsWith('.webp')) {
+                coverBytes += len;
+                seenCoverPaths.add(entity.path);
+              } else {
+                downloadedMusicBytes += len;
+                final dotIdx = name.lastIndexOf('.');
+                final trackId = dotIdx > 0 ? name.substring(0, dotIdx) : name;
+                trackSizeBytes[trackId] = (trackSizeBytes[trackId] ?? 0) + len;
+              }
+            } catch (_) {}
           }
         }
       }
@@ -117,23 +151,27 @@ class StorageUsageHelper {
         final artPath = StorageService.getDownloadedArtworkPath(trackId);
         if (artPath != null && !seenCoverPaths.contains(artPath)) {
           final artFile = File(artPath);
-          if (artFile.existsSync()) {
-            final artLen = artFile.lengthSync();
-            coverBytes += artLen;
-            seenCoverPaths.add(artPath);
-            trackSizeBytes[trackId] = (trackSizeBytes[trackId] ?? 0) + artLen;
+          if (await artFile.exists()) {
+            try {
+              final artLen = await artFile.length();
+              coverBytes += artLen;
+              seenCoverPaths.add(artPath);
+              trackSizeBytes[trackId] = (trackSizeBytes[trackId] ?? 0) + artLen;
+            } catch (_) {}
           }
         }
       }
     } catch (_) {}
 
-    // 3. Cache and temporary directory
+    // 3. Cache and temporary directory asynchronously
     try {
       final tempDir = await getTemporaryDirectory();
-      if (tempDir.existsSync()) {
-        for (final entity in tempDir.listSync(recursive: true, followLinks: false)) {
+      if (await tempDir.exists()) {
+        await for (final entity in tempDir.list(recursive: true, followLinks: false)) {
           if (entity is File) {
-            cacheBytes += entity.lengthSync();
+            try {
+              cacheBytes += await entity.length();
+            } catch (_) {}
           }
         }
       }
@@ -167,7 +205,7 @@ class StorageUsageHelper {
             if (isDown) {
               plDownloadedIds.add(tId);
               countedTrackIds.add(tId);
-              plBytes += trackSizeBytes[tId] ?? _safeTrackSize(tId, docDirPath);
+              plBytes += trackSizeBytes[tId] ?? (trackSizeBytes['yt_$tId'] ?? _safeTrackSize(tId, docDirPath));
             }
           }
         }
@@ -206,7 +244,7 @@ class StorageUsageHelper {
           if (tId != null) {
             plDownloadedIds.add(tId);
             countedTrackIds.add(tId);
-            plBytes += trackSizeBytes[tId] ?? _safeTrackSize(tId, docDirPath);
+            plBytes += trackSizeBytes[tId] ?? (trackSizeBytes['yt_$tId'] ?? _safeTrackSize(tId, docDirPath));
           }
         }
 
@@ -232,7 +270,7 @@ class StorageUsageHelper {
         if (DownloadService.instance.isDownloaded(t.id) || trackSizeBytes.containsKey(t.id)) {
           favDownloadedIds.add(t.id);
           countedTrackIds.add(t.id);
-          favBytes += trackSizeBytes[t.id] ?? _safeTrackSize(t.id, docDirPath);
+          favBytes += trackSizeBytes[t.id] ?? (trackSizeBytes['yt_${t.id}'] ?? _safeTrackSize(t.id, docDirPath));
         }
       }
       if (favDownloadedIds.isNotEmpty) {
@@ -258,7 +296,7 @@ class StorageUsageHelper {
         final otherIds = <String>[];
         for (final t in remainingTracks) {
           otherIds.add(t.id);
-          otherBytes += trackSizeBytes[t.id] ?? _safeTrackSize(t.id, docDirPath);
+          otherBytes += trackSizeBytes[t.id] ?? (trackSizeBytes['yt_${t.id}'] ?? _safeTrackSize(t.id, docDirPath));
         }
         if (otherBytes > 0) {
           playlistDetails.add(PlaylistStorageDetail(
@@ -308,8 +346,8 @@ class StorageUsageHelper {
   static Future<void> clearTemporaryCache() async {
     try {
       final tempDir = await getTemporaryDirectory();
-      if (tempDir.existsSync()) {
-        for (final entity in tempDir.listSync(recursive: false, followLinks: false)) {
+      if (await tempDir.exists()) {
+        await for (final entity in tempDir.list(recursive: false, followLinks: false)) {
           try {
             if (entity is File) {
               await entity.delete();
@@ -320,6 +358,7 @@ class StorageUsageHelper {
         }
       }
     } catch (_) {}
+    invalidateCache();
   }
 }
 
@@ -338,6 +377,7 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
   StorageUsageBreakdown? _breakdown;
   bool _isLoading = true;
   bool _isClearingCache = false;
+  DateTime? _lastDownloadNotification;
 
   @override
   void initState() {
@@ -353,14 +393,20 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
   }
 
   void _onDownloadChange() {
-    if (mounted) {
-      _loadStorageUsage();
+    if (!mounted) return;
+    final now = DateTime.now();
+    // Throttle during active file downloads
+    if (_lastDownloadNotification != null &&
+        now.difference(_lastDownloadNotification!) < const Duration(seconds: 4)) {
+      return;
     }
+    _lastDownloadNotification = now;
+    _loadStorageUsage(forceRefresh: true);
   }
 
-  Future<void> _loadStorageUsage() async {
+  Future<void> _loadStorageUsage({bool forceRefresh = false}) async {
     try {
-      final data = await StorageUsageHelper.getBreakdown();
+      final data = await StorageUsageHelper.getBreakdown(forceRefresh: forceRefresh);
       if (mounted) {
         setState(() {
           _breakdown = data;
@@ -387,7 +433,7 @@ class _AuraStorageUsageCardState extends ConsumerState<AuraStorageUsageCard> {
   Future<void> _handleClearCache() async {
     setState(() => _isClearingCache = true);
     await StorageUsageHelper.clearTemporaryCache();
-    await _loadStorageUsage();
+    await _loadStorageUsage(forceRefresh: true);
     if (mounted) {
       setState(() => _isClearingCache = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -749,7 +795,7 @@ class _DownloadedPlaylistsStorageModalState
   }
 
   Future<void> _refreshData() async {
-    final updated = await StorageUsageHelper.getBreakdown();
+    final updated = await StorageUsageHelper.getBreakdown(forceRefresh: true);
     if (mounted) {
       setState(() => _currentBreakdown = updated);
       widget.onStorageChanged();
