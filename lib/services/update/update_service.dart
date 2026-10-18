@@ -42,42 +42,35 @@ class UpdateService {
   }
 
   /// Checks GitHub for new releases and shows a dialog if an update is found.
-  /// Set [silentIfLatest] to true if manually triggering from Settings.
+  /// Set [manualCheck] to true when triggered manually (e.g. from Settings) so
+  /// the update dialog with "Download & Install" is always displayed, even if
+  /// the current installed version is already the latest.
   static Future<void> checkForUpdates(
     BuildContext context, {
+    bool manualCheck = false,
     bool silentIfLatest = false,
   }) async {
     if (kIsWeb) return;
 
-    // Network connectivity check
-    try {
-      final result = await InternetAddress.lookup('example.com')
-          .timeout(const Duration(seconds: 3));
-      if (result.isEmpty || result[0].rawAddress.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Offline mode active: Cannot check for updates.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Offline mode active: Cannot check for updates.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      return;
+    if (manualCheck && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Checking for updates...'),
+          duration: Duration(milliseconds: 1200),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
 
     try {
-      final response = await Dio().get(
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+        ),
+      );
+
+      final response = await dio.get(
         _apiUrl,
         options: Options(
           headers: {
@@ -90,7 +83,7 @@ class UpdateService {
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data as Map<String, dynamic>;
 
-        // Extract raw tag version (e.g., "v7.1" or "7.1")
+        // Extract raw tag version (e.g., "v7.0.1" or "7.0.1")
         final rawTagName = data['tag_name']?.toString() ?? '';
         final latestVersion = rawTagName.replaceAll(RegExp(r'[^0-9.]'), '');
 
@@ -112,31 +105,58 @@ class UpdateService {
           }
         }
 
-        // Compare current app version with latest GitHub release version
-        if (_isVersionGreater(latestVersion, currentVersion)) {
+        // Ensure Android download URL points directly to an APK
+        if (!downloadUrl.endsWith('.apk')) {
+          final tagForUrl = rawTagName.isNotEmpty ? rawTagName : latestVersion;
+          downloadUrl =
+              'https://github.com/$githubOwner/$githubRepo/releases/download/$tagForUrl/app-release.apk';
+        }
+
+        final isUpdateAvailable = _isVersionGreater(latestVersion, currentVersion);
+
+        // Always show the update dialog with Download & Install if an update is found OR if user manually checked
+        if (isUpdateAvailable || manualCheck) {
           if (context.mounted) {
             _showUpdateDialog(
               context,
-              latestVersion: latestVersion,
+              latestVersion: latestVersion.isNotEmpty ? latestVersion : currentVersion,
               releaseName: releaseName,
               releaseNotes: releaseNotes,
               downloadUrl: downloadUrl,
+              isUpdateAvailable: isUpdateAvailable,
             );
           }
-        } else if (silentIfLatest) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('You are already on the latest version!'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
+        } else if (silentIfLatest && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You are already on the latest version!'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
+      } else {
+        throw Exception('GitHub API returned status ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('GitHub Release update check failed: $e');
-      if (silentIfLatest && context.mounted) {
+      if (manualCheck && context.mounted) {
+        // Fall back gracefully so manual check in Settings ALWAYS displays the update dialog with Download & Install
+        final fallbackTag = AppVersionService.releaseTag.replaceAll(RegExp(r'[^0-9.]'), '');
+        final tagForUrl = AppVersionService.releaseTag.startsWith('v')
+            ? AppVersionService.releaseTag.substring(1)
+            : AppVersionService.releaseTag;
+        final fallbackUrl =
+            'https://github.com/$githubOwner/$githubRepo/releases/download/$tagForUrl/app-release.apk';
+
+        _showUpdateDialog(
+          context,
+          latestVersion: fallbackTag.isNotEmpty ? fallbackTag : '7.0.1',
+          releaseName: AppVersionService.releaseName,
+          releaseNotes: 'Tap "Download & Install" below to fetch the latest APK build directly from GitHub.',
+          downloadUrl: fallbackUrl,
+          isUpdateAvailable: false,
+        );
+      } else if (silentIfLatest && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not check for updates: $e'),
@@ -175,6 +195,7 @@ class UpdateService {
     required String releaseName,
     required String releaseNotes,
     required String downloadUrl,
+    bool isUpdateAvailable = true,
   }) {
     showDialog(
       context: context,
@@ -188,17 +209,21 @@ class UpdateService {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           backgroundColor: theme.colorScheme.surface,
           contentPadding: const EdgeInsets.all(24),
+          actionsOverflowButtonSpacing: 8,
+          actionsAlignment: MainAxisAlignment.end,
           title: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.15),
+                  color: isUpdateAvailable
+                      ? accentColor.withValues(alpha: 0.15)
+                      : Colors.green.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  Icons.system_update_rounded,
-                  color: accentColor,
+                  isUpdateAvailable ? Icons.system_update_rounded : Icons.check_circle_rounded,
+                  color: isUpdateAvailable ? accentColor : Colors.green,
                   size: 28,
                 ),
               ),
@@ -207,16 +232,18 @@ class UpdateService {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Update Available',
-                      style: TextStyle(
+                    Text(
+                      isUpdateAvailable ? 'Update Available' : 'App is Up to Date',
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Version $latestVersion is out!',
+                      isUpdateAvailable
+                          ? 'Version $latestVersion is out! (Current: v$currentVersion)'
+                          : 'Installed: v$currentVersion • Latest: v$latestVersion',
                       style: TextStyle(
                         fontSize: 13,
                         color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
@@ -267,7 +294,7 @@ class UpdateService {
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: Text(
-                'Later',
+                isUpdateAvailable ? 'Later' : 'Close',
                 style: TextStyle(color: theme.textTheme.bodySmall?.color),
               ),
             ),
@@ -588,6 +615,8 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
           ],
         ],
       ),
+      actionsOverflowButtonSpacing: 8,
+      actionsAlignment: MainAxisAlignment.end,
       actions: [
         if (_isDownloading)
           TextButton(
@@ -604,9 +633,21 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              'Dismiss',
+              'Close',
               style: TextStyle(color: theme.textTheme.bodySmall?.color),
             ),
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.download_for_offline_rounded, size: 16),
+            label: const Text(
+              'Download Again',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _startDownload,
           ),
           ElevatedButton.icon(
             icon: const Icon(Icons.install_mobile_rounded, size: 18, color: Colors.white),
@@ -635,9 +676,9 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
             ),
           ),
           ElevatedButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
+            icon: const Icon(Icons.download_for_offline_rounded, size: 18, color: Colors.white),
             label: const Text(
-              'Retry',
+              'Download & Install',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
             ),
             style: ElevatedButton.styleFrom(
