@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+// ignore: undefined_hidden_name
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:palette_generator/palette_generator.dart';
