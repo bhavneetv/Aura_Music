@@ -457,7 +457,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Check for updates',
               subtitle: 'Check GitHub for the latest release',
               accent: accent,
-              onTap: () => UpdateService.checkForUpdates(context, manualCheck: true),
+              onTap: () => UpdateService.checkForUpdates(context, silentIfLatest: true),
             ),
             _SettingsRow(
               icon: Icons.qr_code_2_rounded,
