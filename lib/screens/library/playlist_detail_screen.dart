@@ -560,6 +560,7 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
     if (!AuthService.instance.isLoggedIn) {
       await AuthService.instance.ensureAnonymousSession();
     }
+    if (!mounted) return;
 
     final currentUserId = AuthService.instance.currentUserId;
     final currentAuthor = AuthService.instance.currentUserName.isNotEmpty

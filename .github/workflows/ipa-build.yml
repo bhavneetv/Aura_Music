@@ -47,7 +47,21 @@ jobs:
           python3 -c "import base64, os; open('ios/Runner/GoogleService-Info.plist', 'wb').write(base64.b64decode(os.environ.get('B64_DATA', '').strip()))"
           ls -lh ios/Runner/GoogleService-Info.plist
 
+      - name: Configure iOS Signing Overrides
+        run: |
+          TEAM_ID="${{ secrets.APPLE_DEVELOPMENT_TEAM || '0000000000' }}"
+          echo "Setting fallback Development Team: $TEAM_ID"
+          echo "DEVELOPMENT_TEAM=$TEAM_ID" >> $GITHUB_ENV
+          echo "FLUTTER_XCODE_DEVELOPMENT_TEAM=$TEAM_ID" >> $GITHUB_ENV
+          echo "CODE_SIGNING_ALLOWED=NO" >> $GITHUB_ENV
+          echo "CODE_SIGNING_REQUIRED=NO" >> $GITHUB_ENV
+
       - name: Build Unsigned iOS App
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM || '0000000000' }}
+          FLUTTER_XCODE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM || '0000000000' }}
+          CODE_SIGNING_ALLOWED: 'NO'
+          CODE_SIGNING_REQUIRED: 'NO'
         run: |
           flutter build ios --release --no-codesign --no-tree-shake-icons --build-name=${{ env.VERSION_NAME }} --build-number=${{ env.VERSION_CODE }} --dart-define=GROQ_KEY=${{ secrets.GROQ_KEY }} --dart-define=GROQ_KEY_2=${{ secrets.GROQ_KEY_2 }} --dart-define=GEMINI_KEY=${{ secrets.GEMINI_KEY }}
 
