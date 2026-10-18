@@ -136,7 +136,9 @@ jobs:
           echo "Using apksigner: $APKSIGNER"
           $APKSIGNER verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk > apk_cert_info.txt
           cat apk_cert_info.txt
-          grep -i "76:53:40:F6:2E:B5:7F:B2:C8:3D:9B:5D:37:39:71:B4:9A:25:1F:0C" apk_cert_info.txt || {
+          grep -i "765340f62eb57fb2c83d9b5d373971b49a251f0c" apk_cert_info.txt || \
+          grep -i "76:53:40:F6:2E:B5:7F:B2:C8:3D:9B:5D:37:39:71:B4:9A:25:1F:0C" apk_cert_info.txt || \
+          grep -i "ce503272528843d6054c0288a3269e13de2bbac2ee98af1fc6e38a740f2c4367" apk_cert_info.txt || {
             echo "CRITICAL ERROR: Release APK was NOT signed with the Aura release certificate!"
             exit 1
           }
