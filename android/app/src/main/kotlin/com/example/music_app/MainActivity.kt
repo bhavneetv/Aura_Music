@@ -5,13 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : AudioServiceActivity() {
     private val CHANNEL = "com.example.music_app/voice_assistant"
+    private val INSTALLER_CHANNEL = "com.example.music_app/app_installer"
     private var methodChannel: MethodChannel? = null
     private var pendingVoiceQuery: String? = null
     private var pendingDeepLink: String? = null
@@ -30,6 +35,45 @@ class MainActivity : AudioServiceActivity() {
                 pendingDeepLink = null
             } else {
                 result.notImplemented()
+            }
+        }
+
+        val installerChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INSTALLER_CHANNEL)
+        installerChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "canRequestPackageInstalls" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        result.success(packageManager.canRequestPackageInstalls())
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "openInstallPermissionSettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            result.error("SETTINGS_ERROR", e.localizedMessage, null)
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        installApk(filePath, result)
+                    } else {
+                        result.error("INVALID_PATH", "File path is null", null)
+                    }
+                }
+                else -> result.notImplemented()
             }
         }
 
@@ -108,5 +152,37 @@ class MainActivity : AudioServiceActivity() {
 
     private fun sendDeepLinkToFlutter(link: String) {
         methodChannel?.invokeMethod("onDeepLink", mapOf("link" to link))
+    }
+
+    private fun installApk(filePath: String, result: MethodChannel.Result) {
+        try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                result.error("FILE_NOT_FOUND", "APK file not found at $filePath", null)
+                return
+            }
+
+            val apkUri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                FileProvider.getUriForFile(
+                    applicationContext,
+                    "${applicationContext.packageName}.fileProvider",
+                    file
+                )
+            } else {
+                Uri.fromFile(file)
+            }
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            result.error("INSTALL_ERROR", e.localizedMessage, null)
+        }
     }
 }
