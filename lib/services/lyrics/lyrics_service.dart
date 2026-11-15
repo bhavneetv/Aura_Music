@@ -140,6 +140,8 @@ class LyricsService {
   LyricsService._internal();
 
   final Dio _dio = Dio();
+  final Map<String, LyricsResult> _memCache = {};
+  final Map<String, Future<LyricsResult>> _inFlight = {};
 
   int _parseDurationSeconds(String durationStr) {
     try {
@@ -151,7 +153,35 @@ class LyricsService {
     return 180;
   }
 
-  /// Fetches lyrics for a track from LRCLIB with local Hive caching.
+  /// Cleans track title by stripping visualizer/video/remaster/feature noise
+  static String cleanTrackTitle(String title) {
+    var t = title.trim();
+    t = t.replaceAll(
+      RegExp(
+        r'\s*[\(\[](?:from\s+.*?|official\s*(?:video|audio|music\s*video|lyric\s*video)?|lyrics?|remastered(?:\s*\d+)?|live|radio\s*edit|slowed\s*\+?\s*reverb|lofi\s*mix|acoustic|audio|visualizer)[\)\]]',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    t = t.replaceAll(RegExp(r'\s*[\(\[](?:feat\.|ft\.|featuring).*?[\)\]]', caseSensitive: false), '');
+    t = t.replaceAll(RegExp(r'\s+(?:feat\.|ft\.|featuring)\s+.*$', caseSensitive: false), '');
+    t = t.replaceAll(RegExp(r'\s+-\s+(?:remix|remastered|live|radio edit|original motion picture soundtrack|soundtrack).*$', caseSensitive: false), '');
+    t = t.trim();
+    if (t.isEmpty) {
+      final firstPart = title.split('(').first.trim();
+      t = firstPart.isNotEmpty ? firstPart : title.trim();
+    }
+    return t;
+  }
+
+  /// Cleans artist name by extracting primary artist
+  static String cleanArtistName(String artist) {
+    var a = artist.trim();
+    final first = a.split(RegExp(r'[,/&]|(?:\s+feat\.?\s+)|\s+ft\.?\s+', caseSensitive: false)).first.trim();
+    return first.isNotEmpty ? first : a;
+  }
+
+  /// Fetches lyrics for a track from LRCLIB with tiered fast search and local Hive caching.
   Future<LyricsResult> fetchLyrics({
     required String trackId,
     required String title,
@@ -160,123 +190,192 @@ class LyricsService {
     required String durationStr,
     bool forceRefresh = false,
   }) async {
-    // 1. Check local Hive cache
+    // 1. Fast in-memory check
+    if (!forceRefresh) {
+      final inMemory = _memCache[trackId];
+      if (inMemory != null && inMemory.hasLyrics) {
+        return inMemory;
+      }
+    }
+
+    // 2. In-flight request deduplication
+    if (!forceRefresh && _inFlight.containsKey(trackId)) {
+      return _inFlight[trackId]!;
+    }
+
+    final future = _doFetchLyrics(
+      trackId: trackId,
+      title: title,
+      artist: artist,
+      album: album,
+      durationStr: durationStr,
+      forceRefresh: forceRefresh,
+    );
+
+    _inFlight[trackId] = future;
+    try {
+      final res = await future;
+      return res;
+    } finally {
+      _inFlight.remove(trackId);
+    }
+  }
+
+  Future<LyricsResult> _doFetchLyrics({
+    required String trackId,
+    required String title,
+    required String artist,
+    required String album,
+    required String durationStr,
+    required bool forceRefresh,
+  }) async {
+    // Check local Hive cache
     if (!forceRefresh) {
       final cached = StorageService.getLyrics(trackId);
       if (cached != null) {
-        return LyricsResult.fromJson(cached);
+        final res = LyricsResult.fromJson(cached);
+        if (res.hasLyrics) {
+          _memCache[trackId] = res;
+          return res;
+        }
       }
     }
 
     final durationSec = _parseDurationSeconds(durationStr);
-    final cleanTitle = title.split('(').first.split('-').first.trim();
-    final cleanArtist = artist.split(',').first.trim();
-    final cleanAlbum = album.trim();
+    final cleanTitle = cleanTrackTitle(title);
+    final cleanArtist = cleanArtistName(artist);
 
+    // Tier 1: Try exact GET match without forcing album_name (albums often mismatch across providers)
     try {
-      // 2. Try exact GET match
       final getUri = Uri.https('lrclib.net', '/api/get', {
         'track_name': cleanTitle,
         'artist_name': cleanArtist,
-        if (cleanAlbum.isNotEmpty && cleanAlbum != 'Single') 'album_name': cleanAlbum,
-        'duration': durationSec.toString(),
+        if (durationSec > 0) 'duration': durationSec.toString(),
       });
 
       final response = await _dio.get(
         getUri.toString(),
         options: Options(
-          receiveTimeout: const Duration(seconds: 5),
-          sendTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(milliseconds: 2500),
+          sendTimeout: const Duration(milliseconds: 2000),
         ),
       );
 
       if (response.statusCode == 200 && response.data != null) {
         final result = _parseLrclibObject(response.data);
         if (result != null && result.hasLyrics) {
+          _memCache[trackId] = result;
           await StorageService.saveLyrics(trackId, result.toJson());
           return result;
         }
       }
     } catch (_) {}
 
+    // Tier 2: Try fast full-text search with title + artist
     try {
-      // 3. Try search endpoint fallback
       final searchUri = Uri.https('lrclib.net', '/api/search', {
-        'track_name': cleanTitle,
-        'artist_name': cleanArtist,
+        'q': '$cleanTitle $cleanArtist'.trim(),
       });
 
       final response = await _dio.get(
         searchUri.toString(),
         options: Options(
-          receiveTimeout: const Duration(seconds: 6),
-          sendTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(milliseconds: 3000),
+          sendTimeout: const Duration(milliseconds: 2000),
         ),
       );
 
       if (response.statusCode == 200 && response.data is List) {
-        final rawList = response.data as List;
-        final candidates = <LyricsCandidate>[];
-
-        for (var i = 0; i < rawList.length; i++) {
-          final item = rawList[i];
-          if (item is Map) {
-            final syncedStr = item['syncedLyrics']?.toString();
-            final plainStr = item['plainLyrics']?.toString();
-            final isInstrumental = item['instrumental'] == true;
-
-            if (isInstrumental || (syncedStr != null && syncedStr.isNotEmpty) || (plainStr != null && plainStr.isNotEmpty)) {
-              String label = 'Option ${candidates.length + 1}';
-              final albumName = item['albumName']?.toString() ?? '';
-              if (albumName.isNotEmpty) {
-                label = '$albumName (${candidates.length + 1})';
-              }
-              candidates.add(LyricsCandidate(
-                id: (item['id'] as num?)?.toInt() ?? i,
-                trackName: item['trackName']?.toString() ?? '',
-                artistName: item['artistName']?.toString() ?? '',
-                albumName: albumName,
-                duration: (item['duration'] as num?)?.toDouble() ?? 0.0,
-                instrumental: isInstrumental,
-                syncedLyrics: syncedStr,
-                plainLyrics: plainStr,
-                languageLabel: label,
-              ));
-            }
-          }
-        }
-
-        if (candidates.isNotEmpty) {
-          // Sort candidates by closest duration match
-          candidates.sort((a, b) {
-            final diffA = (a.duration - durationSec).abs();
-            final diffB = (b.duration - durationSec).abs();
-            return diffA.compareTo(diffB);
-          });
-
-          final best = candidates.first;
-          List<LyricLine>? syncedLines;
-          if (best.syncedLyrics != null && best.syncedLyrics!.isNotEmpty) {
-            syncedLines = parseLrc(best.syncedLyrics!);
-          }
-
-          final result = LyricsResult(
-            synced: syncedLines,
-            plain: best.plainLyrics,
-            instrumental: best.instrumental,
-            candidates: candidates,
-          );
-
+        final result = _parseCandidateList(response.data as List, durationSec);
+        if (result != null && result.hasLyrics) {
+          _memCache[trackId] = result;
           await StorageService.saveLyrics(trackId, result.toJson());
           return result;
         }
       }
     } catch (_) {}
 
-    // 4. Return empty result if nothing found
+    // Tier 3: Try search with just clean title if title was modified or artist had special credits
+    try {
+      final searchUri = Uri.https('lrclib.net', '/api/search', {
+        'q': cleanTitle,
+      });
+
+      final response = await _dio.get(
+        searchUri.toString(),
+        options: Options(
+          receiveTimeout: const Duration(milliseconds: 2500),
+          sendTimeout: const Duration(milliseconds: 2000),
+        ),
+      );
+
+      if (response.statusCode == 200 && response.data is List) {
+        final result = _parseCandidateList(response.data as List, durationSec);
+        if (result != null && result.hasLyrics) {
+          _memCache[trackId] = result;
+          await StorageService.saveLyrics(trackId, result.toJson());
+          return result;
+        }
+      }
+    } catch (_) {}
+
+    // Return empty result without corrupting Hive cache with an empty entry
     final emptyResult = LyricsResult();
-    await StorageService.saveLyrics(trackId, emptyResult.toJson());
     return emptyResult;
+  }
+
+  LyricsResult? _parseCandidateList(List rawList, int durationSec) {
+    final candidates = <LyricsCandidate>[];
+
+    for (var i = 0; i < rawList.length; i++) {
+      final item = rawList[i];
+      if (item is Map) {
+        final syncedStr = item['syncedLyrics']?.toString();
+        final plainStr = item['plainLyrics']?.toString();
+        final isInstrumental = item['instrumental'] == true;
+
+        if (isInstrumental || (syncedStr != null && syncedStr.isNotEmpty) || (plainStr != null && plainStr.isNotEmpty)) {
+          String label = 'Option ${candidates.length + 1}';
+          final albumName = item['albumName']?.toString() ?? '';
+          if (albumName.isNotEmpty) {
+            label = '$albumName (${candidates.length + 1})';
+          }
+          candidates.add(LyricsCandidate(
+            id: (item['id'] as num?)?.toInt() ?? i,
+            trackName: item['trackName']?.toString() ?? '',
+            artistName: item['artistName']?.toString() ?? '',
+            albumName: albumName,
+            duration: (item['duration'] as num?)?.toDouble() ?? 0.0,
+            instrumental: isInstrumental,
+            syncedLyrics: syncedStr,
+            plainLyrics: plainStr,
+            languageLabel: label,
+          ));
+        }
+      }
+    }
+
+    if (candidates.isEmpty) return null;
+
+    // Sort candidates by closest duration match
+    candidates.sort((a, b) {
+      final diffA = (a.duration - durationSec).abs();
+      final diffB = (b.duration - durationSec).abs();
+      return diffA.compareTo(diffB);
+    });
+
+    final best = candidates.first;
+    List<LyricLine>? syncedLines;
+    if (best.syncedLyrics != null && best.syncedLyrics!.isNotEmpty) {
+      syncedLines = parseLrc(best.syncedLyrics!);
+    }
+
+    return LyricsResult(
+      synced: syncedLines,
+      plain: best.plainLyrics,
+      instrumental: best.instrumental,
+      candidates: candidates,
+    );
   }
 
   LyricsResult? _parseLrclibObject(dynamic data) {

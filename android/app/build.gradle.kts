@@ -98,14 +98,14 @@ android {
         } else if (flutter.versionCode > 0) {
             flutter.versionCode
         } else {
-            70
+            71
         }
         versionName = if (versionPropertiesFile.exists() && versionProperties.containsKey("VERSION_NAME")) {
             (versionProperties["VERSION_NAME"] as String).trim()
         } else if (!flutter.versionName.isNullOrBlank()) {
             flutter.versionName
         } else {
-            "7.0"
+            "7.1"
         }
     }
 

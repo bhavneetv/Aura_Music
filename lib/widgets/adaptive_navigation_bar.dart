@@ -271,6 +271,8 @@ class AdaptiveNavigationBar extends StatelessWidget {
             // Stays a compact, sleek floating capsule
             constraints: const BoxConstraints(maxWidth: 345),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
                   child: _GlassTabCapsule(
@@ -529,30 +531,36 @@ class _GlassSearchButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return SizedBox(
-      width: _barHeight,
-      height: _barHeight,
-      child: _Glass(
-        radius: _barHeight / 2,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(3.5),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 220),
-                opacity: isSelected ? 1.0 : 0.0,
-                child: _Lens(accent: accent, isDark: isDark),
-              ),
+    return SizedBox.square(
+      dimension: _barHeight,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: 1.0,
+          child: _Glass(
+            isCircle: true,
+            radius: _barHeight / 2,
+            child: Stack(
+              fit: StackFit.expand,
+              alignment: Alignment.center,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(3.5),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    opacity: isSelected ? 1.0 : 0.0,
+                    child: _Lens(accent: accent, isDark: isDark, isCircle: true),
+                  ),
+                ),
+                _GlassTab(
+                  spec: spec,
+                  isSelected: isSelected,
+                  accent: accent,
+                  showLabel: false,
+                  onTap: onTap,
+                ),
+              ],
             ),
-            _GlassTab(
-              spec: spec,
-              isSelected: isSelected,
-              accent: accent,
-              showLabel: false,
-              onTap: onTap,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -561,10 +569,15 @@ class _GlassSearchButton extends StatelessWidget {
 
 /// The highlight behind the selected tab: a lighter, accent-tinted bubble.
 class _Lens extends StatelessWidget {
-  const _Lens({required this.accent, required this.isDark});
+  const _Lens({
+    required this.accent,
+    required this.isDark,
+    this.isCircle = false,
+  });
 
   final Color accent;
   final bool isDark;
+  final bool isCircle;
 
   @override
   Widget build(BuildContext context) {
@@ -573,7 +586,8 @@ class _Lens extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Color.alphaBlend(accent.withValues(alpha: 0.17), base),
-        borderRadius: BorderRadius.circular(100),
+        shape: isCircle ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: isCircle ? null : BorderRadius.circular(100),
         border: Border.all(
           color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.55),
           width: 0.8,
@@ -687,10 +701,15 @@ class _GlassTabState extends State<_GlassTab> {
 /// The tint and the rim are painted on top of the blur. (Before, the border
 /// was painted underneath it, so the blur smeared it away.)
 class _Glass extends StatelessWidget {
-  const _Glass({required this.radius, required this.child});
+  const _Glass({
+    required this.radius,
+    required this.child,
+    this.isCircle = false,
+  });
 
   final double radius;
   final Widget child;
+  final bool isCircle;
 
   @override
   Widget build(BuildContext context) {
@@ -698,120 +717,209 @@ class _Glass extends StatelessWidget {
     final fill = isDark ? const Color(0xFF1B1B1F).withValues(alpha: 0.58) : Colors.white.withValues(alpha: 0.64);
 
     return CustomPaint(
-      painter: _GlassShadowPainter(radius: radius, isDark: isDark),
-      foregroundPainter: _GlassRimPainter(radius: radius, isDark: isDark),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-          child: DecoratedBox(
-            decoration: BoxDecoration(color: fill),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.white.withValues(alpha: isDark ? 0.10 : 0.45),
-                    Colors.white.withValues(alpha: 0),
-                  ],
-                  stops: const [0.0, 0.5],
+      painter: _GlassShadowPainter(radius: radius, isDark: isDark, isCircle: isCircle),
+      foregroundPainter: _GlassRimPainter(radius: radius, isDark: isDark, isCircle: isCircle),
+      child: isCircle
+          ? ClipOval(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.white.withValues(alpha: isDark ? 0.10 : 0.45),
+                          Colors.white.withValues(alpha: 0),
+                        ],
+                        stops: const [0.0, 0.5],
+                      ),
+                    ),
+                    child: child,
+                  ),
                 ),
               ),
-              child: child,
+            )
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: fill),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.white.withValues(alpha: isDark ? 0.10 : 0.45),
+                          Colors.white.withValues(alpha: 0),
+                        ],
+                        stops: const [0.0, 0.5],
+                      ),
+                    ),
+                    child: child,
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }
 
 /// Shadow drawn only outside the shape, so it never darkens the glass itself.
 class _GlassShadowPainter extends CustomPainter {
-  const _GlassShadowPainter({required this.radius, required this.isDark});
+  const _GlassShadowPainter({
+    required this.radius,
+    required this.isDark,
+    this.isCircle = false,
+  });
 
   final double radius;
   final bool isDark;
+  final bool isCircle;
 
   @override
   void paint(Canvas canvas, Size size) {
     const blur = 18.0;
     const offset = Offset(0, 8);
     final rect = Offset.zero & size;
-    final shape = RRect.fromRectAndRadius(rect, Radius.circular(radius));
 
     canvas.save();
-    canvas.clipPath(
-      Path()
-        ..fillType = PathFillType.evenOdd
-        ..addRect(rect.inflate(blur * 3 + offset.dy))
-        ..addRRect(shape),
-    );
-    canvas.drawRRect(
-      shape.shift(offset),
-      Paint()
-        ..color = Colors.black.withValues(alpha: isDark ? 0.45 : 0.16)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, blur),
-    );
+    if (isCircle) {
+      final center = rect.center;
+      final circleRadius = math.min(size.width, size.height) / 2;
+      canvas.clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect(rect.inflate(blur * 3 + offset.dy))
+          ..addOval(Rect.fromCircle(center: center, radius: circleRadius)),
+      );
+      canvas.drawCircle(
+        center + offset,
+        circleRadius,
+        Paint()
+          ..color = Colors.black.withValues(alpha: isDark ? 0.45 : 0.16)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, blur),
+      );
+    } else {
+      final shape = RRect.fromRectAndRadius(rect, Radius.circular(radius));
+      canvas.clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect(rect.inflate(blur * 3 + offset.dy))
+          ..addRRect(shape),
+      );
+      canvas.drawRRect(
+        shape.shift(offset),
+        Paint()
+          ..color = Colors.black.withValues(alpha: isDark ? 0.45 : 0.16)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, blur),
+      );
+    }
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _GlassShadowPainter oldDelegate) {
-    return oldDelegate.radius != radius || oldDelegate.isDark != isDark;
+    return oldDelegate.radius != radius || oldDelegate.isDark != isDark || oldDelegate.isCircle != isCircle;
   }
 }
 
 /// The edge of the glass: brightest at the top-left, where light would catch
 /// it, fading around the shape and picking up again at the bottom-right.
 class _GlassRimPainter extends CustomPainter {
-  const _GlassRimPainter({required this.radius, required this.isDark});
+  const _GlassRimPainter({
+    required this.radius,
+    required this.isDark,
+    this.isCircle = false,
+  });
 
   final double radius;
   final bool isDark;
+  final bool isCircle;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final shape = RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(radius));
+    final bright = isDark ? 0.36 : 0.95;
+    final dim = isDark ? 0.07 : 0.30;
+    final mid = isDark ? 0.18 : 0.60;
 
-    // In light mode a faint dark line keeps the edge visible on white pages.
-    if (!isDark) {
+    if (isCircle) {
+      final center = rect.center;
+      final circleRadius = (math.min(size.width, size.height) - 1.0) / 2;
+
+      // In light mode a faint dark line keeps the edge visible on white pages.
+      if (!isDark) {
+        canvas.drawCircle(
+          center,
+          circleRadius,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0
+            ..color = Colors.black.withValues(alpha: 0.07),
+        );
+      }
+
+      canvas.drawCircle(
+        center,
+        circleRadius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0
+          ..shader = SweepGradient(
+            startAngle: -math.pi / 2,
+            endAngle: 3 * math.pi / 2,
+            colors: [
+              Colors.white.withValues(alpha: bright),
+              Colors.white.withValues(alpha: dim),
+              Colors.white.withValues(alpha: mid),
+              Colors.white.withValues(alpha: dim),
+              Colors.white.withValues(alpha: bright),
+            ],
+            stops: const [0.0, 0.35, 0.65, 0.85, 1.0],
+          ).createShader(rect),
+      );
+    } else {
+      final shape = RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(radius));
+
+      // In light mode a faint dark line keeps the edge visible on white pages.
+      if (!isDark) {
+        canvas.drawRRect(
+          shape,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0
+            ..color = Colors.black.withValues(alpha: 0.07),
+        );
+      }
+
       canvas.drawRRect(
         shape,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.0
-          ..color = Colors.black.withValues(alpha: 0.07),
+          ..shader = LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withValues(alpha: bright),
+              Colors.white.withValues(alpha: dim),
+              Colors.white.withValues(alpha: dim),
+              Colors.white.withValues(alpha: mid),
+            ],
+            stops: const [0.0, 0.38, 0.7, 1.0],
+          ).createShader(rect),
       );
     }
-
-    final bright = isDark ? 0.36 : 0.95;
-    final dim = isDark ? 0.07 : 0.30;
-    final mid = isDark ? 0.18 : 0.60;
-
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: bright),
-            Colors.white.withValues(alpha: dim),
-            Colors.white.withValues(alpha: dim),
-            Colors.white.withValues(alpha: mid),
-          ],
-          stops: const [0.0, 0.38, 0.7, 1.0],
-        ).createShader(rect),
-    );
   }
 
   @override
   bool shouldRepaint(covariant _GlassRimPainter oldDelegate) {
-    return oldDelegate.radius != radius || oldDelegate.isDark != isDark;
+    return oldDelegate.radius != radius || oldDelegate.isDark != isDark || oldDelegate.isCircle != isCircle;
   }
 }

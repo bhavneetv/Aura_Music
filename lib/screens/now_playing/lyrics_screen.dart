@@ -11,12 +11,12 @@ import '../../services/storage/storage_service.dart';
 
 class LyricsScreen extends ConsumerStatefulWidget {
   final Track track;
-  final LyricsResult lyricsResult;
+  final LyricsResult? lyricsResult;
 
   const LyricsScreen({
     super.key,
     required this.track,
-    required this.lyricsResult,
+    this.lyricsResult,
   });
 
   @override
@@ -26,7 +26,9 @@ class LyricsScreen extends ConsumerStatefulWidget {
 class _LyricsScreenState extends ConsumerState<LyricsScreen>
     with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
-  late LyricsCandidate _selectedCandidate;
+  late LyricsResult _activeResult;
+  LyricsCandidate? _selectedCandidate;
+  bool _isLoading = false;
   List<LyricLine>? _currentSyncedLines;
   List<LyricLine>? _originalSyncedLines;
   String? _currentPlainLyrics;
@@ -93,17 +95,72 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
     ));
     _entranceController.forward();
 
-    if (widget.lyricsResult.candidates.isNotEmpty) {
-      _selectedCandidate = widget.lyricsResult.candidates.first;
-      _applyCandidate(_selectedCandidate, clearSavedState: false);
+    final initial = widget.lyricsResult;
+    if (initial != null && initial.hasLyrics) {
+      _activeResult = initial;
+      _initFromActiveResult();
     } else {
-      _currentSyncedLines = widget.lyricsResult.synced;
-      _originalSyncedLines = widget.lyricsResult.synced;
-      _currentPlainLyrics = widget.lyricsResult.plain;
+      _activeResult = initial ?? LyricsResult();
+      _initFromActiveResult();
+      _isLoading = true;
+      _loadLyrics(forceRefresh: false);
+    }
+  }
+
+  void _initFromActiveResult() {
+    if (_activeResult.candidates.isNotEmpty) {
+      _selectedCandidate = _activeResult.candidates.first;
+      _applyCandidate(_selectedCandidate!, clearSavedState: false);
+    } else {
+      _selectedCandidate = LyricsCandidate(
+        id: 0,
+        trackName: widget.track.title,
+        artistName: widget.track.artist,
+        albumName: widget.track.album,
+        duration: 0,
+        instrumental: _activeResult.instrumental,
+        syncedLyrics: null,
+        plainLyrics: _activeResult.plain,
+      );
+      _currentSyncedLines = _activeResult.synced;
+      _originalSyncedLines = _activeResult.synced;
+      _currentPlainLyrics = _activeResult.plain;
     }
 
     // Restore previously saved lyrics state (language + explanations)
     _restoreSavedState();
+  }
+
+  Future<void> _loadLyrics({bool forceRefresh = false}) async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+
+    try {
+      final res = await LyricsService.instance.fetchLyrics(
+        trackId: widget.track.id,
+        title: widget.track.title,
+        artist: widget.track.artist,
+        album: widget.track.album,
+        durationStr: widget.track.duration,
+        forceRefresh: forceRefresh,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeResult = res;
+        _isLoading = false;
+        _initFromActiveResult();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   /// Restores the last active translation language and explanation state from local storage.
@@ -162,7 +219,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
       setState(() {
         _activeLanguage = 'Original';
         _currentSyncedLines = _originalSyncedLines;
-        _currentPlainLyrics = _selectedCandidate.plainLyrics ?? widget.lyricsResult.plain;
+        _currentPlainLyrics = _selectedCandidate?.plainLyrics ?? _activeResult.plain;
         _isTranslating = false;
         _showExplanations = false;
       });
@@ -183,7 +240,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
       if (_originalSyncedLines != null && _originalSyncedLines!.isNotEmpty) {
         final textToTranslate = _originalSyncedLines!.map((l) => l.text).join('\n');
         final translatedText = await LyricsService.instance.translateLyrics(
-          trackId: '${widget.track.id}_${_selectedCandidate.id}',
+          trackId: '${widget.track.id}_${_selectedCandidate?.id ?? 0}',
           lyricsText: textToTranslate,
           targetLanguage: targetLang,
         );
@@ -233,11 +290,11 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
           StorageService.saveSetting('${_trackCacheKey}_language', targetLang);
           onStateUpdated?.call();
         }
-      } else if (_selectedCandidate.plainLyrics != null || widget.lyricsResult.plain != null) {
-        final plainText = _selectedCandidate.plainLyrics ?? widget.lyricsResult.plain ?? '';
+      } else if (_selectedCandidate?.plainLyrics != null || _activeResult.plain != null) {
+        final plainText = _selectedCandidate?.plainLyrics ?? _activeResult.plain ?? '';
         if (plainText.isNotEmpty) {
           final translatedText = await LyricsService.instance.translateLyrics(
-            trackId: '${widget.track.id}_${_selectedCandidate.id}',
+            trackId: '${widget.track.id}_${_selectedCandidate?.id ?? 0}',
             lyricsText: plainText,
             targetLanguage: targetLang,
           );
@@ -377,7 +434,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
     required Color accentColor,
     required bool isDark,
   }) {
-    final candidates = widget.lyricsResult.candidates;
+    final candidates = _activeResult.candidates;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -572,7 +629,7 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
                         ),
                         const SizedBox(height: 10),
                         ...candidates.map((cand) {
-                          final isSel = cand.id == _selectedCandidate.id;
+                          final isSel = cand.id == _selectedCandidate?.id;
                           return GestureDetector(
                             onTap: () {
                               _applyCandidate(cand);
@@ -765,23 +822,86 @@ class _LyricsScreenState extends ConsumerState<LyricsScreen>
                       isDark: isDark,
                     ),
                     Expanded(
-                      child: widget.lyricsResult.instrumental
-                          ? _buildInstrumentalState(textColor, subTextColor, activeTextColor)
-                          : (synced != null && synced.isNotEmpty)
-                              ? _buildSyncedList(
-                                  synced: synced,
-                                  isDark: isDark,
-                                  activeTextColor: activeTextColor,
-                                  inactiveTextColor: inactiveTextColor,
-                                  activeFontSize: activeFontSize,
-                                  inactiveFontSize: inactiveFontSize,
-                                )
-                              : _buildPlainList(
-                                  isDark: isDark,
-                                  textColor: textColor,
-                                  subTextColor: subTextColor,
-                                  inactiveFontSize: inactiveFontSize,
-                                ),
+                      child: _isLoading
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 36,
+                                    height: 36,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      valueColor: AlwaysStoppedAnimation<Color>(activeTextColor),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Loading lyrics...',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    widget.track.title,
+                                    style: TextStyle(fontSize: 12, color: subTextColor),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            )
+                          : _activeResult.instrumental
+                              ? _buildInstrumentalState(textColor, subTextColor, activeTextColor)
+                              : (synced != null && synced.isNotEmpty)
+                                  ? _buildSyncedList(
+                                      synced: synced,
+                                      isDark: isDark,
+                                      activeTextColor: activeTextColor,
+                                      inactiveTextColor: inactiveTextColor,
+                                      activeFontSize: activeFontSize,
+                                      inactiveFontSize: inactiveFontSize,
+                                    )
+                                  : (_currentPlainLyrics != null && _currentPlainLyrics!.trim().isNotEmpty)
+                                      ? _buildPlainList(
+                                          isDark: isDark,
+                                          textColor: textColor,
+                                          subTextColor: subTextColor,
+                                          inactiveFontSize: inactiveFontSize,
+                                        )
+                                      : Center(
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.lyrics_outlined, size: 56, color: subTextColor.withValues(alpha: 0.5)),
+                                              const SizedBox(height: 16),
+                                              Text(
+                                                'No lyrics available',
+                                                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: textColor),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                'We couldn\'t find lyrics for this song',
+                                                style: TextStyle(fontSize: 13, color: subTextColor),
+                                              ),
+                                              const SizedBox(height: 20),
+                                              ElevatedButton.icon(
+                                                icon: const Icon(Icons.refresh_rounded, size: 18),
+                                                label: const Text('Search Again'),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: activeTextColor,
+                                                  foregroundColor: Colors.white,
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                                ),
+                                                onPressed: () => _loadLyrics(forceRefresh: true),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                     ),
                   ],
                 ),

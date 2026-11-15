@@ -178,135 +178,135 @@ class UpdateService {
   }) {
     showDialog(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       builder: (ctx) {
         final theme = Theme.of(ctx);
         final accentColor = theme.colorScheme.primary;
         final isAndroid = !kIsWeb && Platform.isAndroid;
 
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          backgroundColor: theme.colorScheme.surface,
-          contentPadding: const EdgeInsets.all(24),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.system_update_rounded,
-                  color: accentColor,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Update Available',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Version $latestVersion is out!',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {},
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            backgroundColor: theme.colorScheme.surface,
+            contentPadding: const EdgeInsets.all(24),
+            title: Row(
               children: [
-                Text(
-                  releaseName,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.system_update_rounded,
                     color: accentColor,
+                    size: 28,
                   ),
                 ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: theme.dividerColor.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  child: Text(
-                    releaseNotes.trim(),
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.85),
-                    ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Update Required',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Version $latestVersion is required to continue',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(
-                'Later',
-                style: TextStyle(color: theme.textTheme.bodySmall?.color),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    releaseName,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: accentColor,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.dividerColor.withValues(alpha: 0.1),
+                      ),
+                    ),
+                    child: Text(
+                      releaseNotes.trim(),
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.4,
+                        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            ElevatedButton.icon(
-              icon: Icon(
-                isAndroid ? Icons.download_for_offline_rounded : Icons.download_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
-              label: Text(
-                isAndroid ? 'Download & Install' : 'Update Now',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accentColor,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: Icon(
+                    isAndroid ? Icons.download_for_offline_rounded : Icons.open_in_browser_rounded,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                  label: Text(
+                    isAndroid ? 'Download & Install Update' : 'Update Now',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accentColor,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () async {
+                    if (isAndroid) {
+                      Navigator.pop(ctx);
+                      _showDownloadProgressDialog(
+                        context,
+                        downloadUrl: downloadUrl,
+                        latestVersion: latestVersion,
+                        releaseName: releaseName,
+                      );
+                    } else {
+                      final uri = Uri.parse(downloadUrl);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    }
+                  },
                 ),
               ),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                if (isAndroid) {
-                  _showDownloadProgressDialog(
-                    context,
-                    downloadUrl: downloadUrl,
-                    latestVersion: latestVersion,
-                    releaseName: releaseName,
-                  );
-                } else {
-                  final uri = Uri.parse(downloadUrl);
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  }
-                }
-              },
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -454,202 +454,198 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
     final theme = Theme.of(context);
     final accentColor = theme.colorScheme.primary;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      backgroundColor: theme.colorScheme.surface,
-      contentPadding: const EdgeInsets.all(24),
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: _isCompleted
-                  ? Colors.green.withValues(alpha: 0.15)
-                  : (_errorMessage != null
-                      ? Colors.red.withValues(alpha: 0.15)
-                      : accentColor.withValues(alpha: 0.15)),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              _isCompleted
-                  ? Icons.check_circle_rounded
-                  : (_errorMessage != null
-                      ? Icons.error_outline_rounded
-                      : Icons.downloading_rounded),
-              color: _isCompleted
-                  ? Colors.green
-                  : (_errorMessage != null ? Colors.red : accentColor),
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isCompleted
-                      ? 'Download Complete'
-                      : (_errorMessage != null
-                          ? 'Download Failed'
-                          : 'Downloading Update'),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Aura v${widget.latestVersion}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_isDownloading) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: _totalBytes > 0 ? _progress : null,
-                minHeight: 8,
-                backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                valueColor: AlwaysStoppedAnimation<Color>(accentColor),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _totalBytes > 0
-                      ? '${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} MB / ${(_totalBytes / (1024 * 1024)).toStringAsFixed(1)} MB'
-                      : 'Connecting...',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.textTheme.bodySmall?.color,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  _totalBytes > 0 ? '${(_progress * 100).toInt()}%' : '',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: accentColor,
-                  ),
-                ),
-              ],
-            ),
-          ] else if (_isCompleted) ...[
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {},
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: theme.colorScheme.surface,
+        contentPadding: const EdgeInsets.all(24),
+        title: Row(
+          children: [
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                color: _isCompleted
+                    ? Colors.green.withValues(alpha: 0.15)
+                    : (_errorMessage != null
+                        ? Colors.red.withValues(alpha: 0.15)
+                        : accentColor.withValues(alpha: 0.15)),
+                shape: BoxShape.circle,
               ),
-              child: const Row(
+              child: Icon(
+                _isCompleted
+                    ? Icons.check_circle_rounded
+                    : (_errorMessage != null
+                        ? Icons.error_outline_rounded
+                        : Icons.downloading_rounded),
+                color: _isCompleted
+                    ? Colors.green
+                    : (_errorMessage != null ? Colors.red : accentColor),
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.security_update_good_rounded, color: Colors.green, size: 24),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Ready to install! Tap "Update" on the Android system prompt to complete.',
-                      style: TextStyle(fontSize: 13, height: 1.3),
+                  Text(
+                    _isCompleted
+                        ? 'Download Complete'
+                        : (_errorMessage != null
+                            ? 'Download Failed'
+                            : 'Downloading Update'),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Aura v${widget.latestVersion}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
                     ),
                   ),
                 ],
               ),
             ),
-          ] else if (_errorMessage != null) ...[
-            Container(
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_isDownloading) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: _totalBytes > 0 ? _progress : null,
+                  minHeight: 8,
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _totalBytes > 0
+                        ? '${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} MB / ${(_totalBytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+                        : 'Connecting...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.textTheme.bodySmall?.color,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    _totalBytes > 0 ? '${(_progress * 100).toInt()}%' : '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: accentColor,
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (_isCompleted) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.security_update_good_rounded, color: Colors.green, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Ready to install! Tap "Install Update Now" to proceed.',
+                        style: TextStyle(fontSize: 13, height: 1.3),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (_errorMessage != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  'Error: $_errorMessage',
+                  style: const TextStyle(fontSize: 12, color: Colors.red),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          if (_isCompleted) ...[
+            SizedBox(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.install_mobile_rounded, size: 18, color: Colors.white),
+                label: const Text(
+                  'Install Update Now',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentColor,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  if (_savedFilePath != null) {
+                    _triggerInstall(_savedFilePath!);
+                  }
+                },
               ),
-              child: Text(
-                'Error: $_errorMessage',
-                style: const TextStyle(fontSize: 12, color: Colors.red),
-              ),
+            ),
+          ] else if (_errorMessage != null) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                    label: const Text('Browser'),
+                    onPressed: () async {
+                      final uri = Uri.parse(widget.downloadUrl);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white),
+                    label: const Text('Retry', style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentColor,
+                      elevation: 0,
+                    ),
+                    onPressed: _startDownload,
+                  ),
+                ),
+              ],
             ),
           ],
         ],
       ),
-      actions: [
-        if (_isDownloading)
-          TextButton(
-            onPressed: () {
-              _cancelToken?.cancel('User cancelled download');
-              Navigator.pop(context);
-            },
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: theme.textTheme.bodySmall?.color),
-            ),
-          )
-        else if (_isCompleted) ...[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Dismiss',
-              style: TextStyle(color: theme.textTheme.bodySmall?.color),
-            ),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.install_mobile_rounded, size: 18, color: Colors.white),
-            label: const Text(
-              'Install Now',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: accentColor,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () {
-              if (_savedFilePath != null) {
-                _triggerInstall(_savedFilePath!);
-              }
-            },
-          ),
-        ] else if (_errorMessage != null) ...[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Close',
-              style: TextStyle(color: theme.textTheme.bodySmall?.color),
-            ),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
-            label: const Text(
-              'Retry',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: accentColor,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: _startDownload,
-          ),
-        ],
-      ],
     );
   }
 }

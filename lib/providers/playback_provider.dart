@@ -178,6 +178,27 @@ enum PlaybackStatus {
   error,
 }
 
+extension PlaybackStatusX on PlaybackStatus {
+  bool canTransitionTo(PlaybackStatus next) {
+    if (this == next) return true;
+    switch (this) {
+      case PlaybackStatus.idle:
+        return next == PlaybackStatus.loading || next == PlaybackStatus.ready || next == PlaybackStatus.error;
+      case PlaybackStatus.loading:
+        return next == PlaybackStatus.playing || next == PlaybackStatus.ready || next == PlaybackStatus.buffering || next == PlaybackStatus.paused || next == PlaybackStatus.error || next == PlaybackStatus.idle;
+      case PlaybackStatus.ready:
+      case PlaybackStatus.playing:
+      case PlaybackStatus.paused:
+      case PlaybackStatus.buffering:
+        return true;
+      case PlaybackStatus.completed:
+        return next == PlaybackStatus.loading || next == PlaybackStatus.idle || next == PlaybackStatus.playing;
+      case PlaybackStatus.error:
+        return next == PlaybackStatus.loading || next == PlaybackStatus.idle;
+    }
+  }
+}
+
 class _TransitionLock {
   bool _isLocked = false;
   Completer<void>? _completer;
@@ -225,10 +246,16 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   int _lastCompletedNonce = -1;
   int _trackLoadRetries = 0;
 
+  // Circuit breaker: prevents infinite auto-advancement loop when playback enters a broken state
+  int _consecutiveAutoSkips = 0;
+  static const int _maxConsecutiveAutoSkips = 3;
+
   final _TransitionLock _lock = _TransitionLock();
 
   Duration? _lastPosition;
   DateTime? _lastPositionChangeTime;
+
+  bool _canTransition(PlaybackStatus from, PlaybackStatus to) => from.canTransitionTo(to);
 
   @override
   PlaybackState build() {
@@ -352,11 +379,19 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final status = _mapPlayerState(playerState);
       final isPlaying = playerState.playing;
 
+      final canTransition = _canTransition(state.status, status);
       state = state.copyWith(
         isPlaying: isPlaying,
-        status: status,
+        status: canTransition ? status : state.status,
         playRequested: isPlaying ? true : state.playRequested,
       );
+
+      if (!canTransition) {
+        _handler.logPlaybackEvent(
+          eventName: 'ILLEGAL_STATE_TRANSITION_REJECTED',
+          error: 'Current: ${state.status}, Attempted: $status, nonce=$_playbackNonce',
+        );
+      }
       
       _handler.logPlaybackEvent(
         eventName: 'PLAYER_STATE_CHANGE_EVENT',
@@ -367,6 +402,13 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       // Uses _lastCompletedNonce to deduplicate: only fires if the current
       // nonce hasn't already triggered a completion handler.
       if (playerState.processingState == ProcessingState.completed) {
+        if (_isTransitioning) {
+          _handler.logPlaybackEvent(
+            eventName: 'AUTO_ADVANCE_SUPPRESSED_TRANSITION_ACTIVE',
+            error: 'nonce=$_playbackNonce',
+          );
+          return;
+        }
         if (state.currentTrack != null) {
           StatsService.instance.onSongCompleted(state.currentTrack!);
         }
@@ -424,9 +466,8 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     }
   }
 
-  /// Diagnostic-only watchdog: logs warnings if playback appears stuck.
-  /// Does NOT auto-recover or auto-skip — the root cause fixes in the
-  /// transition logic should prevent stuck states from occurring.
+  /// Playback Health Watchdog: logs warnings if playback appears stuck, and after 15s
+  /// triggers automatic audio session recovery without advancing the queue or requiring force-close.
   void _checkPlaybackHealth() {
     final track = state.currentTrack;
     if (track == null) return;
@@ -437,14 +478,20 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       final currentPos = state.currentPosition;
       if (_lastPosition != null && _lastPosition == currentPos) {
         final stuckDuration = now.difference(_lastPositionChangeTime ?? now);
-        if (stuckDuration.inSeconds >= 8) {
+        if (stuckDuration.inSeconds >= 8 && stuckDuration.inSeconds < 15) {
           _handler.logPlaybackEvent(
             eventName: 'WATCHDOG_STUCK_DETECTED',
             currentTrackId: track.id,
             error: 'Position stuck at ${currentPos.inMilliseconds}ms for ${stuckDuration.inSeconds}s. _isTransitioning=$_isTransitioning, _isCrossfading=$_isCrossfading, nonce=$_playbackNonce',
           );
-          // Reset the timer so we don't spam logs
+        } else if (stuckDuration.inSeconds >= 15 && !_isTransitioning) {
+          _handler.logPlaybackEvent(
+            eventName: 'WATCHDOG_AUTO_RECOVERY_TRIGGERED',
+            currentTrackId: track.id,
+            error: 'Audio stuck for ${stuckDuration.inSeconds}s. Executing prepareAndRecover...',
+          );
           _lastPositionChangeTime = now;
+          _recoverStuckPlayback(track, currentPos);
         }
       } else {
         _lastPosition = currentPos;
@@ -453,6 +500,25 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     } else {
       _lastPosition = null;
       _lastPositionChangeTime = null;
+    }
+  }
+
+  Future<void> _recoverStuckPlayback(Track track, Duration position) async {
+    if (_isTransitioning) return;
+    _isTransitioning = true;
+    final myNonce = ++_playbackNonce;
+    try {
+      await _handler.prepareAndRecover(track, position);
+    } catch (e) {
+      _handler.logPlaybackEvent(
+        eventName: 'WATCHDOG_RECOVERY_FAILED',
+        currentTrackId: track.id,
+        error: e.toString(),
+      );
+    } finally {
+      if (myNonce == _playbackNonce) {
+        _isTransitioning = false;
+      }
     }
   }
 
@@ -692,6 +758,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
       newSources[track.id] = QueueSource.user;
     }
 
+    _consecutiveAutoSkips = 0;
     _isTransitioning = true;
     final myNonce = ++_playbackNonce;
 
@@ -716,6 +783,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
   Future<void> jumpToQueueIndex(int index, {int? nonce}) async {
     if (index < 0 || index >= state.queue.length) return;
     
+    _consecutiveAutoSkips = 0;
     final myNonce = nonce ?? ++_playbackNonce;
     if (nonce == null) {
       _isTransitioning = true;
@@ -798,6 +866,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
     final newSources = Map<String, QueueSource>.from(state.queueSources);
     newSources[resolvedTrack.id] = QueueSource.user;
     
+    _consecutiveAutoSkips = 0;
     _isTransitioning = true;
     final myNonce = ++_playbackNonce;
 
@@ -827,7 +896,6 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
 
     final resolvedTrack = _resolveSingleTrackWithLocalDownload(track);
     track = resolvedTrack;
-    _handler.updateTrackMediaItem(track);
     _handler.syncQueue(state.queue);
     String audioUrl = track.audioUrl;
     if (audioUrl.contains('saavncdn.com') && audioUrl.contains('_320.')) {
@@ -903,6 +971,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         }
 
         _trackLoadRetries = 0;
+        _consecutiveAutoSkips = 0;
         state = state.copyWith(
           status: PlaybackStatus.playing,
           isPlaying: true,
@@ -950,6 +1019,7 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
             if (state.currentIndex >= 0 && state.currentIndex < updatedQueue.length) {
               updatedQueue[state.currentIndex] = resolvedTrack;
             }
+            _consecutiveAutoSkips = 0;
             state = state.copyWith(
               queue: updatedQueue, 
               currentTrack: resolvedTrack,
@@ -970,8 +1040,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
           status: PlaybackStatus.error,
           isPlaying: false,
         );
-        // Automatically skip unplayable track
+        // Automatically skip unplayable track with circuit breaker protection
         if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+          _consecutiveAutoSkips++;
+          if (_consecutiveAutoSkips >= _maxConsecutiveAutoSkips) {
+            _handler.logPlaybackEvent(
+              eventName: 'CIRCUIT_BREAKER_TRIGGERED',
+              currentTrackId: track.id,
+              error: 'Circuit breaker triggered after $_consecutiveAutoSkips consecutive auto-skips. Halting auto-advance.',
+            );
+            _consecutiveAutoSkips = 0;
+            return;
+          }
           nextTrack(isAutoAdvance: true);
         }
       }
@@ -995,8 +1075,18 @@ class PlaybackNotifier extends Notifier<PlaybackState> {
         status: PlaybackStatus.error,
         isPlaying: false,
       );
-      // Automatically skip unplayable track
+      // Automatically skip unplayable track with circuit breaker protection
       if (nonce == _playbackNonce && state.status == PlaybackStatus.error) {
+        _consecutiveAutoSkips++;
+        if (_consecutiveAutoSkips >= _maxConsecutiveAutoSkips) {
+          _handler.logPlaybackEvent(
+            eventName: 'CIRCUIT_BREAKER_TRIGGERED',
+            currentTrackId: track.id,
+            error: 'Circuit breaker triggered after $_consecutiveAutoSkips consecutive auto-skips. Halting auto-advance.',
+          );
+          _consecutiveAutoSkips = 0;
+          return;
+        }
         nextTrack(isAutoAdvance: true);
       }
     }

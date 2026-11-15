@@ -56,6 +56,42 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   // Without this, iOS suspends the app during the loading phase because
   // the player reports playing=false while setAudioSource() is loading.
   bool _isTrackTransitioning = false;
+  Timer? _transitionSafetyTimer;
+
+  // Diagnostic Playback Session ID to correlate events across transitions
+  String _playbackSessionId = '';
+  String get playbackSessionId => _playbackSessionId;
+  String _newSessionId() {
+    _playbackSessionId = 'sess_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(10000)}';
+    return _playbackSessionId;
+  }
+
+  // Flag to suppress intermediate broadcasts during atomic operations (player swaps)
+  bool _suppressBroadcast = false;
+
+  // Guarantees Android lock screen and notification strictly reflect the active audio track
+  String? _currentlyLoadedTrackId;
+  String? get currentlyLoadedTrackId => _currentlyLoadedTrackId;
+
+  /// Sets _isTrackTransitioning with a safety watchdog timer (15s) so iOS
+  /// never gets trapped in a perpetual 'playing=true' state if a network request hangs.
+  void _setTrackTransitioning(bool value) {
+    _isTrackTransitioning = value;
+    _transitionSafetyTimer?.cancel();
+    _transitionSafetyTimer = null;
+    if (value) {
+      _transitionSafetyTimer = Timer(const Duration(seconds: 15), () {
+        if (_isTrackTransitioning) {
+          logPlaybackEvent(
+            eventName: 'TRANSITION_SAFETY_TIMEOUT_FORCED_RESET',
+            error: 'Track transition exceeded 15s timeout. Forcing _isTrackTransitioning = false',
+          );
+          _isTrackTransitioning = false;
+          _broadcastState();
+        }
+      });
+    }
+  }
 
   // Track active crossfade state and timer so it can be controlled or cancelled
   Timer? _crossfadeTimer;
@@ -370,14 +406,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   }
 
   Future<void> playTrack(Track track) async {
-    updateTrackMediaItem(track);
-    
-    try {
-      // CRITICAL: Mark transition BEFORE any async work so _broadcastState()
-      // keeps reporting playing=true to iOS throughout the load.
-      _isTrackTransitioning = true;
-      _broadcastState(); // Immediately tell iOS we're still playing
+    _newSessionId();
+    _setTrackTransitioning(true);
+    _broadcastState(); // Immediately tell system we are starting a transition
 
+    try {
       logPlaybackEvent(
         eventName: 'PLAY_TRACK_START',
         currentTrackId: track.id,
@@ -392,7 +425,6 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         // Web: single active player, stop previous song immediately so it never keeps playing, set new source and play
         _preloadedTrack = null;
         try { await _activePlayer.stop(); } catch (_) {}
-        try { await _fadePlayer.stop(); } catch (_) {}
 
         logPlaybackEvent(
           eventName: 'SET_AUDIO_SOURCE_START_WEB',
@@ -400,11 +432,26 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
           overrideAudioSource: url,
         );
 
-        await _activePlayer.setAudioSource(AudioSource.uri(Uri.parse(url)));
+        // Web 10-second timeout guard to prevent hung media connections
+        await _activePlayer
+            .setAudioSource(AudioSource.uri(Uri.parse(url)))
+            .timeout(const Duration(seconds: 10));
         await _activePlayer.setVolume(1.0);
 
-        _activePlayer.play(); // DON'T AWAIT: blocks until song finishes
-        _isTrackTransitioning = false;
+        _currentlyLoadedTrackId = track.id;
+        updateTrackMediaItem(track);
+
+        try {
+          _activePlayer.play(); // DON'T AWAIT: blocks until song finishes
+        } catch (playErr) {
+          logPlaybackEvent(
+            eventName: 'PLAY_AUTOPLAY_RESTRICTED',
+            currentTrackId: track.id,
+            error: playErr.toString(),
+          );
+        }
+
+        _setTrackTransitioning(false);
         _broadcastState();
 
         logPlaybackEvent(
@@ -422,7 +469,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
           overrideAudioSource: url,
         );
         
-        // Swap players for instant playback
+        // Suppress intermediate broadcasts during atomic player swap
+        _suppressBroadcast = true;
         final outgoingPlayer = _activePlayer;
         _activePlayer = _fadePlayer;
         _fadePlayer = outgoingPlayer;
@@ -433,18 +481,22 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         // immediately before calling play() on the new active player.
         await _ensureAudioSessionActive();
 
+        _currentlyLoadedTrackId = track.id;
+        updateTrackMediaItem(track);
+
         _activePlayer.play(); // DON'T AWAIT: it blocks until song finishes!
         SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
         _preloadedTrack = null;
 
-        // Clean up the old player asynchronously
-        resetForNewTrack(); 
+        // Clean up the old player asynchronously with await to guarantee no leaked observers
+        await resetForNewTrack(); 
         
         // Broadcast state with new active player
         _positionController.add(_activePlayer.position);
         _durationController.add(_activePlayer.duration);
         _playerStateController.add(_activePlayer.playerState);
-        _isTrackTransitioning = false;
+        _suppressBroadcast = false;
+        _setTrackTransitioning(false);
         _broadcastState();
       } else {
         // Cold start (track wasn't preloaded)
@@ -475,9 +527,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         // iOS CoreAudio deactivates the app's audio session due to the silent gap.
         await _ensureAudioSessionActive();
 
+        _currentlyLoadedTrackId = track.id;
+        updateTrackMediaItem(track);
+
         _activePlayer.play(); // DON'T AWAIT
         SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
-        _isTrackTransitioning = false;
+        _setTrackTransitioning(false);
         _broadcastState();
       }
       
@@ -487,7 +542,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
         overrideAudioSource: url,
       );
     } catch (e) {
-      _isTrackTransitioning = false;
+      _suppressBroadcast = false;
+      _setTrackTransitioning(false);
+      _broadcastState();
       logPlaybackEvent(
         eventName: 'PLAY_TRACK_FAILED',
         currentTrackId: track.id,
@@ -509,7 +566,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     final incomingPlayer = _fadePlayer;
 
     try {
-      _isTrackTransitioning = true;
+      _newSessionId();
+      _setTrackTransitioning(true);
       _broadcastState();
 
       await _ensureAudioSessionActive();
@@ -551,11 +609,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       _isCrossfadeActive = true;
 
       // Broadcast new MediaItem to system notification & lockscreen at exact swap time
+      _currentlyLoadedTrackId = nextTrack.id;
       updateTrackMediaItem(nextTrack);
 
       onSwapped?.call();
 
-      _isTrackTransitioning = false;
+      _setTrackTransitioning(false);
       _positionController.add(_activePlayer.position);
       _durationController.add(_activePlayer.duration);
       _playerStateController.add(_activePlayer.playerState);
@@ -617,7 +676,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
       return true;
     } catch (e) {
-      _isTrackTransitioning = false;
+      _setTrackTransitioning(false);
       logPlaybackEvent(
         eventName: 'CROSSFADE_FAILED',
         currentTrackId: nextTrack.id,
@@ -630,7 +689,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   Future<void> prepareAndResume(Track track, Duration position) async {
     try {
-      _isTrackTransitioning = true;
+      _setTrackTransitioning(true);
       _broadcastState();
 
       await _ensureAudioSessionActive();
@@ -653,17 +712,89 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
       await _activePlayer.seek(position);
       await _activePlayer.setVolume(1.0);
       await _ensureAudioSessionActive();
+
+      _currentlyLoadedTrackId = track.id;
+      updateTrackMediaItem(track);
+
       _activePlayer.play(); // DON'T AWAIT
-      _isTrackTransitioning = false;
+      _setTrackTransitioning(false);
+      _broadcastState();
 
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_SUCCESS',
         currentTrackId: track.id,
       );
     } catch (e) {
-      _isTrackTransitioning = false;
+      _setTrackTransitioning(false);
+      _broadcastState();
       logPlaybackEvent(
         eventName: 'PREPARE_AND_RESUME_FAILED',
+        currentTrackId: track.id,
+        error: e.toString(),
+      );
+      rethrow;
+    }
+  }
+
+  /// Specialized recovery procedure for stuck audio playback (e.g. after iOS background resume
+  /// or dropped audio hardware session). Does not advance the queue.
+  Future<void> prepareAndRecover(Track track, Duration position) async {
+    try {
+      _newSessionId();
+      _setTrackTransitioning(true);
+      _broadcastState();
+
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RECOVER_START',
+        currentTrackId: track.id,
+        error: 'Attempting hardware audio session recovery at ${position.inMilliseconds}ms',
+      );
+
+      // 1. Fully release any stale or blocked player instance
+      await resetForNewTrack();
+
+      // 2. Multi-attempt audio session reactivation
+      final sessionReady = await _ensureAudioSessionActive();
+      if (!sessionReady) {
+        logPlaybackEvent(
+          eventName: 'PREPARE_AND_RECOVER_SESSION_NOT_READY',
+          currentTrackId: track.id,
+          error: 'Audio session could not be activated during recovery',
+        );
+      }
+
+      // 3. Reload audio source
+      String url = _normalizeUrl(track.audioUrl);
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        await _activePlayer.setAudioSource(
+          AudioSource.uri(Uri.parse(url), headers: _getHeadersForUrl(url)),
+        );
+      } else {
+        await _activePlayer.setFilePath(url);
+      }
+
+      await _activePlayer.seek(position);
+      await _activePlayer.setVolume(1.0);
+      await _ensureAudioSessionActive();
+
+      _currentlyLoadedTrackId = track.id;
+      updateTrackMediaItem(track);
+
+      _activePlayer.play();
+      SpatialAudioService.updateAudioSessionId(_activePlayer.androidAudioSessionId);
+
+      _setTrackTransitioning(false);
+      _broadcastState();
+
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RECOVER_SUCCESS',
+        currentTrackId: track.id,
+      );
+    } catch (e) {
+      _setTrackTransitioning(false);
+      _broadcastState();
+      logPlaybackEvent(
+        eventName: 'PREPARE_AND_RECOVER_FAILED',
         currentTrackId: track.id,
         error: e.toString(),
       );
@@ -684,28 +815,40 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
 
   // ── AudioSession / App Lifecycle ──────────────────────────────
 
-  Future<void> _ensureAudioSessionActive() async {
-    if (kIsWeb) return;
-    try {
-      final session = await AudioSession.instance;
-      final success = await session.setActive(true);
-      if (!success) {
+  Future<bool> _ensureAudioSessionActive() async {
+    if (kIsWeb) return true;
+    final backoffs = [100, 300, 800];
+    for (int attempt = 0; attempt <= backoffs.length; attempt++) {
+      try {
+        final session = await AudioSession.instance;
+        final success = await session.setActive(true);
+        if (success) {
+          logPlaybackEvent(eventName: 'AUDIO_SESSION_ACTIVATED_SUCCESS');
+          return true;
+        }
+        if (attempt < backoffs.length) {
+          final waitMs = backoffs[attempt];
+          logPlaybackEvent(
+            eventName: 'AUDIO_SESSION_SET_ACTIVE_RETURNED_FALSE',
+            error: 'Attempt ${attempt + 1} returned false, retrying after ${waitMs}ms...',
+          );
+          await Future.delayed(Duration(milliseconds: waitMs));
+        }
+      } catch (e) {
         logPlaybackEvent(
-          eventName: 'AUDIO_SESSION_SET_ACTIVE_RETURNED_FALSE',
-          error: 'session.setActive(true) returned false, retrying after 50ms...',
+          eventName: 'AUDIO_SESSION_REACTIVATION_EXCEPTION',
+          error: 'Attempt ${attempt + 1} exception: $e',
         );
-        await Future.delayed(const Duration(milliseconds: 50));
-        final retrySuccess = await session.setActive(true);
-        logPlaybackEvent(
-          eventName: 'AUDIO_SESSION_RETRY_RESULT',
-          error: 'retrySuccess=$retrySuccess',
-        );
-      } else {
-        logPlaybackEvent(eventName: 'AUDIO_SESSION_ACTIVATED_SUCCESS');
+        if (attempt < backoffs.length) {
+          await Future.delayed(Duration(milliseconds: backoffs[attempt]));
+        }
       }
-    } catch (e) {
-      logPlaybackEvent(eventName: 'AUDIO_SESSION_REACTIVATION_FAILED', error: e.toString());
     }
+    logPlaybackEvent(
+      eventName: 'AUDIO_SESSION_REACTIVATION_ALL_RETRIES_FAILED',
+      error: 'Failed to activate AudioSession after ${backoffs.length} retries',
+    );
+    return false;
   }
 
   Future<void> _initAudioSession() async {
@@ -781,12 +924,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
     final duration = _activePlayer.duration?.inMilliseconds ?? 0;
     final audioSource = overrideAudioSource ?? mediaItem.value?.extras?['audioUrl'] ?? 'unknown';
 
-    print('[PLAYBACK-LOG] $timestamp | Event: $eventName '
+    print('[PLAYBACK-LOG] $timestamp | Session: $_playbackSessionId | Event: $eventName '
         '| currentTrackId: ${currentTrackId ?? mediaItem.value?.id} '
+        '| loadedTrackId: $_currentlyLoadedTrackId '
         '| previousTrackId: $previousTrackId '
         '| queueIndex: $queueIndex '
         '| playerState: $pState '
         '| isPlaying: $isPlaying '
+        '| isTransitioning: $_isTrackTransitioning '
         '| position: ${position}ms | duration: ${duration}ms '
         '| audioSource: $audioSource | error: $error '
         '| appLifecycleState: ${_lifecycleState.toString().split('.').last} '
@@ -813,6 +958,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler, Wi
   /// (play/pause/seek/stop). This ensures the Android MediaSession
   /// always has the correct set of controls and playing state.
   void _broadcastState() {
+    if (_suppressBroadcast) return;
+
     const stateMap = {
       ProcessingState.idle: AudioProcessingState.idle,
       ProcessingState.loading: AudioProcessingState.loading,

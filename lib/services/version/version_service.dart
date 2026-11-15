@@ -1,10 +1,10 @@
 import 'package:flutter/services.dart';
 
 class AppVersionService {
-  static String releaseTag = 'v7.0';
-  static String versionName = '7.0';
-  static String versionCode = '70';
-  static String releaseName = 'Aura Music v7.0';
+  static String releaseTag = 'v7.1';
+  static String versionName = '7.1';
+  static String versionCode = '71';
+  static String releaseName = 'Aura Music v7.1';
 
   static Future<void> init() async {
     try {
@@ -30,7 +30,7 @@ class AppVersionService {
       }
 
       final parsedCodeInt = int.tryParse(parsedCode ?? '') ?? 0;
-      final currentCodeInt = int.tryParse(versionCode) ?? 70;
+      final currentCodeInt = int.tryParse(versionCode) ?? 71;
       if (parsedCodeInt >= currentCodeInt) {
         if (parsedTag != null && parsedTag.isNotEmpty) releaseTag = parsedTag;
         if (parsedName != null && parsedName.isNotEmpty) versionName = parsedName;

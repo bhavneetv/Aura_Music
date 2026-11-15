@@ -1313,23 +1313,17 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
               label: 'Lyrics',
               isActive: hasLyrics,
               accentColor: accentColor,
-              onTap: hasLyrics
-                  ? () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => LyricsScreen(
-                            track: track,
-                            lyricsResult: _lyricsResult!,
-                          ),
-                        ),
-                      );
-                    }
-                  : () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Fetching lyrics for this track...'), duration: Duration(seconds: 1)),
-                      );
-                    },
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => LyricsScreen(
+                      track: track,
+                      lyricsResult: _lyricsResult,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
 
@@ -3008,23 +3002,17 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> with Ticker
                       label: 'Lyrics',
                       isActive: _lyricsResult != null && _lyricsResult!.hasLyrics,
                       accentColor: accentColor,
-                      onTap: (_lyricsResult != null && _lyricsResult!.hasLyrics)
-                          ? () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => LyricsScreen(
-                                    track: track,
-                                    lyricsResult: _lyricsResult!,
-                                  ),
-                                ),
-                              );
-                            }
-                          : () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Fetching lyrics for this track...'), duration: Duration(seconds: 1)),
-                              );
-                            },
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => LyricsScreen(
+                              track: track,
+                              lyricsResult: _lyricsResult,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     _buildActionButton(
                       icon: Icons.playlist_add_rounded,
